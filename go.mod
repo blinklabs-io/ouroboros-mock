@@ -10,6 +10,7 @@ require (
 require (
 	github.com/fxamacker/cbor/v2 v2.6.0 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
+	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/utxorpc/go-codegen v0.4.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.21.0 // indirect

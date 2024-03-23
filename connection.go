@@ -44,6 +44,7 @@ type Connection struct {
 	muxer         *muxer.Muxer
 	muxerRecvChan chan *muxer.Segment
 	doneChan      chan any
+	errorChan     chan error
 	onceClose     sync.Once
 }
 
@@ -55,6 +56,7 @@ func NewConnection(
 	c := &Connection{
 		conversation: conversation,
 		doneChan:     make(chan any),
+		errorChan:    make(chan error),
 	}
 	c.conn, c.mockConn = net.Pipe()
 	// Start a muxer on the mocked side of the connection
@@ -76,7 +78,7 @@ func NewConnection(
 		if !ok {
 			return
 		}
-		panic(fmt.Sprintf("muxer error: %s", err))
+		c.errorChan <- fmt.Errorf("muxer error: %s", err)
 	}()
 	// Start async conversation handler
 	go c.asyncLoop()
@@ -146,24 +148,18 @@ func (c *Connection) asyncLoop() {
 		switch entry.Type {
 		case EntryTypeInput:
 			if err := c.processInputEntry(entry); err != nil {
-				panic(err.Error())
+				c.errorChan <- err
 			}
 		case EntryTypeOutput:
 			if err := c.processOutputEntry(entry); err != nil {
-				panic(fmt.Sprintf("output error: %s", err))
+				c.errorChan <- fmt.Errorf("output error: %s", err)
 			}
 		case EntryTypeClose:
 			c.Close()
 		case EntryTypeSleep:
 			time.Sleep(entry.Duration)
 		default:
-			panic(
-				fmt.Sprintf(
-					"unknown conversation entry type: %d: %#v",
-					entry.Type,
-					entry,
-				),
-			)
+			c.errorChan <- fmt.Errorf("unknown conversation entry type: %d: %#v", entry.Type, entry)
 		}
 	}
 }
