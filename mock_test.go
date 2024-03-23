@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ouroboros_mock
+package ouroboros_mock_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
+
+	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"go.uber.org/goleak"
@@ -25,16 +28,23 @@ import (
 // Basic test of conversation mock functionality
 func TestBasic(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	mockConn := NewConnection(
-		ProtocolRoleClient,
-		[]ConversationEntry{
-			ConversationEntryHandshakeRequestGeneric,
-			ConversationEntryHandshakeNtCResponse,
+	mockConn := ouroboros_mock.NewConnection(
+		ouroboros_mock.ProtocolRoleClient,
+		[]ouroboros_mock.ConversationEntry{
+			ouroboros_mock.ConversationEntryHandshakeRequestGeneric,
+			ouroboros_mock.ConversationEntryHandshakeNtCResponse,
 		},
 	)
+	// Async mock connection error handler
+	go func() {
+		err, ok := <-mockConn.(*ouroboros_mock.Connection).ErrorChan()
+		if ok {
+			panic(err)
+		}
+	}()
 	oConn, err := ouroboros.New(
 		ouroboros.WithConnection(mockConn),
-		ouroboros.WithNetworkMagic(MockNetworkMagic),
+		ouroboros.WithNetworkMagic(ouroboros_mock.MockNetworkMagic),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error when creating Ouroboros object: %s", err)
@@ -48,5 +58,47 @@ func TestBasic(t *testing.T) {
 	case <-oConn.ErrorChan():
 	case <-time.After(10 * time.Second):
 		t.Errorf("did not shutdown within timeout")
+	}
+}
+
+func TestError(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	expectedErr := "input error: input message protocol ID did not match expected value: expected 999, got 0"
+	mockConn := ouroboros_mock.NewConnection(
+		ouroboros_mock.ProtocolRoleClient,
+		[]ouroboros_mock.ConversationEntry{
+			ouroboros_mock.ConversationEntryInput{
+				ProtocolId: 999,
+			},
+		},
+	)
+	// Async mock connection error handler
+	asyncErrChan := make(chan error, 1)
+	go func() {
+		err := <-mockConn.(*ouroboros_mock.Connection).ErrorChan()
+		if err == nil {
+			asyncErrChan <- fmt.Errorf("did not receive expected error")
+		} else {
+			if err.Error() != expectedErr {
+				asyncErrChan <- fmt.Errorf("did not receive expected error\n  got:    %s\n  wanted: %s", err, expectedErr)
+			}
+		}
+		close(asyncErrChan)
+	}()
+	_, err := ouroboros.New(
+		ouroboros.WithConnection(mockConn),
+		ouroboros.WithNetworkMagic(ouroboros_mock.MockNetworkMagic),
+	)
+	if err == nil {
+		t.Fatalf("did not receive expected error")
+	}
+	// Wait for mock connection shutdown
+	select {
+	case err, ok := <-asyncErrChan:
+		if ok {
+			t.Fatal(err.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("did not complete within timeout")
 	}
 }

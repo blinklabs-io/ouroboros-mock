@@ -45,6 +45,7 @@ type Connection struct {
 	muxerRecvChan chan *muxer.Segment
 	doneChan      chan any
 	onceClose     sync.Once
+	errorChan     chan error
 }
 
 // NewConnection returns a new Connection with the provided conversation entries
@@ -55,6 +56,7 @@ func NewConnection(
 	c := &Connection{
 		conversation: conversation,
 		doneChan:     make(chan any),
+		errorChan:    make(chan error, 1),
 	}
 	c.conn, c.mockConn = net.Pipe()
 	// Start a muxer on the mocked side of the connection
@@ -76,11 +78,16 @@ func NewConnection(
 		if !ok {
 			return
 		}
-		panic(fmt.Sprintf("muxer error: %s", err))
+		c.errorChan <- fmt.Errorf("muxer error: %w", err)
+		c.Close()
 	}()
 	// Start async conversation handler
 	go c.asyncLoop()
 	return c
+}
+
+func (c *Connection) ErrorChan() <-chan error {
+	return c.errorChan
 }
 
 // Read provides a proxy to the client-side connection's Read function. This is needed to satisfy the net.Conn interface
@@ -136,7 +143,18 @@ func (c *Connection) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
 }
 
+func (c *Connection) sendError(err error) {
+	select {
+	case c.errorChan <- err:
+		_ = c.Close()
+	default:
+	}
+}
+
 func (c *Connection) asyncLoop() {
+	defer func() {
+		close(c.errorChan)
+	}()
 	for _, entry := range c.conversation {
 		select {
 		case <-c.doneChan:
@@ -146,24 +164,27 @@ func (c *Connection) asyncLoop() {
 		switch entry := entry.(type) {
 		case ConversationEntryInput:
 			if err := c.processInputEntry(entry); err != nil {
-				panic(err.Error())
+				c.sendError(fmt.Errorf("input error: %w", err))
+				return
 			}
 		case ConversationEntryOutput:
 			if err := c.processOutputEntry(entry); err != nil {
-				panic(fmt.Sprintf("output error: %s", err))
+				c.sendError(fmt.Errorf("output error: %w", err))
+				return
 			}
 		case ConversationEntryClose:
 			c.Close()
 		case ConversationEntrySleep:
 			time.Sleep(entry.Duration)
 		default:
-			panic(
-				fmt.Sprintf(
+			c.sendError(
+				fmt.Errorf(
 					"unknown conversation entry type: %T: %#v",
 					entry,
 					entry,
 				),
 			)
+			return
 		}
 	}
 }
