@@ -29,41 +29,51 @@ const (
 	MockKeepAliveCookie    uint16 = 999
 )
 
-type EntryType int
+type ConversationEntry interface {
+	isConversationEntry()
+}
 
-const (
-	EntryTypeNone   EntryType = 0
-	EntryTypeInput  EntryType = 1
-	EntryTypeOutput EntryType = 2
-	EntryTypeClose  EntryType = 3
-	EntryTypeSleep  EntryType = 4
-)
+type conversationEntryBase struct{}
 
-type ConversationEntry struct {
-	Type             EntryType
-	ProtocolId       uint16
-	IsResponse       bool
-	OutputMessages   []protocol.Message
-	InputMessage     protocol.Message
-	InputMessageType uint
-	MsgFromCborFunc  protocol.MessageFromCborFunc
-	Duration         time.Duration
+func (c conversationEntryBase) isConversationEntry() {}
+
+type ConversationEntryInput struct {
+	conversationEntryBase
+	ProtocolId      uint16
+	IsResponse      bool
+	Message         protocol.Message
+	MessageType     uint
+	MsgFromCborFunc protocol.MessageFromCborFunc
+}
+
+type ConversationEntryOutput struct {
+	conversationEntryBase
+	ProtocolId uint16
+	IsResponse bool
+	Messages   []protocol.Message
+}
+
+type ConversationEntryClose struct {
+	conversationEntryBase
+}
+
+type ConversationEntrySleep struct {
+	conversationEntryBase
+	Duration time.Duration
 }
 
 // ConversationEntryHandshakeRequestGeneric is a pre-defined conversation event that matches a generic
 // handshake request from a client
-var ConversationEntryHandshakeRequestGeneric = ConversationEntry{
-	Type:             EntryTypeInput,
-	ProtocolId:       handshake.ProtocolId,
-	InputMessageType: handshake.MessageTypeProposeVersions,
+var ConversationEntryHandshakeRequestGeneric = ConversationEntryInput{
+	ProtocolId:  handshake.ProtocolId,
+	MessageType: handshake.MessageTypeProposeVersions,
 }
 
 // ConversationEntryHandshakeNtCResponse is a pre-defined conversation entry for a server NtC handshake response
-var ConversationEntryHandshakeNtCResponse = ConversationEntry{
-	Type:       EntryTypeOutput,
+var ConversationEntryHandshakeNtCResponse = ConversationEntryOutput{
 	ProtocolId: handshake.ProtocolId,
 	IsResponse: true,
-	OutputMessages: []protocol.Message{
+	Messages: []protocol.Message{
 		handshake.NewMsgAcceptVersion(
 			MockProtocolVersionNtC,
 			protocol.VersionDataNtC9to14(MockNetworkMagic),
@@ -72,11 +82,10 @@ var ConversationEntryHandshakeNtCResponse = ConversationEntry{
 }
 
 // ConversationEntryHandshakeNtNResponse is a pre-defined conversation entry for a server NtN handshake response
-var ConversationEntryHandshakeNtNResponse = ConversationEntry{
-	Type:       EntryTypeOutput,
+var ConversationEntryHandshakeNtNResponse = ConversationEntryOutput{
 	ProtocolId: handshake.ProtocolId,
 	IsResponse: true,
-	OutputMessages: []protocol.Message{
+	Messages: []protocol.Message{
 		handshake.NewMsgAcceptVersion(
 			MockProtocolVersionNtN,
 			protocol.VersionDataNtN13andUp{
@@ -92,19 +101,17 @@ var ConversationEntryHandshakeNtNResponse = ConversationEntry{
 }
 
 // ConversationEntryKeepAliveRequest is a pre-defined conversation entry for a keep-alive request
-var ConversationEntryKeepAliveRequest = ConversationEntry{
-	Type:            EntryTypeInput,
+var ConversationEntryKeepAliveRequest = ConversationEntryInput{
 	ProtocolId:      keepalive.ProtocolId,
-	InputMessage:    keepalive.NewMsgKeepAlive(MockKeepAliveCookie),
+	Message:         keepalive.NewMsgKeepAlive(MockKeepAliveCookie),
 	MsgFromCborFunc: keepalive.NewMsgFromCbor,
 }
 
 // ConversationEntryKeepAliveResponse is a pre-defined conversation entry for a keep-alive response
-var ConversationEntryKeepAliveResponse = ConversationEntry{
-	Type:       EntryTypeOutput,
+var ConversationEntryKeepAliveResponse = ConversationEntryOutput{
 	ProtocolId: keepalive.ProtocolId,
 	IsResponse: true,
-	OutputMessages: []protocol.Message{
+	Messages: []protocol.Message{
 		keepalive.NewMsgKeepAliveResponse(MockKeepAliveCookie),
 	},
 }
@@ -130,7 +137,5 @@ var ConversationKeepAliveClose = []ConversationEntry{
 	ConversationEntryHandshakeRequestGeneric,
 	ConversationEntryHandshakeNtNResponse,
 	ConversationEntryKeepAliveRequest,
-	ConversationEntry{
-		Type: EntryTypeClose,
-	},
+	ConversationEntryClose{},
 }

@@ -143,24 +143,24 @@ func (c *Connection) asyncLoop() {
 			return
 		default:
 		}
-		switch entry.Type {
-		case EntryTypeInput:
+		switch entry := entry.(type) {
+		case ConversationEntryInput:
 			if err := c.processInputEntry(entry); err != nil {
 				panic(err.Error())
 			}
-		case EntryTypeOutput:
+		case ConversationEntryOutput:
 			if err := c.processOutputEntry(entry); err != nil {
 				panic(fmt.Sprintf("output error: %s", err))
 			}
-		case EntryTypeClose:
+		case ConversationEntryClose:
 			c.Close()
-		case EntryTypeSleep:
+		case ConversationEntrySleep:
 			time.Sleep(entry.Duration)
 		default:
 			panic(
 				fmt.Sprintf(
-					"unknown conversation entry type: %d: %#v",
-					entry.Type,
+					"unknown conversation entry type: %T: %#v",
+					entry,
 					entry,
 				),
 			)
@@ -168,7 +168,7 @@ func (c *Connection) asyncLoop() {
 	}
 }
 
-func (c *Connection) processInputEntry(entry ConversationEntry) error {
+func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	// Wait for segment to be received from muxer
 	segment, ok := <-c.muxerRecvChan
 	if !ok {
@@ -193,7 +193,7 @@ func (c *Connection) processInputEntry(entry ConversationEntry) error {
 	if err != nil {
 		return fmt.Errorf("decode error: %s", err)
 	}
-	if entry.InputMessage != nil {
+	if entry.Message != nil {
 		// Create Message object from CBOR
 		msg, err := entry.MsgFromCborFunc(uint(msgType), segment.Payload)
 		if err != nil {
@@ -208,25 +208,25 @@ func (c *Connection) processInputEntry(entry ConversationEntry) error {
 		// As changing the CBOR of the expected message is not thread-safe, we instead clear the
 		// CBOR of the received message
 		msg.SetCbor(nil)
-		if !reflect.DeepEqual(msg, entry.InputMessage) {
+		if !reflect.DeepEqual(msg, entry.Message) {
 			return fmt.Errorf(
 				"parsed message does not match expected value: got %#v, expected %#v",
 				msg,
-				entry.InputMessage,
+				entry.Message,
 			)
 		}
 	} else {
-		if entry.InputMessageType == uint(msgType) {
+		if entry.MessageType == uint(msgType) {
 			return nil
 		}
-		return fmt.Errorf("input message is not of expected type: expected %d, got %d", entry.InputMessageType, msgType)
+		return fmt.Errorf("input message is not of expected type: expected %d, got %d", entry.MessageType, msgType)
 	}
 	return nil
 }
 
-func (c *Connection) processOutputEntry(entry ConversationEntry) error {
+func (c *Connection) processOutputEntry(entry ConversationEntryOutput) error {
 	payloadBuf := bytes.NewBuffer(nil)
-	for _, msg := range entry.OutputMessages {
+	for _, msg := range entry.Messages {
 		// Get raw CBOR from message
 		data := msg.Cbor()
 		// If message has no raw CBOR, encode the message
