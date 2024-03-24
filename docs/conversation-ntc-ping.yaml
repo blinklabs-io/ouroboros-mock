@@ -1,0 +1,23 @@
+name: test
+
+entries:
+  - input:
+      messageType: handshake.ProposeVersions
+  - output:
+      response: true
+      message:
+        handshake.AcceptVersion:
+          # TODO
+        #var ConversationEntryHandshakeNtCResponse = ConversationEntryOutput{
+        #	ProtocolId: handshake.ProtocolId,
+        #	IsResponse: true,
+        #	Messages: []protocol.Message{
+        #		handshake.NewMsgAcceptVersion(
+        #			MockProtocolVersionNtC,
+        #			protocol.VersionDataNtC9to14(MockNetworkMagic),
+        #		),
+        #	},
+        #}
+
+  - sleep:
+      duration: 5s
