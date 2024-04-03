@@ -120,12 +120,16 @@ func (c *Connection) Close() error {
 
 // LocalAddr provides a proxy to the client-side connection's LocalAddr function. This is needed to satisfy the net.Conn interface
 func (c *Connection) LocalAddr() net.Addr {
-	return c.conn.LocalAddr()
+	return MockAddr{
+		addr: fmt.Sprintf("mock-local:%p", c),
+	}
 }
 
 // RemoteAddr provides a proxy to the client-side connection's RemoteAddr function. This is needed to satisfy the net.Conn interface
 func (c *Connection) RemoteAddr() net.Addr {
-	return c.conn.RemoteAddr()
+	return MockAddr{
+		addr: fmt.Sprintf("mock-remote:%p", c),
+	}
 }
 
 // SetDeadline provides a proxy to the client-side connection's SetDeadline function. This is needed to satisfy the net.Conn interface
@@ -269,4 +273,16 @@ func (c *Connection) processOutputEntry(entry ConversationEntryOutput) error {
 		return err
 	}
 	return nil
+}
+
+type MockAddr struct {
+	addr string
+}
+
+func (m MockAddr) Network() string {
+	return "mock"
+}
+
+func (m MockAddr) String() string {
+	return m.addr
 }
