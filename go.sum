@@ -1,7 +1,7 @@
 filippo.io/edwards25519 v1.1.0 h1:FNf4tywRC1HmFuKW5xopWpigGjJKiJSV0Cqo0cJWDaA=
 filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
-github.com/blinklabs-io/gouroboros v0.96.0 h1:UYF2fwOo9MT6uHrpwHz+1krVib6SZ9sDkZ/C5KQxwdA=
-github.com/blinklabs-io/gouroboros v0.96.0/go.mod h1:lfvV4sV5tNz/qkaLiR85pKpKqPlHfAa5wFhWGbgsXZ0=
+github.com/blinklabs-io/gouroboros v0.98.0 h1:Nngi16Y/lJiihLx/H7AMeDX1mqkqfka3xi1Lv6CC1zM=
+github.com/blinklabs-io/gouroboros v0.98.0/go.mod h1:gU9pBcL1h584sVqYF8H7JJcB2x0n1HdWcmWP11VYxPE=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/fxamacker/cbor/v2 v2.7.0 h1:iM5WgngdRBanHcxugY4JySA0nk1wZorNOpTgCMedv5E=
@@ -14,8 +14,8 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/utxorpc/go-codegen v0.9.0 h1:sV5vK/QiQs3WvKynRVo+U+5n2tmKU7yMz5y3rEX90Hg=
-github.com/utxorpc/go-codegen v0.9.0/go.mod h1:+npvJc9wftIf8JMtWaRXxwjX0YlOCpNp1OlZVioNEO0=
+github.com/utxorpc/go-codegen v0.10.0 h1:EVRNc136CThXbbGeYV/oIy6NKfcZGLH2QSRmLTPE6TQ=
+github.com/utxorpc/go-codegen v0.10.0/go.mod h1:+npvJc9wftIf8JMtWaRXxwjX0YlOCpNp1OlZVioNEO0=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
