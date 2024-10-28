@@ -1,9 +1,10 @@
 module github.com/blinklabs-io/ouroboros-mock
 
 go 1.21
+toolchain go1.22.5
 
 require (
-	github.com/blinklabs-io/gouroboros v0.100.0
+	github.com/blinklabs-io/gouroboros v0.102.0
 	go.uber.org/goleak v1.3.0
 )
 
