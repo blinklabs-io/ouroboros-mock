@@ -3,7 +3,7 @@ module github.com/blinklabs-io/ouroboros-mock
 go 1.22.9
 
 require (
-	github.com/blinklabs-io/gouroboros v0.106.2
+	github.com/blinklabs-io/gouroboros v0.107.1
 	go.uber.org/goleak v1.3.0
 )
 
