@@ -3,12 +3,13 @@ module github.com/blinklabs-io/ouroboros-mock
 go 1.22.11
 
 require (
-	github.com/blinklabs-io/gouroboros v0.108.0
+	github.com/blinklabs-io/gouroboros v0.108.1
 	go.uber.org/goleak v1.3.0
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/btcsuite/btcd/btcutil v1.1.3 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/utxorpc/go-codegen v0.15.0 // indirect
