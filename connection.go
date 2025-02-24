@@ -1,4 +1,4 @@
-// Copyright 2024 Blink Labs Software
+// Copyright 2025 Blink Labs Software
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -217,6 +217,9 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	msgType, err := cbor.DecodeIdFromList(segment.Payload)
 	if err != nil {
 		return fmt.Errorf("decode error: %s", err)
+	}
+	if msgType < 0 {
+		return fmt.Errorf("index out of bounds: %d", msgType)
 	}
 	if entry.Message != nil {
 		// Create Message object from CBOR
