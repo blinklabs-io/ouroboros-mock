@@ -80,7 +80,7 @@ func TestError(t *testing.T) {
 			asyncErrChan <- fmt.Errorf("did not receive expected error")
 		} else {
 			if err.Error() != expectedErr {
-				asyncErrChan <- fmt.Errorf("did not receive expected error\n  got:    %s\n  wanted: %s", err, expectedErr)
+				asyncErrChan <- fmt.Errorf("did not receive expected error\n  got:    %v\n  wanted: %s", err, expectedErr)
 			}
 		}
 		close(asyncErrChan)

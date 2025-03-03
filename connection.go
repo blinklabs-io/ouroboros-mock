@@ -216,7 +216,7 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	// Determine message type
 	msgType, err := cbor.DecodeIdFromList(segment.Payload)
 	if err != nil {
-		return fmt.Errorf("decode error: %s", err)
+		return fmt.Errorf("decode error: %w", err)
 	}
 	if msgType < 0 {
 		return fmt.Errorf("index out of bounds: %d", msgType)
@@ -225,7 +225,7 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 		// Create Message object from CBOR
 		msg, err := entry.MsgFromCborFunc(uint(msgType), segment.Payload)
 		if err != nil {
-			return fmt.Errorf("message from CBOR error: %s", err)
+			return fmt.Errorf("message from CBOR error: %w", err)
 		}
 		if msg == nil {
 			return fmt.Errorf("received unknown message type: %d", msgType)
