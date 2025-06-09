@@ -5,7 +5,7 @@ go 1.23.6
 toolchain go1.24.1
 
 require (
-	github.com/blinklabs-io/gouroboros v0.121.0
+	github.com/blinklabs-io/gouroboros v0.122.0
 	go.uber.org/goleak v1.3.0
 )
 
