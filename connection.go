@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"sync"
 	"time"
 
@@ -167,12 +168,58 @@ func (c *Connection) asyncLoop() {
 		}
 		switch entry := entry.(type) {
 		case ConversationEntryInput:
-			if err := c.processInputEntry(entry); err != nil {
+			err := c.processInputEntry(entry)
+			if entry.ExpectedError != "" {
+				if err == nil {
+					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))
+					return
+				}
+				if entry.IsRegex {
+					re, compileErr := regexp.Compile(entry.ExpectedError)
+					if compileErr != nil {
+						c.sendError(fmt.Errorf("invalid regex %q: %w", entry.ExpectedError, compileErr))
+						return
+					}
+					if !re.MatchString(err.Error()) {
+						c.sendError(fmt.Errorf("expected error does not match regex %q: got %q", entry.ExpectedError, err.Error()))
+						return
+					}
+				} else {
+					if err.Error() != entry.ExpectedError {
+						c.sendError(fmt.Errorf("expected error does not match %q: got %q", entry.ExpectedError, err.Error()))
+						return
+					}
+				}
+				// error matched, continue
+			} else if err != nil {
 				c.sendError(fmt.Errorf("input error: %w", err))
 				return
 			}
 		case ConversationEntryOutput:
-			if err := c.processOutputEntry(entry); err != nil {
+			err := c.processOutputEntry(entry)
+			if entry.ExpectedError != "" {
+				if err == nil {
+					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))
+					return
+				}
+				if entry.IsRegex {
+					re, compileErr := regexp.Compile(entry.ExpectedError)
+					if compileErr != nil {
+						c.sendError(fmt.Errorf("invalid regex %q: %w", entry.ExpectedError, compileErr))
+						return
+					}
+					if !re.MatchString(err.Error()) {
+						c.sendError(fmt.Errorf("expected error does not match regex %q: got %q", entry.ExpectedError, err.Error()))
+						return
+					}
+				} else {
+					if err.Error() != entry.ExpectedError {
+						c.sendError(fmt.Errorf("expected error does not match %q: got %q", entry.ExpectedError, err.Error()))
+						return
+					}
+				}
+				// error matched, continue
+			} else if err != nil {
 				c.sendError(fmt.Errorf("output error: %w", err))
 				return
 			}

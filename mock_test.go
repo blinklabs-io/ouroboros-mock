@@ -63,27 +63,30 @@ func TestBasic(t *testing.T) {
 
 func TestError(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	expectedErr := "input error: input message protocol ID did not match expected value: expected 999, got 0"
 	mockConn := ouroboros_mock.NewConnection(
 		ouroboros_mock.ProtocolRoleClient,
 		[]ouroboros_mock.ConversationEntry{
 			ouroboros_mock.ConversationEntryInput{
-				ProtocolId: 999,
+				ProtocolId:    999,
+				ExpectedError: "input message protocol ID did not match expected value: expected 999, got 0",
 			},
 		},
 	)
 	// Async mock connection error handler
 	asyncErrChan := make(chan error, 1)
 	go func() {
-		err := <-mockConn.(*ouroboros_mock.Connection).ErrorChan()
-		if err == nil {
-			asyncErrChan <- fmt.Errorf("did not receive expected error")
-		} else {
-			if err.Error() != expectedErr {
-				asyncErrChan <- fmt.Errorf("did not receive expected error\n  got:    %v\n  wanted: %s", err, expectedErr)
+		select {
+		case err, ok := <-mockConn.(*ouroboros_mock.Connection).ErrorChan():
+			if !ok {
+				// channel closed, no error
+				close(asyncErrChan)
+				return
 			}
+			asyncErrChan <- fmt.Errorf("received unexpected error: %v", err)
+		case <-time.After(1 * time.Second):
+			// no error received within timeout
+			close(asyncErrChan)
 		}
-		close(asyncErrChan)
 	}()
 	_, err := ouroboros.New(
 		ouroboros.WithConnection(mockConn),
