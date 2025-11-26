@@ -44,13 +44,17 @@ type ConversationEntryInput struct {
 	Message         protocol.Message
 	MessageType     uint
 	MsgFromCborFunc protocol.MessageFromCborFunc
+	ExpectedError   string
+	IsRegex         bool
 }
 
 type ConversationEntryOutput struct {
 	conversationEntryBase
-	ProtocolId uint16
-	IsResponse bool
-	Messages   []protocol.Message
+	ProtocolId    uint16
+	IsResponse    bool
+	Messages      []protocol.Message
+	ExpectedError string
+	IsRegex       bool
 }
 
 type ConversationEntryClose struct {
