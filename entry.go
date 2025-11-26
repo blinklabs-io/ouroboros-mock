@@ -104,6 +104,56 @@ var ConversationEntryHandshakeNtNResponse = ConversationEntryOutput{
 	},
 }
 
+// ConversationEntryHandshakeRequestOutput is a pre-defined conversation entry for a client handshake request
+var ConversationEntryHandshakeRequestOutput = ConversationEntryOutput{
+	ProtocolId: handshake.ProtocolId,
+	IsResponse: false,
+	Messages: []protocol.Message{
+		handshake.NewMsgProposeVersions(protocol.ProtocolVersionMap{
+			MockProtocolVersionNtC: protocol.VersionDataNtC9to14(
+				MockNetworkMagic,
+			),
+			MockProtocolVersionNtN: protocol.VersionDataNtN13andUp{
+				VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+					CborNetworkMagic:                       MockNetworkMagic,
+					CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorOnly,
+					CborPeerSharing:                        protocol.PeerSharingModeNoPeerSharing,
+					CborQuery:                              protocol.QueryModeDisabled,
+				},
+			},
+		}),
+	},
+}
+
+// ConversationEntryHandshakeNtCResponseInput is a pre-defined conversation entry for a client expecting a server NtC handshake response
+var ConversationEntryHandshakeNtCResponseInput = ConversationEntryInput{
+	ProtocolId: handshake.ProtocolId,
+	IsResponse: true,
+	Message: handshake.NewMsgAcceptVersion(
+		MockProtocolVersionNtC,
+		protocol.VersionDataNtC9to14(MockNetworkMagic),
+	),
+	MsgFromCborFunc: handshake.NewMsgFromCbor,
+}
+
+// ConversationEntryHandshakeNtNResponseInput is a pre-defined conversation entry for a client expecting a server NtN handshake response
+var ConversationEntryHandshakeNtNResponseInput = ConversationEntryInput{
+	ProtocolId: handshake.ProtocolId,
+	IsResponse: true,
+	Message: handshake.NewMsgAcceptVersion(
+		MockProtocolVersionNtN,
+		protocol.VersionDataNtN13andUp{
+			VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+				CborNetworkMagic:                       MockNetworkMagic,
+				CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorOnly,
+				CborPeerSharing:                        protocol.PeerSharingModeNoPeerSharing,
+				CborQuery:                              protocol.QueryModeDisabled,
+			},
+		},
+	),
+	MsgFromCborFunc: handshake.NewMsgFromCbor,
+}
+
 // ConversationEntryKeepAliveRequest is a pre-defined conversation entry for a keep-alive request
 var ConversationEntryKeepAliveRequest = ConversationEntryInput{
 	ProtocolId:      keepalive.ProtocolId,

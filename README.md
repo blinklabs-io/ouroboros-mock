@@ -13,10 +13,35 @@ Go library and CLI framework for mocking Ouroboros connections
 
 ```go
 mockConn := ouroboros_mock.NewConnection(
-    ouroboros_mock.ProtocolRoleClient,
+    ouroboros_mock.ProtocolRoleServer, // Mock acts as server
     []ouroboros_mock.ConversationEntry{
         ouroboros_mock.ConversationEntryHandshakeRequestGeneric,
         ouroboros_mock.ConversationEntryHandshakeNtCResponse,
+    },
+)
+```
+### Client Handshake Conversation
+
+When mocking a client that initiates the handshake:
+
+```go
+mockConn := ouroboros_mock.NewConnection(
+    ouroboros_mock.ProtocolRoleClient, // Mock acts as client
+    []ouroboros_mock.ConversationEntry{
+        ouroboros_mock.ConversationEntryHandshakeRequestOutput,    // Mock sends ProposeVersions
+        ouroboros_mock.ConversationEntryHandshakeNtCResponseInput, // Mock expects AcceptVersion for NtC
+    },
+)
+```
+
+For NtN protocol:
+
+```go
+mockConn := ouroboros_mock.NewConnection(
+    ouroboros_mock.ProtocolRoleClient, // Mock acts as client
+    []ouroboros_mock.ConversationEntry{
+        ouroboros_mock.ConversationEntryHandshakeRequestOutput,    // Mock sends ProposeVersions
+        ouroboros_mock.ConversationEntryHandshakeNtNResponseInput, // Mock expects AcceptVersion for NtN
     },
 )
 ```
