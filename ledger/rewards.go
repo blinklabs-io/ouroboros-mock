@@ -86,7 +86,10 @@ type RewardSnapshotBuilder interface {
 		pool lcommon.PoolKeyHash,
 		cert *lcommon.PoolRegistrationCertificate,
 	) RewardSnapshotBuilder
-	WithPoolBlocks(pool lcommon.PoolKeyHash, blocks uint64) RewardSnapshotBuilder
+	WithPoolBlocks(
+		pool lcommon.PoolKeyHash,
+		blocks uint64,
+	) RewardSnapshotBuilder
 	Build() (*lcommon.RewardSnapshot, error)
 }
 

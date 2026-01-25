@@ -20,22 +20,31 @@ import (
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
+	utxorpc "github.com/utxorpc/go-codegen/utxorpc/v1alpha/cardano"
 )
 
 // ErrNotFound is returned when a requested item is not found
 var ErrNotFound = errors.New("ledger: not found")
 
-// PlutusLanguage represents a Plutus language version
-type PlutusLanguage uint
+// Type aliases for convenience - use gouroboros types directly
+// Note: CommitteeMember and Constitution are NOT aliased here because they
+// are defined as local types in governance.go for the builder pattern.
+// The interface methods use lcommon types directly.
+type (
+	PlutusLanguage   = lcommon.PlutusLanguage
+	CostModel        = lcommon.CostModel
+	DRepRegistration = lcommon.DRepRegistration
+	GovActionState   = lcommon.GovActionState
+)
 
+// Plutus language version constants
 const (
 	PlutusV1 PlutusLanguage = 1
 	PlutusV2 PlutusLanguage = 2
 	PlutusV3 PlutusLanguage = 3
 )
 
-// CostModel represents a Plutus cost model
-type CostModel []int64
+// Callback function types for customizable behavior
 
 // UtxoByIdFunc is a callback for UTxO lookups by transaction input
 type UtxoByIdFunc func(lcommon.TransactionInput) (lcommon.Utxo, error)
@@ -59,19 +68,22 @@ type CalculateRewardsFunc func(lcommon.AdaPots, lcommon.RewardSnapshot, lcommon.
 type GetRewardSnapshotFunc func(uint64) (lcommon.RewardSnapshot, error)
 
 // CommitteeMemberFunc is a callback for committee member lookups
-type CommitteeMemberFunc func(lcommon.Blake2b224) (*CommitteeMember, error)
+type CommitteeMemberFunc func(lcommon.Blake2b224) (*lcommon.CommitteeMember, error)
 
 // DRepRegistrationFunc is a callback for DRep registration lookups
-type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.RegistrationDrepCertificate, error)
+type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
 
 // ConstitutionFunc is a callback for constitution lookups
-type ConstitutionFunc func() (*Constitution, error)
+type ConstitutionFunc func() (*lcommon.Constitution, error)
 
 // TreasuryValueFunc is a callback for treasury value lookups
 type TreasuryValueFunc func() (uint64, error)
 
 // CostModelsFunc is a callback for cost models lookups
-type CostModelsFunc func() map[PlutusLanguage]CostModel
+type CostModelsFunc func() map[lcommon.PlutusLanguage]lcommon.CostModel
+
+// GovActionByIdFunc is a callback for governance action lookups
+type GovActionByIdFunc func(lcommon.GovActionId) (*lcommon.GovActionState, error)
 
 // MockLedgerState implements the ledger.LedgerState interface from gouroboros
 // using callback functions for customizable behavior
@@ -79,30 +91,37 @@ type MockLedgerState struct {
 	// UtxoState callbacks
 	UtxoByIdCallback UtxoByIdFunc
 
-	// CertState callbacks
+	// CertState callbacks and state
 	StakeRegistrationCallback StakeRegistrationFunc
+	stakeRegistrations        map[lcommon.Blake2b224]bool // credential -> registered
 
 	// SlotState callbacks
 	SlotToTimeCallback SlotToTimeFunc
 	TimeToSlotCallback TimeToSlotFunc
 
-	// PoolState callbacks
+	// PoolState callbacks and state
 	PoolCurrentStateCallback PoolCurrentStateFunc
+	poolRegistrations        []lcommon.PoolRegistrationCertificate
 
-	// RewardState callbacks
+	// RewardState callbacks and state
 	CalculateRewardsCallback  CalculateRewardsFunc
 	GetRewardSnapshotCallback GetRewardSnapshotFunc
+	rewardAccounts            map[lcommon.Blake2b224]uint64 // credential -> balance
 
-	// GovState callbacks (for future governance queries)
+	// GovState callbacks and state
 	CommitteeMemberCallback  CommitteeMemberFunc
 	DRepRegistrationCallback DRepRegistrationFunc
 	ConstitutionCallback     ConstitutionFunc
 	TreasuryValueCallback    TreasuryValueFunc
-	CostModelsCallback       CostModelsFunc
+	GovActionByIdCallback    GovActionByIdFunc
+	committeeMembers         []lcommon.CommitteeMember
+	drepRegistrations        []lcommon.DRepRegistration
+	govActions               map[string]*lcommon.GovActionState // "txhash#index" -> state
 
-	// Static fields
-	networkId uint
-	adaPots   lcommon.AdaPots
+	// LedgerState fields
+	CostModelsCallback CostModelsFunc
+	networkId          uint
+	adaPots            lcommon.AdaPots
 }
 
 // NetworkId returns the network identifier
@@ -130,6 +149,16 @@ func (ls *MockLedgerState) StakeRegistration(
 	return []lcommon.StakeRegistrationCertificate{}, nil
 }
 
+// IsStakeCredentialRegistered checks if a stake credential is currently registered
+func (ls *MockLedgerState) IsStakeCredentialRegistered(
+	cred lcommon.Credential,
+) bool {
+	if ls.stakeRegistrations == nil {
+		return false
+	}
+	return ls.stakeRegistrations[cred.Credential]
+}
+
 // SlotToTime converts a slot number to a time
 func (ls *MockLedgerState) SlotToTime(slot uint64) (time.Time, error) {
 	if ls.SlotToTimeCallback != nil {
@@ -153,7 +182,31 @@ func (ls *MockLedgerState) PoolCurrentState(
 	if ls.PoolCurrentStateCallback != nil {
 		return ls.PoolCurrentStateCallback(poolKeyHash)
 	}
+	// Search in stored pool registrations
+	for i := range ls.poolRegistrations {
+		if ls.poolRegistrations[i].Operator == poolKeyHash {
+			return &ls.poolRegistrations[i], nil, nil
+		}
+	}
 	return nil, nil, nil
+}
+
+// IsPoolRegistered checks if a pool is currently registered
+func (ls *MockLedgerState) IsPoolRegistered(
+	poolKeyHash lcommon.PoolKeyHash,
+) bool {
+	// Check callback first
+	if ls.PoolCurrentStateCallback != nil {
+		cert, _, _ := ls.PoolCurrentStateCallback(poolKeyHash)
+		return cert != nil
+	}
+	// Search in stored pool registrations
+	for i := range ls.poolRegistrations {
+		if ls.poolRegistrations[i].Operator == poolKeyHash {
+			return true
+		}
+	}
+	return false
 }
 
 // CalculateRewards calculates rewards for the given epoch
@@ -189,32 +242,76 @@ func (ls *MockLedgerState) GetRewardSnapshot(
 	return lcommon.RewardSnapshot{}, nil
 }
 
+// IsRewardAccountRegistered checks if a reward account is registered
+func (ls *MockLedgerState) IsRewardAccountRegistered(
+	cred lcommon.Credential,
+) bool {
+	// Reward account registration is tied to stake credential registration
+	return ls.IsStakeCredentialRegistered(cred)
+}
+
+// RewardAccountBalance returns the current reward balance for a stake credential
+func (ls *MockLedgerState) RewardAccountBalance(
+	cred lcommon.Credential,
+) (*uint64, error) {
+	if ls.rewardAccounts == nil {
+		return nil, nil
+	}
+	balance, exists := ls.rewardAccounts[cred.Credential]
+	if !exists {
+		return nil, nil
+	}
+	return &balance, nil
+}
+
 // CommitteeMember looks up a constitutional committee member by credential hash
 func (ls *MockLedgerState) CommitteeMember(
-	credHash lcommon.Blake2b224,
-) (*CommitteeMember, error) {
+	coldKey lcommon.Blake2b224,
+) (*lcommon.CommitteeMember, error) {
 	if ls.CommitteeMemberCallback != nil {
-		return ls.CommitteeMemberCallback(credHash)
+		return ls.CommitteeMemberCallback(coldKey)
 	}
-	return nil, ErrNotFound
+	// Search in stored committee members
+	for i := range ls.committeeMembers {
+		if ls.committeeMembers[i].ColdKey == coldKey {
+			return &ls.committeeMembers[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// CommitteeMembers returns all committee members
+func (ls *MockLedgerState) CommitteeMembers() ([]lcommon.CommitteeMember, error) {
+	return ls.committeeMembers, nil
 }
 
 // DRepRegistration looks up a DRep registration by credential hash
 func (ls *MockLedgerState) DRepRegistration(
-	credHash lcommon.Blake2b224,
-) (*lcommon.RegistrationDrepCertificate, error) {
+	credential lcommon.Blake2b224,
+) (*lcommon.DRepRegistration, error) {
 	if ls.DRepRegistrationCallback != nil {
-		return ls.DRepRegistrationCallback(credHash)
+		return ls.DRepRegistrationCallback(credential)
 	}
-	return nil, ErrNotFound
+	// Search in stored DRep registrations
+	for i := range ls.drepRegistrations {
+		if ls.drepRegistrations[i].Credential == credential {
+			return &ls.drepRegistrations[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// DRepRegistrations returns all DRep registrations
+func (ls *MockLedgerState) DRepRegistrations() ([]lcommon.DRepRegistration, error) {
+	return ls.drepRegistrations, nil
 }
 
 // Constitution returns the current constitution
-func (ls *MockLedgerState) Constitution() (*Constitution, error) {
+func (ls *MockLedgerState) Constitution() (*lcommon.Constitution, error) {
 	if ls.ConstitutionCallback != nil {
 		return ls.ConstitutionCallback()
 	}
-	return nil, ErrNotFound
+	return nil, nil
 }
 
 // TreasuryValue returns the current treasury value
@@ -225,12 +322,51 @@ func (ls *MockLedgerState) TreasuryValue() (uint64, error) {
 	return ls.adaPots.Treasury, nil
 }
 
+// GovActionById looks up a governance action by its ID
+func (ls *MockLedgerState) GovActionById(
+	id lcommon.GovActionId,
+) (*lcommon.GovActionState, error) {
+	if ls.GovActionByIdCallback != nil {
+		return ls.GovActionByIdCallback(id)
+	}
+	if ls.govActions == nil {
+		return nil, nil
+	}
+	// Key format matches gouroboros internal mock: "txhash#index"
+	key := id.String()
+	state, exists := ls.govActions[key]
+	if !exists {
+		return nil, nil
+	}
+	return state, nil
+}
+
+// GovActionExists checks if a governance action exists
+func (ls *MockLedgerState) GovActionExists(id lcommon.GovActionId) bool {
+	state, _ := ls.GovActionById(id)
+	return state != nil
+}
+
 // CostModels returns the current cost models for Plutus scripts
-func (ls *MockLedgerState) CostModels() map[PlutusLanguage]CostModel {
+func (ls *MockLedgerState) CostModels() map[lcommon.PlutusLanguage]lcommon.CostModel {
 	if ls.CostModelsCallback != nil {
 		return ls.CostModelsCallback()
 	}
-	return make(map[PlutusLanguage]CostModel)
+	return make(map[lcommon.PlutusLanguage]lcommon.CostModel)
+}
+
+// MockProtocolParamsRules is a simple protocol params provider used in tests.
+// Utxorpc() returns a zero-value struct to prevent nil pointer dereferences.
+type MockProtocolParamsRules struct {
+	PParams *utxorpc.PParams
+}
+
+// Utxorpc returns the protocol parameters in UTxO RPC format
+func (m *MockProtocolParamsRules) Utxorpc() (*utxorpc.PParams, error) {
+	if m.PParams != nil {
+		return m.PParams, nil
+	}
+	return &utxorpc.PParams{}, nil
 }
 
 // LedgerStateBuilder provides a fluent API for setting up MockLedgerState
@@ -241,7 +377,11 @@ type LedgerStateBuilder struct {
 // NewLedgerStateBuilder creates a new LedgerStateBuilder
 func NewLedgerStateBuilder() *LedgerStateBuilder {
 	return &LedgerStateBuilder{
-		state: &MockLedgerState{},
+		state: &MockLedgerState{
+			stakeRegistrations: make(map[lcommon.Blake2b224]bool),
+			rewardAccounts:     make(map[lcommon.Blake2b224]uint64),
+			govActions:         make(map[string]*lcommon.GovActionState),
+		},
 	}
 }
 
@@ -273,6 +413,25 @@ func (b *LedgerStateBuilder) WithStakeRegistration(
 	return b
 }
 
+// WithStakeCredentialRegistered sets whether a stake credential is registered
+func (b *LedgerStateBuilder) WithStakeCredentialRegistered(
+	cred lcommon.Blake2b224,
+	registered bool,
+) *LedgerStateBuilder {
+	b.state.stakeRegistrations[cred] = registered
+	return b
+}
+
+// WithStakeCredentials sets multiple stake credential registrations
+func (b *LedgerStateBuilder) WithStakeCredentials(
+	creds map[lcommon.Blake2b224]bool,
+) *LedgerStateBuilder {
+	for cred, registered := range creds {
+		b.state.stakeRegistrations[cred] = registered
+	}
+	return b
+}
+
 // WithSlotToTime sets the slot to time conversion callback
 func (b *LedgerStateBuilder) WithSlotToTime(
 	fn SlotToTimeFunc,
@@ -297,6 +456,14 @@ func (b *LedgerStateBuilder) WithPoolCurrentState(
 	return b
 }
 
+// WithPoolRegistrations sets the pool registrations
+func (b *LedgerStateBuilder) WithPoolRegistrations(
+	pools []lcommon.PoolRegistrationCertificate,
+) *LedgerStateBuilder {
+	b.state.poolRegistrations = pools
+	return b
+}
+
 // WithCalculateRewards sets the calculate rewards callback
 func (b *LedgerStateBuilder) WithCalculateRewards(
 	fn CalculateRewardsFunc,
@@ -313,6 +480,28 @@ func (b *LedgerStateBuilder) WithGetRewardSnapshot(
 	return b
 }
 
+// WithRewardAccountBalance sets the balance for a reward account
+func (b *LedgerStateBuilder) WithRewardAccountBalance(
+	cred lcommon.Blake2b224,
+	balance uint64,
+) *LedgerStateBuilder {
+	b.state.rewardAccounts[cred] = balance
+	// Also mark the stake credential as registered
+	b.state.stakeRegistrations[cred] = true
+	return b
+}
+
+// WithRewardAccounts sets multiple reward account balances
+func (b *LedgerStateBuilder) WithRewardAccounts(
+	accounts map[lcommon.Blake2b224]uint64,
+) *LedgerStateBuilder {
+	for cred, balance := range accounts {
+		b.state.rewardAccounts[cred] = balance
+		b.state.stakeRegistrations[cred] = true
+	}
+	return b
+}
+
 // WithCommitteeMember sets the committee member lookup callback
 func (b *LedgerStateBuilder) WithCommitteeMember(
 	fn CommitteeMemberFunc,
@@ -321,11 +510,27 @@ func (b *LedgerStateBuilder) WithCommitteeMember(
 	return b
 }
 
+// WithCommitteeMembers sets the committee members
+func (b *LedgerStateBuilder) WithCommitteeMembers(
+	members []lcommon.CommitteeMember,
+) *LedgerStateBuilder {
+	b.state.committeeMembers = members
+	return b
+}
+
 // WithDRepRegistration sets the DRep registration lookup callback
 func (b *LedgerStateBuilder) WithDRepRegistration(
 	fn DRepRegistrationFunc,
 ) *LedgerStateBuilder {
 	b.state.DRepRegistrationCallback = fn
+	return b
+}
+
+// WithDRepRegistrations sets the DRep registrations
+func (b *LedgerStateBuilder) WithDRepRegistrations(
+	dreps []lcommon.DRepRegistration,
+) *LedgerStateBuilder {
+	b.state.drepRegistrations = dreps
 	return b
 }
 
@@ -342,6 +547,22 @@ func (b *LedgerStateBuilder) WithTreasuryValue(
 	fn TreasuryValueFunc,
 ) *LedgerStateBuilder {
 	b.state.TreasuryValueCallback = fn
+	return b
+}
+
+// WithGovActionById sets the governance action lookup callback
+func (b *LedgerStateBuilder) WithGovActionById(
+	fn GovActionByIdFunc,
+) *LedgerStateBuilder {
+	b.state.GovActionByIdCallback = fn
+	return b
+}
+
+// WithGovActions sets the governance actions
+func (b *LedgerStateBuilder) WithGovActions(
+	actions map[string]*lcommon.GovActionState,
+) *LedgerStateBuilder {
+	b.state.govActions = actions
 	return b
 }
 
@@ -388,7 +609,7 @@ func (b *LedgerStateBuilder) WithUtxos(
 	return b
 }
 
-// WithPools configures the mock with a static set of pool registrations
+// WithPools configures the mock with a static set of pool registrations (pointer version)
 func (b *LedgerStateBuilder) WithPools(
 	pools []*lcommon.PoolRegistrationCertificate,
 ) *LedgerStateBuilder {
@@ -399,12 +620,17 @@ func (b *LedgerStateBuilder) WithPools(
 				continue
 			}
 			// Compare pool operator hash directly with the lookup key using bytes.Equal
-			// (both are already Blake2b224 hashes, no need to hash again)
 			if bytes.Equal(pool.Operator.Bytes(), poolKeyHash.Bytes()) {
 				return pool, nil, nil
 			}
 		}
 		return nil, nil, nil
+	}
+	// Also store for IsPoolRegistered
+	for _, pool := range pools {
+		if pool != nil {
+			b.state.poolRegistrations = append(b.state.poolRegistrations, *pool)
+		}
 	}
 	return b
 }
@@ -417,7 +643,6 @@ func (b *LedgerStateBuilder) WithStakeRegistrations(
 		var result []lcommon.StakeRegistrationCertificate
 		for _, cert := range certs {
 			// Compare credential directly using bytes.Equal
-			// (it's already a Blake2b224 hash, no need to hash again)
 			if bytes.Equal(
 				cert.StakeCredential.Credential.Bytes(),
 				stakingKey,
@@ -427,10 +652,20 @@ func (b *LedgerStateBuilder) WithStakeRegistrations(
 		}
 		return result, nil
 	}
+	// Also mark credentials as registered for IsStakeCredentialRegistered
+	for _, cert := range certs {
+		b.state.stakeRegistrations[cert.StakeCredential.Credential] = true
+	}
 	return b
 }
 
 // Build constructs the MockLedgerState
 func (b *LedgerStateBuilder) Build() *MockLedgerState {
 	return b.state
+}
+
+// NewMockLedgerStateWithUtxos creates a MockLedgerState with lookup behavior for provided UTxOs.
+// This helper matches the gouroboros internal mock API.
+func NewMockLedgerStateWithUtxos(utxos []lcommon.Utxo) *MockLedgerState {
+	return NewLedgerStateBuilder().WithUtxos(utxos).Build()
 }

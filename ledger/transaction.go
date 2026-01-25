@@ -166,12 +166,18 @@ func (t *MockTransaction) Build() (lcommon.Transaction, error) {
 	// Check for nil entries in inputs and outputs
 	for i, input := range t.inputs {
 		if input == nil {
-			return nil, fmt.Errorf("transaction contains nil input at index %d", i)
+			return nil, fmt.Errorf(
+				"transaction contains nil input at index %d",
+				i,
+			)
 		}
 	}
 	for i, output := range t.outputs {
 		if output == nil {
-			return nil, fmt.Errorf("transaction contains nil output at index %d", i)
+			return nil, fmt.Errorf(
+				"transaction contains nil output at index %d",
+				i,
+			)
 		}
 	}
 	return t, nil
