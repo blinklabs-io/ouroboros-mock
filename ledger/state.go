@@ -117,6 +117,11 @@ type MockLedgerState struct {
 	committeeMembers         []lcommon.CommitteeMember
 	drepRegistrations        []lcommon.DRepRegistration
 	govActions               map[string]*lcommon.GovActionState // "txhash#index" -> state
+	// ProposedCommitteeMembers tracks committee members proposed in pending
+	// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC
+	// should succeed if the member is either a current member OR proposed
+	// in a pending UpdateCommittee action. Maps coldKey -> expiryEpoch.
+	proposedCommitteeMembers map[lcommon.Blake2b224]uint64
 
 	// LedgerState fields
 	CostModelsCallback CostModelsFunc
@@ -264,7 +269,9 @@ func (ls *MockLedgerState) RewardAccountBalance(
 	return &balance, nil
 }
 
-// CommitteeMember looks up a constitutional committee member by credential hash
+// CommitteeMember looks up a constitutional committee member by credential hash.
+// Per Cardano ledger spec, AUTH_CC should succeed if the member is either a
+// current committee member OR proposed in a pending UpdateCommittee action.
 func (ls *MockLedgerState) CommitteeMember(
 	coldKey lcommon.Blake2b224,
 ) (*lcommon.CommitteeMember, error) {
@@ -275,6 +282,17 @@ func (ls *MockLedgerState) CommitteeMember(
 	for i := range ls.committeeMembers {
 		if ls.committeeMembers[i].ColdKey == coldKey {
 			return &ls.committeeMembers[i], nil
+		}
+	}
+	// Also check proposed members from pending UpdateCommittee proposals
+	if ls.proposedCommitteeMembers != nil {
+		if expiryEpoch, ok := ls.proposedCommitteeMembers[coldKey]; ok {
+			return &lcommon.CommitteeMember{
+				ColdKey:     coldKey,
+				HotKey:      nil,
+				ExpiryEpoch: expiryEpoch,
+				Resigned:    false,
+			}, nil
 		}
 	}
 	return nil, nil
@@ -378,9 +396,10 @@ type LedgerStateBuilder struct {
 func NewLedgerStateBuilder() *LedgerStateBuilder {
 	return &LedgerStateBuilder{
 		state: &MockLedgerState{
-			stakeRegistrations: make(map[lcommon.Blake2b224]bool),
-			rewardAccounts:     make(map[lcommon.Blake2b224]uint64),
-			govActions:         make(map[string]*lcommon.GovActionState),
+			stakeRegistrations:       make(map[lcommon.Blake2b224]bool),
+			rewardAccounts:           make(map[lcommon.Blake2b224]uint64),
+			govActions:               make(map[string]*lcommon.GovActionState),
+			proposedCommitteeMembers: make(map[lcommon.Blake2b224]uint64),
 		},
 	}
 }
@@ -515,6 +534,18 @@ func (b *LedgerStateBuilder) WithCommitteeMembers(
 	members []lcommon.CommitteeMember,
 ) *LedgerStateBuilder {
 	b.state.committeeMembers = members
+	return b
+}
+
+// WithProposedCommitteeMembers sets the proposed committee members from pending
+// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC should
+// succeed if the member is either a current member OR proposed in a pending
+// UpdateCommittee action. The map keys are cold key hashes and values are
+// expiry epochs.
+func (b *LedgerStateBuilder) WithProposedCommitteeMembers(
+	members map[lcommon.Blake2b224]uint64,
+) *LedgerStateBuilder {
+	b.state.proposedCommitteeMembers = members
 	return b
 }
 
