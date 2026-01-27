@@ -768,6 +768,108 @@ func TestCommitteeMemberBuilder_Build_MissingColdKey(t *testing.T) {
 }
 
 // =============================================================================
+// ProposedCommitteeMembers Tests
+// =============================================================================
+
+func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
+	// Create cold key hashes
+	var coldKey1, coldKey2 lcommon.Blake2b224
+	copy(coldKey1[:], bytes.Repeat([]byte{0x11}, 28))
+	copy(coldKey2[:], bytes.Repeat([]byte{0x22}, 28))
+
+	// Set up proposed committee members with expiry epochs
+	proposed := map[lcommon.Blake2b224]uint64{
+		coldKey1: 100,
+		coldKey2: 200,
+	}
+
+	state := ledger.NewLedgerStateBuilder().
+		WithProposedCommitteeMembers(proposed).
+		Build()
+
+	// Lookup proposed member should return synthetic CommitteeMember
+	member, err := state.CommitteeMember(coldKey1)
+	if err != nil {
+		t.Fatalf("CommitteeMember() returned error: %v", err)
+	}
+	if member == nil {
+		t.Fatal("CommitteeMember() returned nil for proposed member")
+	}
+	if member.ColdKey != coldKey1 {
+		t.Errorf("ColdKey mismatch: got %v, want %v", member.ColdKey, coldKey1)
+	}
+	if member.ExpiryEpoch != 100 {
+		t.Errorf("ExpiryEpoch mismatch: got %d, want 100", member.ExpiryEpoch)
+	}
+	if member.HotKey != nil {
+		t.Errorf("HotKey should be nil for proposed member, got %v", member.HotKey)
+	}
+	if member.Resigned {
+		t.Error("Resigned should be false for proposed member")
+	}
+}
+
+func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(t *testing.T) {
+	// Create a cold key hash
+	var coldKey lcommon.Blake2b224
+	copy(coldKey[:], bytes.Repeat([]byte{0x33}, 28))
+
+	// Create a hot key for the current member
+	var hotKey lcommon.Blake2b224
+	copy(hotKey[:], bytes.Repeat([]byte{0x44}, 28))
+
+	// Set up both current and proposed committee members with same cold key
+	currentMembers := []lcommon.CommitteeMember{
+		{
+			ColdKey:     coldKey,
+			HotKey:      &hotKey,
+			ExpiryEpoch: 150,
+			Resigned:    false,
+		},
+	}
+	proposed := map[lcommon.Blake2b224]uint64{
+		coldKey: 200, // Different expiry epoch
+	}
+
+	state := ledger.NewLedgerStateBuilder().
+		WithCommitteeMembers(currentMembers).
+		WithProposedCommitteeMembers(proposed).
+		Build()
+
+	// Lookup should return the current member, not the proposed one
+	member, err := state.CommitteeMember(coldKey)
+	if err != nil {
+		t.Fatalf("CommitteeMember() returned error: %v", err)
+	}
+	if member == nil {
+		t.Fatal("CommitteeMember() returned nil")
+	}
+	// Should have the current member's expiry epoch (150), not proposed (200)
+	if member.ExpiryEpoch != 150 {
+		t.Errorf("ExpiryEpoch mismatch: got %d, want 150 (current member)", member.ExpiryEpoch)
+	}
+	// Should have the hot key from current member
+	if member.HotKey == nil {
+		t.Error("HotKey should not be nil for current member")
+	}
+}
+
+func TestLedgerStateBuilder_CommitteeMember_NotFound(t *testing.T) {
+	var unknownKey lcommon.Blake2b224
+	copy(unknownKey[:], bytes.Repeat([]byte{0x99}, 28))
+
+	state := ledger.NewLedgerStateBuilder().Build()
+
+	member, err := state.CommitteeMember(unknownKey)
+	if err != nil {
+		t.Fatalf("CommitteeMember() returned error: %v", err)
+	}
+	if member != nil {
+		t.Error("CommitteeMember() should return nil for unknown key")
+	}
+}
+
+// =============================================================================
 // DRepRegistrationBuilder Tests
 // =============================================================================
 
