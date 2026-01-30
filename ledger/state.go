@@ -17,6 +17,7 @@ package ledger
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -116,7 +117,7 @@ type MockLedgerState struct {
 	GovActionByIdCallback    GovActionByIdFunc
 	committeeMembers         []lcommon.CommitteeMember
 	drepRegistrations        []lcommon.DRepRegistration
-	govActions               map[string]*lcommon.GovActionState // "txhash#index" -> state
+	govActions               map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
 	// ProposedCommitteeMembers tracks committee members proposed in pending
 	// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC
 	// should succeed if the member is either a current member OR proposed
@@ -350,8 +351,9 @@ func (ls *MockLedgerState) GovActionById(
 	if ls.govActions == nil {
 		return nil, nil
 	}
-	// Key format matches gouroboros internal mock: "txhash#index"
-	key := id.String()
+	// Key format: hex-encoded transaction ID + "#" + decimal index
+	// This matches the format used in test vectors and debugging output
+	key := fmt.Sprintf("%x#%d", id.TransactionId[:], id.GovActionIdx)
 	state, exists := ls.govActions[key]
 	if !exists {
 		return nil, nil
