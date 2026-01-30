@@ -108,6 +108,7 @@ type MockLedgerState struct {
 	CalculateRewardsCallback  CalculateRewardsFunc
 	GetRewardSnapshotCallback GetRewardSnapshotFunc
 	rewardAccounts            map[lcommon.Blake2b224]uint64 // credential -> balance
+	rewardSnapshot            lcommon.RewardSnapshot        // static snapshot value
 
 	// GovState callbacks and state
 	CommitteeMemberCallback  CommitteeMemberFunc
@@ -118,6 +119,7 @@ type MockLedgerState struct {
 	committeeMembers         []lcommon.CommitteeMember
 	drepRegistrations        []lcommon.DRepRegistration
 	govActions               map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
+	constitution             *lcommon.Constitution              // static constitution value
 	// ProposedCommitteeMembers tracks committee members proposed in pending
 	// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC
 	// should succeed if the member is either a current member OR proposed
@@ -126,8 +128,10 @@ type MockLedgerState struct {
 
 	// LedgerState fields
 	CostModelsCallback CostModelsFunc
+	costModelsMap      map[lcommon.PlutusLanguage]lcommon.CostModel // static cost models
 	networkId          uint
 	adaPots            lcommon.AdaPots
+	treasuryAmount     *uint64 // explicit treasury override
 }
 
 // NetworkId returns the network identifier
@@ -245,7 +249,7 @@ func (ls *MockLedgerState) GetRewardSnapshot(
 	if ls.GetRewardSnapshotCallback != nil {
 		return ls.GetRewardSnapshotCallback(epoch)
 	}
-	return lcommon.RewardSnapshot{}, nil
+	return ls.rewardSnapshot, nil
 }
 
 // IsRewardAccountRegistered checks if a reward account is registered
@@ -330,13 +334,16 @@ func (ls *MockLedgerState) Constitution() (*lcommon.Constitution, error) {
 	if ls.ConstitutionCallback != nil {
 		return ls.ConstitutionCallback()
 	}
-	return nil, nil
+	return ls.constitution, nil
 }
 
 // TreasuryValue returns the current treasury value
 func (ls *MockLedgerState) TreasuryValue() (uint64, error) {
 	if ls.TreasuryValueCallback != nil {
 		return ls.TreasuryValueCallback()
+	}
+	if ls.treasuryAmount != nil {
+		return *ls.treasuryAmount, nil
 	}
 	return ls.adaPots.Treasury, nil
 }
@@ -371,6 +378,9 @@ func (ls *MockLedgerState) GovActionExists(id lcommon.GovActionId) bool {
 func (ls *MockLedgerState) CostModels() map[lcommon.PlutusLanguage]lcommon.CostModel {
 	if ls.CostModelsCallback != nil {
 		return ls.CostModelsCallback()
+	}
+	if ls.costModelsMap != nil {
+		return ls.costModelsMap
 	}
 	return make(map[lcommon.PlutusLanguage]lcommon.CostModel)
 }
@@ -501,6 +511,14 @@ func (b *LedgerStateBuilder) WithGetRewardSnapshot(
 	return b
 }
 
+// WithRewardSnapshot sets a static reward snapshot value
+func (b *LedgerStateBuilder) WithRewardSnapshot(
+	snapshot lcommon.RewardSnapshot,
+) *LedgerStateBuilder {
+	b.state.rewardSnapshot = snapshot
+	return b
+}
+
 // WithRewardAccountBalance sets the balance for a reward account
 func (b *LedgerStateBuilder) WithRewardAccountBalance(
 	cred lcommon.Blake2b224,
@@ -575,11 +593,27 @@ func (b *LedgerStateBuilder) WithConstitution(
 	return b
 }
 
+// WithConstitutionValue sets a static constitution value
+func (b *LedgerStateBuilder) WithConstitutionValue(
+	constitution *lcommon.Constitution,
+) *LedgerStateBuilder {
+	b.state.constitution = constitution
+	return b
+}
+
 // WithTreasuryValue sets the treasury value lookup callback
 func (b *LedgerStateBuilder) WithTreasuryValue(
 	fn TreasuryValueFunc,
 ) *LedgerStateBuilder {
 	b.state.TreasuryValueCallback = fn
+	return b
+}
+
+// WithTreasuryAmount sets a static treasury amount
+func (b *LedgerStateBuilder) WithTreasuryAmount(
+	amount uint64,
+) *LedgerStateBuilder {
+	b.state.treasuryAmount = &amount
 	return b
 }
 
@@ -604,6 +638,14 @@ func (b *LedgerStateBuilder) WithCostModels(
 	fn CostModelsFunc,
 ) *LedgerStateBuilder {
 	b.state.CostModelsCallback = fn
+	return b
+}
+
+// WithCostModelsMap sets a static cost models map
+func (b *LedgerStateBuilder) WithCostModelsMap(
+	costModels map[lcommon.PlutusLanguage]lcommon.CostModel,
+) *LedgerStateBuilder {
+	b.state.costModelsMap = costModels
 	return b
 }
 

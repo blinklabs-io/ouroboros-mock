@@ -23,6 +23,8 @@ import (
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test helper to create a sample transaction ID
@@ -2007,4 +2009,75 @@ func TestMockLedgerState_GovActionById_KeyFormat(t *testing.T) {
 	if result.ActionId != actionId {
 		t.Errorf("ActionId mismatch: got %v, want %v", result.ActionId, actionId)
 	}
+}
+
+// =============================================================================
+// WithRewardSnapshot Tests
+// =============================================================================
+
+func TestLedgerStateBuilder_WithRewardSnapshot(t *testing.T) {
+	snapshot := lcommon.RewardSnapshot{
+		TotalActiveStake: 1000000,
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithRewardSnapshot(snapshot).
+		Build()
+
+	result, err := ls.GetRewardSnapshot(0)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1000000), result.TotalActiveStake)
+}
+
+// =============================================================================
+// WithConstitutionValue Tests
+// =============================================================================
+
+func TestLedgerStateBuilder_WithConstitutionValue(t *testing.T) {
+	constitution := &lcommon.Constitution{}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithConstitutionValue(constitution).
+		Build()
+
+	result, err := ls.Constitution()
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, constitution, result)
+}
+
+// =============================================================================
+// WithTreasuryAmount Tests
+// =============================================================================
+
+func TestLedgerStateBuilder_WithTreasuryAmount(t *testing.T) {
+	ls := ledger.NewLedgerStateBuilder().
+		WithTreasuryAmount(5000000).
+		Build()
+
+	result, err := ls.TreasuryValue()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(5000000), result)
+}
+
+// =============================================================================
+// WithCostModelsMap Tests
+// =============================================================================
+
+func TestLedgerStateBuilder_WithCostModelsMap(t *testing.T) {
+	costModels := map[lcommon.PlutusLanguage]lcommon.CostModel{
+		ledger.PlutusV1: {},
+		ledger.PlutusV2: {},
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithCostModelsMap(costModels).
+		Build()
+
+	result := ls.CostModels()
+	assert.Len(t, result, 2)
+	_, hasV1 := result[ledger.PlutusV1]
+	_, hasV2 := result[ledger.PlutusV2]
+	assert.True(t, hasV1, "should have PlutusV1 cost model")
+	assert.True(t, hasV2, "should have PlutusV2 cost model")
 }
