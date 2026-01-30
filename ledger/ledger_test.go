@@ -16,6 +16,7 @@ package ledger_test
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -1966,5 +1967,44 @@ func TestErrNotFound(t *testing.T) {
 			"Expected error message 'ledger: not found', got '%s'",
 			ledger.ErrNotFound.Error(),
 		)
+	}
+}
+
+// =============================================================================
+// GovActionById Key Format Tests
+// =============================================================================
+
+func TestMockLedgerState_GovActionById_KeyFormat(t *testing.T) {
+	// Create a governance action with known ID
+	txId := lcommon.Blake2b256{}
+	copy(txId[:], []byte("test-transaction-id-32-bytes...."))
+
+	actionId := lcommon.GovActionId{
+		TransactionId: txId,
+		GovActionIdx:  42,
+	}
+
+	// Key should be hex#index format, not bech32
+	expectedKey := fmt.Sprintf("%x#%d", actionId.TransactionId[:], actionId.GovActionIdx)
+
+	testAction := &lcommon.GovActionState{
+		ActionId: actionId,
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithGovActions(map[string]*lcommon.GovActionState{
+			expectedKey: testAction,
+		}).
+		Build()
+
+	result, err := ls.GovActionById(actionId)
+	if err != nil {
+		t.Fatalf("GovActionById returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("should find action using hex#index key format")
+	}
+	if result.ActionId != actionId {
+		t.Errorf("ActionId mismatch: got %v, want %v", result.ActionId, actionId)
 	}
 }
