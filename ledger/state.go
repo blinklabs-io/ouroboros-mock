@@ -103,6 +103,7 @@ type MockLedgerState struct {
 	// PoolState callbacks and state
 	PoolCurrentStateCallback PoolCurrentStateFunc
 	poolRegistrations        []lcommon.PoolRegistrationCertificate
+	vrfKeyInUseFunc          func(vrfKeyHash lcommon.Blake2b256) (bool, lcommon.PoolKeyHash, error)
 
 	// RewardState callbacks and state
 	CalculateRewardsCallback  CalculateRewardsFunc
@@ -217,6 +218,17 @@ func (ls *MockLedgerState) IsPoolRegistered(
 		}
 	}
 	return false
+}
+
+// IsVrfKeyInUse checks if a VRF key hash is registered by another pool.
+// Returns (inUse, owningPoolId, error). Used for PV11+ VRF uniqueness validation.
+func (ls *MockLedgerState) IsVrfKeyInUse(
+	vrfKeyHash lcommon.Blake2b256,
+) (bool, lcommon.PoolKeyHash, error) {
+	if ls.vrfKeyInUseFunc != nil {
+		return ls.vrfKeyInUseFunc(vrfKeyHash)
+	}
+	return false, lcommon.PoolKeyHash{}, nil
 }
 
 // CalculateRewards calculates rewards for the given epoch
@@ -492,6 +504,14 @@ func (b *LedgerStateBuilder) WithPoolRegistrations(
 	pools []lcommon.PoolRegistrationCertificate,
 ) *LedgerStateBuilder {
 	b.state.poolRegistrations = pools
+	return b
+}
+
+// WithVrfKeyInUseFunc sets the VRF key in use lookup callback
+func (b *LedgerStateBuilder) WithVrfKeyInUseFunc(
+	f func(lcommon.Blake2b256) (bool, lcommon.PoolKeyHash, error),
+) *LedgerStateBuilder {
+	b.state.vrfKeyInUseFunc = f
 	return b
 }
 
