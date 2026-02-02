@@ -805,14 +805,19 @@ func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
 		t.Errorf("ExpiryEpoch mismatch: got %d, want 100", member.ExpiryEpoch)
 	}
 	if member.HotKey != nil {
-		t.Errorf("HotKey should be nil for proposed member, got %v", member.HotKey)
+		t.Errorf(
+			"HotKey should be nil for proposed member, got %v",
+			member.HotKey,
+		)
 	}
 	if member.Resigned {
 		t.Error("Resigned should be false for proposed member")
 	}
 }
 
-func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(t *testing.T) {
+func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
+	t *testing.T,
+) {
 	// Create a cold key hash
 	var coldKey lcommon.Blake2b224
 	copy(coldKey[:], bytes.Repeat([]byte{0x33}, 28))
@@ -849,7 +854,10 @@ func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(t *testin
 	}
 	// Should have the current member's expiry epoch (150), not proposed (200)
 	if member.ExpiryEpoch != 150 {
-		t.Errorf("ExpiryEpoch mismatch: got %d, want 150 (current member)", member.ExpiryEpoch)
+		t.Errorf(
+			"ExpiryEpoch mismatch: got %d, want 150 (current member)",
+			member.ExpiryEpoch,
+		)
 	}
 	// Should have the hot key from current member
 	if member.HotKey == nil {
@@ -1987,7 +1995,11 @@ func TestMockLedgerState_GovActionById_KeyFormat(t *testing.T) {
 	}
 
 	// Key should be hex#index format, not bech32
-	expectedKey := fmt.Sprintf("%x#%d", actionId.TransactionId[:], actionId.GovActionIdx)
+	expectedKey := fmt.Sprintf(
+		"%x#%d",
+		actionId.TransactionId[:],
+		actionId.GovActionIdx,
+	)
 
 	testAction := &lcommon.GovActionState{
 		ActionId: actionId,
@@ -2007,7 +2019,11 @@ func TestMockLedgerState_GovActionById_KeyFormat(t *testing.T) {
 		t.Fatal("should find action using hex#index key format")
 	}
 	if result.ActionId != actionId {
-		t.Errorf("ActionId mismatch: got %v, want %v", result.ActionId, actionId)
+		t.Errorf(
+			"ActionId mismatch: got %v, want %v",
+			result.ActionId,
+			actionId,
+		)
 	}
 }
 

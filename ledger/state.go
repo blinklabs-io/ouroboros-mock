@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -469,9 +470,7 @@ func (b *LedgerStateBuilder) WithStakeCredentialRegistered(
 func (b *LedgerStateBuilder) WithStakeCredentials(
 	creds map[lcommon.Blake2b224]bool,
 ) *LedgerStateBuilder {
-	for cred, registered := range creds {
-		b.state.stakeRegistrations[cred] = registered
-	}
+	maps.Copy(b.state.stakeRegistrations, creds)
 	return b
 }
 
