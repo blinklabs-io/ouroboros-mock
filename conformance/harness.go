@@ -105,7 +105,12 @@ func (h *Harness) RunAllVectors(t *testing.T) {
 	}
 
 	for _, path := range vectors {
-		t.Run(path, func(t *testing.T) {
+		// Use relative path for cleaner test names
+		testName := path
+		if rel, err := filepath.Rel(h.testdataRoot, path); err == nil {
+			testName = rel
+		}
+		t.Run(testName, func(t *testing.T) {
 			h.runVectorFile(t, path)
 		})
 	}
