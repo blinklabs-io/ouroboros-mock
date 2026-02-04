@@ -371,7 +371,7 @@ Tests constitution proposal chain validation. Expected to fail validation.
 
 ### Test: Hardfork cantFollow
 
-**File:** `conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/GOV/HardFork/Hardfork_is_the_first_one_(doesn't_have_a_GovPurposeId)_/Hardfork_cantFollow`
+**File:** `conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/GOV/HardFork/Hardfork_is_the_first_one_(doesnt_have_a_GovPurposeId)/Hardfork_cantFollow`
 
 **Rule:** GOV
 
@@ -413,7 +413,7 @@ Tests hard fork initiation protocol version rules. Expected to fail validation.
 
 ### Test: Hardfork majorFollow
 
-**File:** `conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/GOV/HardFork/Hardfork_is_the_first_one_(doesn't_have_a_GovPurposeId)_/Hardfork_majorFollow`
+**File:** `conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/GOV/HardFork/Hardfork_is_the_first_one_(doesnt_have_a_GovPurposeId)/Hardfork_majorFollow`
 
 **Rule:** GOV
 
@@ -455,7 +455,7 @@ Tests hard fork initiation protocol version rules. Expected to succeed.
 
 ### Test: Hardfork minorFollow
 
-**File:** `conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/GOV/HardFork/Hardfork_is_the_first_one_(doesn't_have_a_GovPurposeId)_/Hardfork_minorFollow`
+**File:** `conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/GOV/HardFork/Hardfork_is_the_first_one_(doesnt_have_a_GovPurposeId)/Hardfork_minorFollow`
 
 **Rule:** GOV
 
