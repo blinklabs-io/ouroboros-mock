@@ -51,16 +51,13 @@ download-amaru-testdata:
 	@echo "Downloading latest Amaru conformance test data..."
 	@rm -rf /tmp/amaru-testdata
 	@mkdir -p /tmp/amaru-testdata
-	@curl -L -s https://github.com/pragma-org/amaru/archive/main.tar.gz | tar xz -C /tmp/amaru-testdata
+	@curl -fsSL https://github.com/pragma-org/amaru/archive/main.tar.gz | tar xz -C /tmp/amaru-testdata
 	@rm -rf $(ROOT_DIR)/conformance/testdata/eras
 	@mkdir -p $(ROOT_DIR)/conformance/testdata/eras
 	@cp -r /tmp/amaru-testdata/amaru-main/crates/amaru-ledger/tests/data/rules-conformance/* $(ROOT_DIR)/conformance/testdata/eras/
 	@echo "Sanitizing file paths (Go module zip requires clean paths)..."
-	@# Remove apostrophes from file/directory names
-	@find $(ROOT_DIR)/conformance/testdata/eras -depth -name "*'*" -execdir bash -c 'mv "$$1" "$${1//\047/}"' _ {} \;
-	@# Replace spaces with underscores
-	@find $(ROOT_DIR)/conformance/testdata/eras -depth -name "* *" -execdir bash -c 'mv "$$1" "$${1// /_}"' _ {} \;
-	@# Remove trailing underscores (from trailing spaces)
-	@find $(ROOT_DIR)/conformance/testdata/eras -depth -name "*_" -execdir bash -c 'mv "$$1" "$${1%_}"' _ {} \;
+	@# Replace any unsafe characters with underscore, collapse multiple underscores, remove trailing underscores
+	@# Safe characters: alphanumeric, dot, dash, underscore
+	@find $(ROOT_DIR)/conformance/testdata/eras -depth -execdir bash -c 'name="$${1#./}"; safe=$$(printf "%s" "$$name" | tr -c "[:alnum:]._-" "_" | sed "s/__*/_/g; s/_$$//"); [ "$$name" != "$$safe" ] && mv -- "$$name" "$$safe" || true' _ {} \;
 	@rm -rf /tmp/amaru-testdata
 	@echo "Download complete. Test data is now in conformance/testdata/eras/"
