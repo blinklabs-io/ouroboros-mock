@@ -573,8 +573,8 @@ Final State:
 
 | File | Title | Description |
 |------|-------|-------------|
-| `SPOs_alone_can't_enact_hard-fork` | Expired CC blocks hard fork | Hard fork requires CC even if SPOs approve |
-| `SPOs_alone_can't_enact_security_group_parameter_change` | Expired CC blocks security params | Security params require CC even if SPOs approve |
+| `SPOs_alone_cant_enact_hard-fork` | Expired CC blocks hard fork | Hard fork requires CC even if SPOs approve |
+| `SPOs_alone_cant_enact_security_group_parameter_change` | Expired CC blocks security params | Security params require CC even if SPOs approve |
 
 ```
 Initial State:
