@@ -54,7 +54,7 @@ download-amaru-testdata:
 	@curl -fsSL https://github.com/pragma-org/amaru/archive/main.tar.gz | tar xz -C /tmp/amaru-testdata
 	@rm -rf $(ROOT_DIR)/conformance/testdata/eras
 	@mkdir -p $(ROOT_DIR)/conformance/testdata/eras
-	@cp -r /tmp/amaru-testdata/amaru-main/crates/amaru-ledger/tests/data/rules-conformance/* $(ROOT_DIR)/conformance/testdata/eras/
+	@cp -r /tmp/amaru-testdata/amaru-main/crates/amaru-ledger/tests/data/rules-conformance/eras/* $(ROOT_DIR)/conformance/testdata/eras/
 	@echo "Sanitizing file paths (Go module zip requires clean paths)..."
 	@# Replace any unsafe characters with underscore, collapse multiple underscores, remove trailing underscores
 	@# Safe characters: alphanumeric, dot, dash, underscore
