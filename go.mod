@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 require (
 	github.com/blinklabs-io/gouroboros v0.153.1
-	github.com/blinklabs-io/plutigo v0.0.22
+	github.com/blinklabs-io/plutigo v0.0.24
 	github.com/stretchr/testify v1.11.1
 	github.com/utxorpc/go-codegen v0.18.1
 	go.uber.org/goleak v1.3.0
