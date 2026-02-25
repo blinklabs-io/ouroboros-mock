@@ -47,6 +47,7 @@ type Connection struct {
 	doneChan      chan any
 	onceClose     sync.Once
 	errorChan     chan error
+	inputBuffers  map[uint16]*bytes.Buffer
 }
 
 // NewConnection returns a new Connection with the provided conversation entries
@@ -58,6 +59,7 @@ func NewConnection(
 		conversation: conversation,
 		doneChan:     make(chan any),
 		errorChan:    make(chan error, 1),
+		inputBuffers: make(map[uint16]*bytes.Buffer),
 	}
 	c.conn, c.mockConn = net.Pipe()
 	// Start a muxer on the mocked side of the connection
@@ -241,27 +243,49 @@ func (c *Connection) asyncLoop() {
 }
 
 func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
-	// Wait for segment to be received from muxer
-	segment, ok := <-c.muxerRecvChan
-	if !ok {
-		return nil
+	if c.inputBuffers[entry.ProtocolId] == nil {
+		c.inputBuffers[entry.ProtocolId] = bytes.NewBuffer(nil)
 	}
-	if segment.GetProtocolId() != entry.ProtocolId {
-		return fmt.Errorf(
-			"input message protocol ID did not match expected value: expected %d, got %d",
-			entry.ProtocolId,
-			segment.GetProtocolId(),
-		)
+	buf := c.inputBuffers[entry.ProtocolId]
+	if buf.Len() == 0 {
+		// Wait for segment to be received from muxer
+		segment, ok := <-c.muxerRecvChan
+		if !ok {
+			return nil
+		}
+		if segment.GetProtocolId() != entry.ProtocolId {
+			return fmt.Errorf(
+				"input muxer segment protocol ID did not match expected value: expected %d, got %d",
+				entry.ProtocolId,
+				segment.GetProtocolId(),
+			)
+		}
+		if segment.IsResponse() != entry.IsResponse {
+			return fmt.Errorf(
+				"input muxer segment response flag did not match expected value: expected %v, got %v",
+				entry.IsResponse,
+				segment.IsResponse(),
+			)
+		}
+		buf.Write(segment.Payload)
 	}
-	if segment.IsResponse() != entry.IsResponse {
-		return fmt.Errorf(
-			"input message response flag did not match expected value: expected %v, got %v",
-			entry.IsResponse,
-			segment.IsResponse(),
-		)
+	// Extract first message from buffer
+	var tmpMsg cbor.RawMessage
+	numBytesRead, err := cbor.Decode(buf.Bytes(), &tmpMsg)
+	if err != nil {
+		// NOTE: we don't properly handle partial reads, which indicates that a message is split across multiple muxer segments
+		return fmt.Errorf("decode error: %w", err)
+	}
+	if numBytesRead < buf.Len() {
+		// There is another message in the same muxer segment, so we reset the buffer with just
+		// the remaining data
+		c.inputBuffers[entry.ProtocolId] = bytes.NewBuffer(buf.Bytes()[numBytesRead:])
+	} else {
+		// Empty out our buffer since we successfully processed the message
+		buf.Reset()
 	}
 	// Determine message type
-	msgType, err := cbor.DecodeIdFromList(segment.Payload)
+	msgType, err := cbor.DecodeIdFromList(tmpMsg)
 	if err != nil {
 		return fmt.Errorf("decode error: %w", err)
 	}
@@ -270,7 +294,7 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	}
 	if entry.Message != nil {
 		// Create Message object from CBOR
-		msg, err := entry.MsgFromCborFunc(uint(msgType), segment.Payload)
+		msg, err := entry.MsgFromCborFunc(uint(msgType), tmpMsg)
 		if err != nil {
 			return fmt.Errorf("message from CBOR error: %w", err)
 		}

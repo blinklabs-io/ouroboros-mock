@@ -68,7 +68,7 @@ func TestError(t *testing.T) {
 		[]ouroboros_mock.ConversationEntry{
 			ouroboros_mock.ConversationEntryInput{
 				ProtocolId:    999,
-				ExpectedError: "input message protocol ID did not match expected value: expected 999, got 0",
+				ExpectedError: "input muxer segment protocol ID did not match expected value: expected 999, got 0",
 			},
 		},
 	)
