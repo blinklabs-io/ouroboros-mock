@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.1
 
 require (
-	github.com/blinklabs-io/gouroboros v0.156.0
+	github.com/blinklabs-io/gouroboros v0.159.2
 	github.com/blinklabs-io/plutigo v0.0.25
 	github.com/stretchr/testify v1.11.1
 	github.com/utxorpc/go-codegen v0.18.1
@@ -13,7 +13,7 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.1 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
