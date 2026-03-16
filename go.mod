@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 require (
 	github.com/blinklabs-io/gouroboros v0.159.2
-	github.com/blinklabs-io/plutigo v0.0.25
+	github.com/blinklabs-io/plutigo v0.0.27
 	github.com/stretchr/testify v1.11.1
 	github.com/utxorpc/go-codegen v0.18.1
 	go.uber.org/goleak v1.3.0
@@ -23,7 +23,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect
-	github.com/ethereum/go-ethereum v1.17.0 // indirect
+	github.com/ethereum/go-ethereum v1.17.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
