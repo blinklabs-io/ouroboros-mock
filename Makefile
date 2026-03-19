@@ -13,7 +13,15 @@ GOMODULE=$(shell grep ^module $(ROOT_DIR)/go.mod | awk '{ print $$2 }')
 # Set version strings based on git tag and current ref
 GO_LDFLAGS=-ldflags "-s -w"
 
-.PHONY: build mod-tidy clean format golines test download-amaru-testdata
+.PHONY: \
+	build \
+	mod-tidy \
+	clean \
+	format \
+	golines \
+	test \
+	download-amaru-testdata \
+	download-upstream-fixtures
 
 # Alias for building program binary
 build: $(BINARIES)
@@ -61,3 +69,12 @@ download-amaru-testdata:
 	@find $(ROOT_DIR)/conformance/testdata/eras -depth -execdir bash -c 'name="$${1#./}"; safe=$$(printf "%s" "$$name" | tr -c "[:alnum:]._-" "_" | sed "s/__*/_/g; s/_$$//"); [ "$$name" != "$$safe" ] && mv -- "$$name" "$$safe" || true' _ {} \;
 	@rm -rf /tmp/amaru-testdata
 	@echo "Download complete. Test data is now in conformance/testdata/eras/"
+
+# Download and update curated upstream fixtures used for block/message tests.
+# Sources:
+#   - https://github.com/IntersectMBO/ouroboros-consensus
+#   - https://github.com/IntersectMBO/cardano-ledger
+#   - https://github.com/IntersectMBO/cardano-api
+#   - https://github.com/IntersectMBO/cardano-node
+download-upstream-fixtures:
+	@bash $(ROOT_DIR)/scripts/update-upstream-fixtures.sh
