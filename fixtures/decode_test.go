@@ -33,11 +33,13 @@ func TestConsensusEnvelopeKindGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fixture failed: %v", err)
 	}
-	txIDFixture.Kind = KindTransaction
-	if _, err := txIDFixture.ConsensusTransactionBytes(); err == nil {
-		t.Fatal("expected transaction accessor to reject transaction-id envelope")
-	} else if !strings.Contains(err.Error(), "expected transaction envelope, got transaction-id") {
-		t.Fatalf("unexpected error: %v", err)
+	// ConsensusTransactionBytes guards on f.Kind (metadata) rather than envelope.Kind() (binary heuristic)
+	// so a fixture with Kind=KindTransactionID is rejected regardless of payload format.
+	if _, err := txIDFixture.ConsensusTransactionBytes(); !errors.Is(
+		err,
+		ErrNotTransactionFixture,
+	) {
+		t.Fatalf("expected ErrNotTransactionFixture, got %v", err)
 	}
 
 	txFixture, err := harness.Fixture(
@@ -47,10 +49,11 @@ func TestConsensusEnvelopeKindGuards(t *testing.T) {
 		t.Fatalf("Fixture failed: %v", err)
 	}
 	txFixture.Kind = KindTransactionID
-	if _, err := txFixture.ConsensusTransactionIDBytes(); err == nil {
-		t.Fatal("expected transaction-id accessor to reject transaction envelope")
-	} else if !strings.Contains(err.Error(), "expected transaction-id envelope, got transaction") {
-		t.Fatalf("unexpected error: %v", err)
+	if _, err := txFixture.ConsensusTransactionIDBytes(); !errors.Is(
+		err,
+		ErrNotTransactionIDEnvelope,
+	) {
+		t.Fatalf("expected ErrNotTransactionIDEnvelope, got %v", err)
 	}
 }
 
@@ -103,7 +106,9 @@ func TestClassifyFixtureCanonicalTransactionUsesConwayEra(t *testing.T) {
 	}
 }
 
-func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(t *testing.T) {
+func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(
+	t *testing.T,
+) {
 	harness := NewHarness(HarnessConfig{})
 
 	paramsFixture, err := harness.Fixture(
@@ -112,7 +117,10 @@ func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(t *te
 	if err != nil {
 		t.Fatalf("Fixture failed: %v", err)
 	}
-	if _, err := paramsFixture.DecodeProtocolParameters(); !errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
+	if _, err := paramsFixture.DecodeProtocolParameters(); !errors.Is(
+		err,
+		errUnsupportedDijkstraRefScriptFields,
+	) {
 		t.Fatalf("expected unsupported Dijkstra ref-script error, got %v", err)
 	}
 
@@ -122,15 +130,188 @@ func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(t *te
 	if err != nil {
 		t.Fatalf("Fixture failed: %v", err)
 	}
-	if _, err := updateFixture.DecodeProtocolParameterUpdate(); !errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
+	if _, err := updateFixture.DecodeProtocolParameterUpdate(); !errors.Is(
+		err,
+		errUnsupportedDijkstraRefScriptFields,
+	) {
 		t.Fatalf("expected unsupported Dijkstra ref-script error, got %v", err)
 	}
+}
+
+func TestDecodeDijkstraConwayNamedProtocolParametersRejectsUnsupportedRefScriptFields(
+	t *testing.T,
+) {
+	fixture := writeTempJSONFixture(
+		t,
+		filepath.Join(
+			"cardano-ledger",
+			"eras",
+			"dijkstra",
+			"impl",
+			"protocol-parameters",
+			"conway.json",
+		),
+		`{
+			"txFeePerByte": 1,
+			"maxRefScriptSizePerBlock": 1,
+			"txFeeFixed": 2,
+			"maxBlockBodySize": 3,
+			"maxTxSize": 4,
+			"maxBlockHeaderSize": 5,
+			"stakeAddressDeposit": 6,
+			"stakePoolDeposit": 7,
+			"poolRetireMaxEpoch": 8,
+			"stakePoolTargetNum": 9,
+			"poolPledgeInfluence": 1,
+			"monetaryExpansion": 1,
+			"treasuryCut": 1,
+			"executionUnitPrices": {
+				"priceMemory": 1,
+				"priceSteps": 1
+			},
+			"maxTxExecutionUnits": {
+				"memory": 1,
+				"steps": 1
+			},
+			"maxBlockExecutionUnits": {
+				"memory": 1,
+				"steps": 1
+			},
+			"protocolVersion": {
+				"major": 2,
+				"minor": 0
+			}
+		}`,
+	)
+	if _, err := fixture.DecodeProtocolParameters(); !errors.Is(
+		err,
+		errUnsupportedDijkstraRefScriptFields,
+	) {
+		t.Fatalf("expected unsupported Dijkstra ref-script error, got %v", err)
+	}
+}
+
+func TestExecuteProtocolParametersUpdateFixtureIgnoresUnsupportedDijkstraBaseRefScriptFields(
+	t *testing.T,
+) {
+	rootDir := t.TempDir()
+	baseFixture := writeTempJSONFixtureInRoot(
+		t,
+		rootDir,
+		filepath.Join(
+			"cardano-ledger",
+			"eras",
+			"dijkstra",
+			"impl",
+			"golden",
+			"pparams.json",
+		),
+		`{
+			"txFeePerByte": 1,
+			"maxRefScriptSizePerBlock": 1,
+			"txFeeFixed": 2,
+			"maxBlockBodySize": 3,
+			"maxTxSize": 4,
+			"maxBlockHeaderSize": 5,
+			"stakeAddressDeposit": 6,
+			"stakePoolDeposit": 7,
+			"poolRetireMaxEpoch": 8,
+			"stakePoolTargetNum": 9,
+			"poolPledgeInfluence": 1,
+			"monetaryExpansion": 1,
+			"treasuryCut": 1,
+			"executionUnitPrices": {
+				"priceMemory": 1,
+				"priceSteps": 1
+			},
+			"maxTxExecutionUnits": {
+				"memory": 1,
+				"steps": 1
+			},
+			"maxBlockExecutionUnits": {
+				"memory": 1,
+				"steps": 1
+			},
+			"protocolVersion": {
+				"major": 2,
+				"minor": 0
+			}
+		}`,
+	)
+	updateFixture := writeTempJSONFixtureInRoot(
+		t,
+		rootDir,
+		filepath.Join(
+			"cardano-ledger",
+			"eras",
+			"dijkstra",
+			"impl",
+			"golden",
+			"pparams-update.json",
+		),
+		`{"committeeMinSize": 1}`,
+	)
+
+	caseCount, err := executeProtocolParametersUpdateFixture(
+		updateFixture,
+		map[string]Fixture{
+			baseFixture.RelPath:   baseFixture,
+			updateFixture.RelPath: updateFixture,
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"expected unsupported Dijkstra paired-base fixture to be ignored, got %v",
+			err,
+		)
+	}
+	if caseCount != 1 {
+		t.Fatalf("expected single execution case, got %d", caseCount)
+	}
+}
+
+func TestValidateReferenceValidatesOptionalReferenceHash(t *testing.T) {
+	t.Run("MissingHashAlgorithm", func(t *testing.T) {
+		err := validateReference(governanceReference{
+			Type:  "Link",
+			Label: "spec",
+			URI:   "https://example.com",
+			ReferenceHash: &metadataReferenceHash{
+				HashDigest: strings.Repeat("00", 32),
+			},
+		}, false)
+		if err == nil || !strings.Contains(err.Error(), "referenceHash.hashAlgorithm") {
+			t.Fatalf("expected optional reference hash to require algorithm, got %v", err)
+		}
+	})
+
+	t.Run("InvalidHashDigest", func(t *testing.T) {
+		err := validateReference(governanceReference{
+			Type:  "Link",
+			Label: "spec",
+			URI:   "https://example.com",
+			ReferenceHash: &metadataReferenceHash{
+				HashAlgorithm: "sha256",
+				HashDigest:    "zz",
+			},
+		}, false)
+		if err == nil || !strings.Contains(err.Error(), "referenceHash.hashDigest") {
+			t.Fatalf("expected optional reference hash digest validation, got %v", err)
+		}
+	})
 }
 
 func TestDecodeProtocolJSONRejectsMalformedNonce(t *testing.T) {
 	paramsFixture := writeTempJSONFixture(
 		t,
-		filepath.Join("cardano-ledger", "eras", "shelley", "impl", "golden", "pparams.json"),
+		filepath.Join(
+			"cardano-ledger",
+			"eras",
+			"shelley",
+			"impl",
+			"golden",
+			"pparams.json",
+		),
 		`{
 			"txFeePerByte": 1,
 			"txFeeFixed": 2,
@@ -159,20 +340,33 @@ func TestDecodeProtocolJSONRejectsMalformedNonce(t *testing.T) {
 
 	updateFixture := writeTempJSONFixture(
 		t,
-		filepath.Join("cardano-ledger", "eras", "shelley", "impl", "golden", "pparams-update.json"),
+		filepath.Join(
+			"cardano-ledger",
+			"eras",
+			"shelley",
+			"impl",
+			"golden",
+			"pparams-update.json",
+		),
 		`{"extraPraosEntropy": "zz"}`,
 	)
 	if _, err := updateFixture.DecodeProtocolParameterUpdate(); err == nil {
-		t.Fatal("expected protocol-parameters update decode to reject malformed nonce")
+		t.Fatal(
+			"expected protocol-parameters update decode to reject malformed nonce",
+		)
 	} else if !strings.Contains(err.Error(), "invalid extraPraosEntropy") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func writeTempJSONFixture(t *testing.T, relPath string, content string) Fixture {
+func writeTempJSONFixtureInRoot(
+	t *testing.T,
+	rootDir string,
+	relPath string,
+	content string,
+) Fixture {
 	t.Helper()
 
-	rootDir := t.TempDir()
 	path := filepath.Join(rootDir, filepath.FromSlash(relPath))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -186,4 +380,14 @@ func writeTempJSONFixture(t *testing.T, relPath string, content string) Fixture 
 		t.Fatalf("NewFixture failed: %v", err)
 	}
 	return fixture
+}
+
+func writeTempJSONFixture(
+	t *testing.T,
+	relPath string,
+	content string,
+) Fixture {
+	t.Helper()
+	rootDir := t.TempDir()
+	return writeTempJSONFixtureInRoot(t, rootDir, relPath, content)
 }

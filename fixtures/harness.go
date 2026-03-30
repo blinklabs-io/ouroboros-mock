@@ -16,9 +16,9 @@ package fixtures
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -32,7 +32,8 @@ type Harness struct {
 // HarnessConfig configures the fixture harness.
 type HarnessConfig struct {
 	// FixturesRoot is the root directory containing the upstream fixtures.
-	// Defaults to "upstream" if empty.
+	// When left empty, NewHarness resolves the default "upstream" path
+	// relative to the fixtures package directory.
 	FixturesRoot string
 }
 
@@ -40,7 +41,11 @@ type HarnessConfig struct {
 func NewHarness(config HarnessConfig) *Harness {
 	fixturesRoot := config.FixturesRoot
 	if fixturesRoot == "" {
-		fixturesRoot = "upstream"
+		_, thisFile, _, ok := runtime.Caller(0)
+		if !ok {
+			panic("fixtures: unable to determine package directory")
+		}
+		fixturesRoot = filepath.Join(filepath.Dir(thisFile), "upstream")
 	}
 
 	return &Harness{
@@ -142,26 +147,26 @@ func (h *Harness) runMatching(
 	}
 }
 
-// CollectFixtureFiles walks the fixture root and returns every curated file.
-// It skips manifest.txt and returns sorted paths.
+// CollectFixtureFiles reads the committed manifest under root and returns the
+// filesystem paths of every listed fixture in sorted order. It returns an
+// error if any manifest entry is missing on disk.
 func CollectFixtureFiles(root string) ([]string, error) {
-	var paths []string
-
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if filepath.Base(path) == "manifest.txt" {
-			return nil
-		}
-		paths = append(paths, path)
-		return nil
-	})
+	manifest, err := LoadManifest(root)
 	if err != nil {
 		return nil, err
+	}
+
+	paths := make([]string, 0, len(manifest))
+	for _, relPath := range manifest {
+		path := filepath.Join(root, filepath.FromSlash(relPath))
+		if _, err := os.Stat(path); err != nil {
+			return nil, fmt.Errorf(
+				"manifest entry %q missing: %w",
+				relPath,
+				err,
+			)
+		}
+		paths = append(paths, path)
 	}
 
 	sort.Strings(paths)
@@ -238,10 +243,22 @@ type Fixture struct {
 func NewFixture(root string, path string) (Fixture, error) {
 	relPath, err := filepath.Rel(root, path)
 	if err != nil {
-		return Fixture{}, fmt.Errorf("failed to compute relative path for %s: %w", path, err)
+		return Fixture{}, fmt.Errorf(
+			"failed to compute relative path for %s: %w",
+			path,
+			err,
+		)
 	}
 
 	normalizedRelPath := normalizeRelativePath(relPath)
+	if normalizedRelPath == ".." ||
+		strings.HasPrefix(normalizedRelPath, "../") {
+		return Fixture{}, fmt.Errorf(
+			"path %s is outside root %s",
+			path,
+			root,
+		)
+	}
 	parts := strings.Split(normalizedRelPath, "/")
 	if len(parts) < 2 {
 		return Fixture{}, fmt.Errorf("unexpected fixture path: %s", path)

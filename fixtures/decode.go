@@ -57,7 +57,11 @@ func (f Fixture) DecodeHex() ([]byte, error) {
 
 	decoded, err := hex.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode hex fixture %s: %w", f.RelPath, err)
+		return nil, fmt.Errorf(
+			"failed to decode hex fixture %s: %w",
+			f.RelPath,
+			err,
+		)
 	}
 	return decoded, nil
 }
@@ -159,7 +163,10 @@ func (f Fixture) LedgerTransactionType() (uint, error) {
 		return ledger.TxTypeConway, nil
 	}
 	if f.Kind != KindTransaction {
-		return 0, fmt.Errorf("fixture %s is not a transaction fixture", f.RelPath)
+		return 0, fmt.Errorf(
+			"fixture %s is not a transaction fixture",
+			f.RelPath,
+		)
 	}
 	return ledgerTransactionTypeForEra(f.Era)
 }
@@ -219,7 +226,10 @@ func consensusHeaderTypeForEra(era string) (uint, error) {
 // the raw one-era block wrapper bytes.
 func (f Fixture) ConsensusBlockBytes() ([]byte, error) {
 	if f.Repo != RepoOuroborosConsensus || f.Kind != KindBlock {
-		return nil, fmt.Errorf("fixture %s is not an ouroboros-consensus block fixture", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s is not an ouroboros-consensus block fixture",
+			f.RelPath,
+		)
 	}
 
 	data, err := f.Read()
@@ -241,12 +251,18 @@ func (f Fixture) ConsensusBlock() (*ConsensusBlock, error) {
 		return nil, err
 	}
 	if len(blockItems) != 2 {
-		return nil, fmt.Errorf("expected 2-element block wrapper, got %d", len(blockItems))
+		return nil, fmt.Errorf(
+			"expected 2-element block wrapper, got %d",
+			len(blockItems),
+		)
 	}
 
 	var era uint
 	if _, err := cbor.Decode(blockItems[0], &era); err != nil {
-		return nil, fmt.Errorf("failed to decode one-era block identifier: %w", err)
+		return nil, fmt.Errorf(
+			"failed to decode one-era block identifier: %w",
+			err,
+		)
 	}
 
 	return &ConsensusBlock{
@@ -268,7 +284,10 @@ func (f Fixture) ConsensusLedgerBlockBytes() ([]byte, error) {
 // ConsensusHeader decodes an ouroboros-consensus wrapped header fixture.
 func (f Fixture) ConsensusHeader() (*chainsync.WrappedHeader, error) {
 	if f.Repo != RepoOuroborosConsensus || f.Kind != KindHeader {
-		return nil, fmt.Errorf("fixture %s is not an ouroboros-consensus header fixture", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s is not an ouroboros-consensus header fixture",
+			f.RelPath,
+		)
 	}
 
 	data, err := f.Read()
@@ -295,10 +314,16 @@ func (f Fixture) ConsensusHeaderBytes() ([]byte, error) {
 // ConsensusEnvelope decodes a 2-element ouroboros-consensus transaction or transaction-id envelope.
 func (f Fixture) ConsensusEnvelope() (*ConsensusEnvelope, error) {
 	if f.Repo != RepoOuroborosConsensus {
-		return nil, fmt.Errorf("fixture %s is not an ouroboros-consensus fixture", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s is not an ouroboros-consensus fixture",
+			f.RelPath,
+		)
 	}
 	if f.Kind != KindTransaction && f.Kind != KindTransactionID {
-		return nil, fmt.Errorf("fixture %s is not a consensus envelope fixture", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s is not a consensus envelope fixture",
+			f.RelPath,
+		)
 	}
 
 	data, err := f.Read()
@@ -311,7 +336,10 @@ func (f Fixture) ConsensusEnvelope() (*ConsensusEnvelope, error) {
 		return nil, err
 	}
 	if len(envelope) != 2 {
-		return nil, fmt.Errorf("expected 2-element envelope, got %d", len(envelope))
+		return nil, fmt.Errorf(
+			"expected 2-element envelope, got %d",
+			len(envelope),
+		)
 	}
 
 	var era uint
@@ -328,33 +356,43 @@ func (f Fixture) ConsensusEnvelope() (*ConsensusEnvelope, error) {
 // ConsensusTransactionBytes returns the actual ledger transaction bytes from a
 // consensus transaction fixture.
 func (f Fixture) ConsensusTransactionBytes() ([]byte, error) {
+	if f.Kind != KindTransaction {
+		return nil, fmt.Errorf("%w: fixture %s", ErrNotTransactionFixture, f.RelPath)
+	}
+
 	envelope, err := f.ConsensusEnvelope()
 	if err != nil {
 		return nil, err
 	}
-	envelopeKind, err := envelope.Kind()
-	if err != nil {
-		return nil, err
-	}
-	if envelopeKind != KindTransaction {
-		return nil, fmt.Errorf(
-			"expected transaction envelope, got %s",
-			envelopeKind,
-		)
+
+	if f.Era == "byron" {
+		var nested []cbor.RawMessage
+		if _, err := cbor.Decode(envelope.Payload, &nested); err != nil {
+			return nil, err
+		}
+		if len(nested) != 2 {
+			return nil, fmt.Errorf(
+				"expected 2-element Byron transaction wrapper, got %d",
+				len(nested),
+			)
+		}
+		return nested[1], nil
 	}
 
-	if f.Era != "byron" {
-		return envelope.TaggedPayloadBytes()
+	// Try tag-24 unwrapping (standard post-Byron eras)
+	if tagged, err := unwrapTag24(envelope.Payload); err == nil {
+		return tagged, nil
 	}
 
-	var nested []cbor.RawMessage
-	if _, err := cbor.Decode(envelope.Payload, &nested); err != nil {
-		return nil, err
+	// Try bytes payload (Dijkstra era uses raw bytes encoding)
+	if bytesPayload, err := decodeEnvelopeBytesPayload(envelope.Payload); err == nil {
+		return bytesPayload, nil
 	}
-	if len(nested) != 2 {
-		return nil, fmt.Errorf("expected 2-element Byron transaction wrapper, got %d", len(nested))
-	}
-	return nested[1], nil
+
+	return nil, fmt.Errorf(
+		"failed to extract transaction bytes from consensus envelope for %s",
+		f.RelPath,
+	)
 }
 
 // ConsensusTransactionIDBytes returns the transaction identifier payload bytes
@@ -370,8 +408,10 @@ func (f Fixture) ConsensusTransactionIDBytes() ([]byte, error) {
 	}
 	if envelopeKind != KindTransactionID {
 		return nil, fmt.Errorf(
-			"expected transaction-id envelope, got %s",
+			"%w: got %s in fixture %s",
+			ErrNotTransactionIDEnvelope,
 			envelopeKind,
+			f.RelPath,
 		)
 	}
 	return envelope.BytesPayload()
@@ -392,7 +432,10 @@ func (f Fixture) LedgerBlockBytes() ([]byte, error) {
 	case f.Format == FormatCBOR:
 		return f.Read()
 	default:
-		return nil, fmt.Errorf("fixture %s does not expose ledger block bytes", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s does not expose ledger block bytes",
+			f.RelPath,
+		)
 	}
 }
 
@@ -409,7 +452,10 @@ func (f Fixture) LedgerHeaderBytes() ([]byte, error) {
 	case f.Format == FormatCBOR:
 		return f.Read()
 	default:
-		return nil, fmt.Errorf("fixture %s does not expose ledger header bytes", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s does not expose ledger header bytes",
+			f.RelPath,
+		)
 	}
 }
 
@@ -417,7 +463,10 @@ func (f Fixture) LedgerHeaderBytes() ([]byte, error) {
 // supported transaction fixture family.
 func (f Fixture) LedgerTransactionBytes() ([]byte, error) {
 	if f.Kind != KindTransaction {
-		return nil, fmt.Errorf("fixture %s is not a transaction fixture", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s is not a transaction fixture",
+			f.RelPath,
+		)
 	}
 
 	switch {
@@ -430,13 +479,20 @@ func (f Fixture) LedgerTransactionBytes() ([]byte, error) {
 		}
 		var payload canonicalTransaction
 		if err := json.Unmarshal(data, &payload); err != nil {
-			return nil, fmt.Errorf("failed to decode canonical tx fixture %s: %w", f.RelPath, err)
+			return nil, fmt.Errorf(
+				"failed to decode canonical tx fixture %s: %w",
+				f.RelPath,
+				err,
+			)
 		}
 		return hex.DecodeString(strings.TrimSpace(payload.CborHex))
 	case f.Format == FormatCBOR:
 		return f.Read()
 	default:
-		return nil, fmt.Errorf("fixture %s does not expose ledger transaction bytes", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s does not expose ledger transaction bytes",
+			f.RelPath,
+		)
 	}
 }
 
@@ -444,13 +500,19 @@ func (f Fixture) LedgerTransactionBytes() ([]byte, error) {
 // supported transaction-id fixture family.
 func (f Fixture) LedgerTransactionIDBytes() ([]byte, error) {
 	if f.Kind != KindTransactionID {
-		return nil, fmt.Errorf("fixture %s is not a transaction-id fixture", f.RelPath)
+		return nil, fmt.Errorf(
+			"fixture %s is not a transaction-id fixture",
+			f.RelPath,
+		)
 	}
 
 	if f.Repo == RepoOuroborosConsensus {
 		return f.ConsensusTransactionIDBytes()
 	}
-	return nil, fmt.Errorf("fixture %s does not expose transaction-id bytes", f.RelPath)
+	return nil, fmt.Errorf(
+		"fixture %s does not expose transaction-id bytes",
+		f.RelPath,
+	)
 }
 
 // DecodeLedgerBlock decodes any supported block fixture into a ledger block.
@@ -497,13 +559,21 @@ func (e ConsensusEnvelope) TaggedPayloadBytes() ([]byte, error) {
 	return unwrapTag24(e.Payload)
 }
 
+// txIDHashLen is the length of a Cardano transaction ID (Blake2b-256 hash).
+const txIDHashLen = 32
+
 // Kind infers whether the envelope contains a transaction or transaction-id payload.
 func (e ConsensusEnvelope) Kind() (Kind, error) {
 	if _, err := unwrapTag24(e.Payload); err == nil {
 		return KindTransaction, nil
 	}
-	if _, err := decodeEnvelopeBytesPayload(e.Payload); err == nil {
-		return KindTransactionID, nil
+	if payload, err := decodeEnvelopeBytesPayload(e.Payload); err == nil {
+		// Transaction IDs are 32-byte Blake2b-256 hashes;
+		// byte-string transaction payloads (e.g. Dijkstra GenTx) are larger.
+		if len(payload) == txIDHashLen {
+			return KindTransactionID, nil
+		}
+		return KindTransaction, nil
 	}
 
 	var nested []cbor.RawMessage

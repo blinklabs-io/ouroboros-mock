@@ -235,14 +235,22 @@ func (l *PParamsLoader) loadFile(
 	return pp, nil
 }
 
-func (l *PParamsLoader) resolveContainedPath(filePath string) (string, string, error) {
+func (l *PParamsLoader) resolveContainedPath(
+	filePath string,
+) (string, string, error) {
 	pparamsDirAbs, err := filepath.Abs(l.pparamsDir)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to resolve pparams directory: %w", err)
+		return "", "", fmt.Errorf(
+			"failed to resolve pparams directory: %w",
+			err,
+		)
 	}
 	pparamsDirReal, err := filepath.EvalSymlinks(pparamsDirAbs)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to evaluate pparams directory: %w", err)
+		return "", "", fmt.Errorf(
+			"failed to evaluate pparams directory: %w",
+			err,
+		)
 	}
 
 	filePathAbs, err := filepath.Abs(filePath)
@@ -256,9 +264,13 @@ func (l *PParamsLoader) resolveContainedPath(filePath string) (string, string, e
 
 	relPath, err := filepath.Rel(pparamsDirReal, filePathReal)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to compare file path to pparams directory: %w", err)
+		return "", "", fmt.Errorf(
+			"failed to compare file path to pparams directory: %w",
+			err,
+		)
 	}
-	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+	if relPath == ".." ||
+		strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf(
 			"path %s escapes pparams directory %s",
 			filePathReal,

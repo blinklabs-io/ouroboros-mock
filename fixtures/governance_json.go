@@ -94,13 +94,19 @@ func validateGovernanceMetadataFixture(f Fixture) error {
 		return validateDRepMetadata(data)
 	case "invalid-drep-metadata.jsonld":
 		if err := validateDRepMetadata(data); err == nil {
-			return fmt.Errorf("expected invalid governance metadata for %s", f.RelPath)
+			return fmt.Errorf(
+				"expected invalid governance metadata for %s",
+				f.RelPath,
+			)
 		}
 		return nil
 	case "no-confidence.jsonld":
 		return validateNoConfidenceMetadata(data)
 	default:
-		return fmt.Errorf("unsupported governance metadata fixture: %s", f.RelPath)
+		return fmt.Errorf(
+			"unsupported governance metadata fixture: %s",
+			f.RelPath,
+		)
 	}
 }
 
@@ -125,7 +131,8 @@ func validateDRepMetadata(data []byte) error {
 	if _, err := gcommon.NewAddress(metadata.Body.PaymentAddress); err != nil {
 		return fmt.Errorf("invalid paymentAddress: %w", err)
 	}
-	if metadata.Body.Objectives == "" || metadata.Body.Motivations == "" || metadata.Body.Qualifications == "" {
+	if metadata.Body.Objectives == "" || metadata.Body.Motivations == "" ||
+		metadata.Body.Qualifications == "" {
 		return errors.New("incomplete DRep body text fields")
 	}
 	if err := validateImage(metadata.Body.Image); err != nil {
@@ -154,7 +161,9 @@ func validateNoConfidenceMetadata(data []byte) error {
 	if metadata.HashAlgorithm == "" {
 		return errors.New("missing hashAlgorithm")
 	}
-	if metadata.Body.Title == "" || metadata.Body.Abstract == "" || metadata.Body.Motivation == "" || metadata.Body.Rationale == "" {
+	if metadata.Body.Title == "" || metadata.Body.Abstract == "" ||
+		metadata.Body.Motivation == "" ||
+		metadata.Body.Rationale == "" {
 		return errors.New("incomplete governance action body")
 	}
 	for _, reference := range metadata.Body.References {
@@ -202,16 +211,17 @@ func validateReference(reference governanceReference, expectHash bool) error {
 	if err := validateURI(reference.URI, "reference.uri"); err != nil {
 		return err
 	}
-	if expectHash {
-		if reference.ReferenceHash == nil {
+	if reference.ReferenceHash == nil {
+		if expectHash {
 			return errors.New("missing referenceHash")
 		}
-		if reference.ReferenceHash.HashAlgorithm == "" {
-			return errors.New("missing referenceHash.hashAlgorithm")
-		}
-		if err := validateHexString(reference.ReferenceHash.HashDigest, 32, "referenceHash.hashDigest"); err != nil {
-			return err
-		}
+		return nil
+	}
+	if reference.ReferenceHash.HashAlgorithm == "" {
+		return errors.New("missing referenceHash.hashAlgorithm")
+	}
+	if err := validateHexString(reference.ReferenceHash.HashDigest, 32, "referenceHash.hashDigest"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -236,7 +246,12 @@ func validateHexString(raw string, expectedBytes int, label string) error {
 		return fmt.Errorf("invalid %s: %w", label, err)
 	}
 	if expectedBytes >= 0 && len(decoded) != expectedBytes {
-		return fmt.Errorf("unexpected %s length: got %d want %d", label, len(decoded), expectedBytes)
+		return fmt.Errorf(
+			"unexpected %s length: got %d want %d",
+			label,
+			len(decoded),
+			expectedBytes,
+		)
 	}
 	return nil
 }

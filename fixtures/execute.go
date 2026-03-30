@@ -80,7 +80,10 @@ func (h *Harness) ExecuteFixture(relPath string) (ExecutionResult, error) {
 	normalizedPath := normalizeRelativePath(relPath)
 	fixture, ok := fixtureMap[normalizedPath]
 	if !ok {
-		return ExecutionResult{}, fmt.Errorf("fixture not found: %s", normalizedPath)
+		return ExecutionResult{}, fmt.Errorf(
+			"fixture not found: %s",
+			normalizedPath,
+		)
 	}
 	return executeFixtureWithIndex(fixture, fixtureMap), nil
 }
@@ -188,7 +191,11 @@ func executeFixture(
 	case KindUnknown:
 		return 0, fmt.Errorf("unknown fixture kind for %s", fixture.RelPath)
 	default:
-		return 0, fmt.Errorf("unsupported fixture kind %q for %s", fixture.Kind, fixture.RelPath)
+		return 0, fmt.Errorf(
+			"unsupported fixture kind %q for %s",
+			fixture.Kind,
+			fixture.RelPath,
+		)
 	}
 }
 
@@ -202,21 +209,36 @@ func executeBlockFixture(
 
 	block, err := fixture.DecodeLedgerBlock()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode block fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode block fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if len(block.Cbor()) == 0 {
-		return 0, fmt.Errorf("decoded block has empty CBOR: %s", fixture.RelPath)
+		return 0, fmt.Errorf(
+			"decoded block has empty CBOR: %s",
+			fixture.RelPath,
+		)
 	}
 	for txIdx, tx := range block.Transactions() {
 		if len(tx.Cbor()) == 0 {
-			return 0, fmt.Errorf("decoded block transaction %d has empty CBOR: %s", txIdx, fixture.RelPath)
+			return 0, fmt.Errorf(
+				"decoded block transaction %d has empty CBOR: %s",
+				txIdx,
+				fixture.RelPath,
+			)
 		}
 	}
 
 	if fixture.Repo == RepoOuroborosConsensus {
 		oneEraBlock, err := fixture.ConsensusBlock()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode consensus block wrapper %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode consensus block wrapper %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		expectedType, err := fixture.LedgerBlockType()
 		if err != nil {
@@ -235,16 +257,32 @@ func executeBlockFixture(
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindHeader); ok {
 		header, err := counterpart.DecodeLedgerHeader()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related header fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related header fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if block.Hash() != header.Hash() {
-			return 0, fmt.Errorf("block/header hash mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"block/header hash mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 		if block.SlotNumber() != header.SlotNumber() {
-			return 0, fmt.Errorf("block/header slot mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"block/header slot mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 		if block.BlockNumber() != header.BlockNumber() {
-			return 0, fmt.Errorf("block/header block number mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"block/header block number mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -257,16 +295,27 @@ func executeHeaderFixture(
 ) (int, error) {
 	header, err := fixture.DecodeLedgerHeader()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode header fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode header fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if len(header.Cbor()) == 0 {
-		return 0, fmt.Errorf("decoded header has empty CBOR: %s", fixture.RelPath)
+		return 0, fmt.Errorf(
+			"decoded header has empty CBOR: %s",
+			fixture.RelPath,
+		)
 	}
 
 	if fixture.Repo == RepoOuroborosConsensus {
 		wrappedHeader, err := fixture.ConsensusHeader()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode consensus header wrapper %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode consensus header wrapper %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		expectedEra, err := fixture.ConsensusHeaderEra()
 		if err != nil {
@@ -283,18 +332,31 @@ func executeHeaderFixture(
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindBlock); ok {
-		if counterpart.Repo == RepoOuroborosConsensus && counterpart.Era == "dijkstra" {
+		if counterpart.Repo == RepoOuroborosConsensus &&
+			counterpart.Era == "dijkstra" {
 			return 1, nil
 		}
 		block, err := counterpart.DecodeLedgerBlock()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related block fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related block fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if block.Hash() != header.Hash() {
-			return 0, fmt.Errorf("header/block hash mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"header/block hash mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 		if block.SlotNumber() != header.SlotNumber() {
-			return 0, fmt.Errorf("header/block slot mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"header/block slot mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -311,16 +373,27 @@ func executeTransactionFixture(
 
 	tx, err := fixture.DecodeLedgerTransaction()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode transaction fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode transaction fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if len(tx.Cbor()) == 0 {
-		return 0, fmt.Errorf("decoded transaction has empty CBOR: %s", fixture.RelPath)
+		return 0, fmt.Errorf(
+			"decoded transaction has empty CBOR: %s",
+			fixture.RelPath,
+		)
 	}
 
 	if fixture.Repo == RepoOuroborosConsensus {
 		envelope, err := fixture.ConsensusEnvelope()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode consensus transaction envelope %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode consensus transaction envelope %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		expectedType, err := fixture.LedgerTransactionType()
 		if err != nil {
@@ -342,10 +415,18 @@ func executeTransactionFixture(
 		}
 		txIDBytes, err := counterpart.LedgerTransactionIDBytes()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related transaction-id fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related transaction-id fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if !bytes.Equal(tx.Hash().Bytes(), txIDBytes) {
-			return 0, fmt.Errorf("transaction/txid mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"transaction/txid mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -362,16 +443,28 @@ func executeTransactionIDFixture(
 
 	txIDBytes, err := fixture.LedgerTransactionIDBytes()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode transaction-id fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode transaction-id fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if len(txIDBytes) != 32 {
-		return 0, fmt.Errorf("unexpected transaction-id length for %s: got %d", fixture.RelPath, len(txIDBytes))
+		return 0, fmt.Errorf(
+			"unexpected transaction-id length for %s: got %d",
+			fixture.RelPath,
+			len(txIDBytes),
+		)
 	}
 
 	if fixture.Repo == RepoOuroborosConsensus {
 		envelope, err := fixture.ConsensusEnvelope()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode consensus transaction-id envelope %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode consensus transaction-id envelope %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		expectedType, err := ledgerTransactionTypeForEra(fixture.Era)
 		if err != nil {
@@ -393,10 +486,18 @@ func executeTransactionIDFixture(
 		}
 		tx, err := counterpart.DecodeLedgerTransaction()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related transaction fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related transaction fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if !bytes.Equal(tx.Hash().Bytes(), txIDBytes) {
-			return 0, fmt.Errorf("transaction-id/transaction mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"transaction-id/transaction mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -411,40 +512,77 @@ func executeGenesisFixture(fixture Fixture) (int, error) {
 
 	switch {
 	case fixture.Name == "ShelleyGenesis.json":
-		genesis, err := shelley.NewShelleyGenesisFromReader(bytes.NewReader(data))
+		genesis, err := shelley.NewShelleyGenesisFromReader(
+			bytes.NewReader(data),
+		)
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode Shelley genesis fixture %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode Shelley genesis fixture %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		pp := shelley.ShelleyProtocolParameters{}
 		if err := pp.UpdateFromGenesis(&genesis); err != nil {
-			return 0, fmt.Errorf("failed to derive Shelley protocol parameters from %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to derive Shelley protocol parameters from %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		if pp.A0 == nil || pp.Rho == nil || pp.Tau == nil {
-			return 0, fmt.Errorf("incomplete Shelley genesis-derived protocol parameters for %s", fixture.RelPath)
+			return 0, fmt.Errorf(
+				"incomplete Shelley genesis-derived protocol parameters for %s",
+				fixture.RelPath,
+			)
 		}
 	case fixture.Era == "alonzo":
 		genesis, err := alonzo.NewAlonzoGenesisFromReader(bytes.NewReader(data))
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode Alonzo genesis fixture %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode Alonzo genesis fixture %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		pp := alonzo.AlonzoProtocolParameters{}
 		if err := pp.UpdateFromGenesis(&genesis); err != nil {
-			return 0, fmt.Errorf("failed to derive Alonzo protocol parameters from %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to derive Alonzo protocol parameters from %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
-		if pp.ExecutionCosts.MemPrice == nil || pp.ExecutionCosts.StepPrice == nil {
-			return 0, fmt.Errorf("missing execution prices after decoding %s", fixture.RelPath)
+		if pp.ExecutionCosts.MemPrice == nil ||
+			pp.ExecutionCosts.StepPrice == nil {
+			return 0, fmt.Errorf(
+				"missing execution prices after decoding %s",
+				fixture.RelPath,
+			)
 		}
 	case fixture.Era == "conway":
 		genesis, err := conway.NewConwayGenesisFromReader(bytes.NewReader(data))
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode Conway genesis fixture %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode Conway genesis fixture %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
 		pp := conway.ConwayProtocolParameters{}
 		if err := pp.UpdateFromGenesis(&genesis); err != nil {
-			return 0, fmt.Errorf("failed to derive Conway protocol parameters from %s: %w", fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to derive Conway protocol parameters from %s: %w",
+				fixture.RelPath,
+				err,
+			)
 		}
-		if pp.MinCommitteeSize == 0 && pp.CommitteeTermLimit == 0 && len(pp.CostModels) == 0 {
-			return 0, fmt.Errorf("Conway genesis fixture %s did not populate any governance parameters", fixture.RelPath)
+		if pp.MinCommitteeSize == 0 && pp.CommitteeTermLimit == 0 &&
+			len(pp.CostModels) == 0 {
+			return 0, fmt.Errorf(
+				"Conway genesis fixture %s did not populate any governance parameters",
+				fixture.RelPath,
+			)
 		}
 	default:
 		return 0, fmt.Errorf("unsupported genesis fixture: %s", fixture.RelPath)
@@ -456,13 +594,22 @@ func executeGenesisFixture(fixture Fixture) (int, error) {
 func executeProtocolParametersFixture(fixture Fixture) (int, error) {
 	params, err := fixture.DecodeProtocolParameters()
 	if err != nil {
-		if fixture.Era == "dijkstra" && errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
+		if fixture.Era == "dijkstra" &&
+			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
 			return 1, nil
 		}
-		return 0, fmt.Errorf("failed to decode protocol-parameters fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode protocol-parameters fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if err := validateDecodedProtocolParameters(params); err != nil {
-		return 0, fmt.Errorf("invalid decoded protocol parameters for %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"invalid decoded protocol parameters for %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	return 1, nil
 }
@@ -473,26 +620,50 @@ func executeProtocolParametersUpdateFixture(
 ) (int, error) {
 	update, err := fixture.DecodeProtocolParameterUpdate()
 	if err != nil {
-		if fixture.Era == "dijkstra" && errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
+		if fixture.Era == "dijkstra" &&
+			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
 			return 1, nil
 		}
-		return 0, fmt.Errorf("failed to decode protocol-parameters update fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode protocol-parameters update fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 
 	baseFixture, ok := sameDirectoryFixture(fixtureMap, fixture, "pparams.json")
 	if !ok {
-		return 0, fmt.Errorf("missing paired pparams.json for %s", fixture.RelPath)
+		return 0, fmt.Errorf(
+			"missing paired pparams.json for %s",
+			fixture.RelPath,
+		)
 	}
 	params, err := baseFixture.DecodeProtocolParameters()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode paired protocol parameters fixture %s: %w", baseFixture.RelPath, err)
+		if baseFixture.Era == "dijkstra" &&
+			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
+			return 1, nil
+		}
+		return 0, fmt.Errorf(
+			"failed to decode paired protocol parameters fixture %s: %w",
+			baseFixture.RelPath,
+			err,
+		)
 	}
 
 	if err := ApplyProtocolParameterUpdate(params, update); err != nil {
-		return 0, fmt.Errorf("failed to apply protocol-parameter update %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to apply protocol-parameter update %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if err := validateDecodedProtocolParameters(params); err != nil {
-		return 0, fmt.Errorf("invalid protocol parameters after applying %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"invalid protocol parameters after applying %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 
 	return 1, nil
@@ -506,7 +677,11 @@ func executeTranslationFixture(fixture Fixture) (int, error) {
 
 	var cases []cbor.RawMessage
 	if _, err := cbor.Decode(data, &cases); err != nil {
-		return 0, fmt.Errorf("failed to decode translation corpus %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode translation corpus %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if len(cases) == 0 {
 		return 0, fmt.Errorf("translation corpus is empty: %s", fixture.RelPath)
@@ -515,10 +690,20 @@ func executeTranslationFixture(fixture Fixture) (int, error) {
 	for caseIdx, rawCase := range cases {
 		var items []cbor.RawMessage
 		if _, err := cbor.Decode(rawCase, &items); err != nil {
-			return 0, fmt.Errorf("failed to decode translation case %d in %s: %w", caseIdx, fixture.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode translation case %d in %s: %w",
+				caseIdx,
+				fixture.RelPath,
+				err,
+			)
 		}
 		if len(items) != 5 {
-			return 0, fmt.Errorf("unexpected translation case width in %s case %d: got %d want 5", fixture.RelPath, caseIdx, len(items))
+			return 0, fmt.Errorf(
+				"unexpected translation case width in %s case %d: got %d want 5",
+				fixture.RelPath,
+				caseIdx,
+				len(items),
+			)
 		}
 		if err := validateTranslationCase(items); err != nil {
 			return 0, fmt.Errorf(
@@ -539,22 +724,42 @@ func executeDijkstraConsensusBlockFixture(
 ) (int, error) {
 	wrappedBytes, err := fixture.ConsensusBlockBytes()
 	if err != nil {
-		return 0, fmt.Errorf("failed to extract consensus block wrapper %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to extract consensus block wrapper %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	dec, err := cbor.NewStreamDecoder(wrappedBytes)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create consensus block stream decoder %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to create consensus block stream decoder %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	arrayLen, _, _, err := dec.DecodeArrayHeader()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode Dijkstra block wrapper header %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode Dijkstra block wrapper header %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if arrayLen != 2 {
-		return 0, fmt.Errorf("unexpected Dijkstra block wrapper width for %s: got %d want 2", fixture.RelPath, arrayLen)
+		return 0, fmt.Errorf(
+			"unexpected Dijkstra block wrapper width for %s: got %d want 2",
+			fixture.RelPath,
+			arrayLen,
+		)
 	}
 	var era uint
 	if _, _, err := dec.Decode(&era); err != nil {
-		return 0, fmt.Errorf("failed to decode Dijkstra block era %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode Dijkstra block era %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	expectedType, err := fixture.LedgerBlockType()
 	if err != nil {
@@ -569,19 +774,34 @@ func executeDijkstraConsensusBlockFixture(
 		)
 	}
 	if dec.EOF() {
-		return 0, fmt.Errorf("decoded Dijkstra block payload is empty: %s", fixture.RelPath)
+		return 0, fmt.Errorf(
+			"decoded Dijkstra block payload is empty: %s",
+			fixture.RelPath,
+		)
 	}
-	if _, _, err := dec.Skip(); err != nil && !strings.Contains(err.Error(), "unexpected EOF") {
-		return 0, fmt.Errorf("failed to validate Dijkstra block payload %s: %w", fixture.RelPath, err)
+	if _, _, err := dec.Skip(); err != nil &&
+		!strings.Contains(err.Error(), "unexpected EOF") {
+		return 0, fmt.Errorf(
+			"failed to validate Dijkstra block payload %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindHeader); ok {
 		header, err := counterpart.DecodeLedgerHeader()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related header fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related header fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if len(header.Cbor()) == 0 {
-			return 0, fmt.Errorf("decoded related header has empty CBOR: %s", counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"decoded related header has empty CBOR: %s",
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -594,7 +814,11 @@ func executeDijkstraConsensusTransactionFixture(
 ) (int, error) {
 	envelope, err := fixture.ConsensusEnvelope()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode consensus transaction envelope %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode consensus transaction envelope %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	expectedType, err := fixture.LedgerTransactionType()
 	if err != nil {
@@ -611,20 +835,36 @@ func executeDijkstraConsensusTransactionFixture(
 
 	payloadBytes, err := envelope.BytesPayload()
 	if err != nil {
-		return 0, fmt.Errorf("failed to extract Dijkstra transaction payload %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to extract Dijkstra transaction payload %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	bodyHash, err := dijkstraConsensusTransactionBodyHash(payloadBytes)
 	if err != nil {
-		return 0, fmt.Errorf("failed to validate Dijkstra transaction %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to validate Dijkstra transaction %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindTransactionID); ok {
 		txIDBytes, err := counterpart.LedgerTransactionIDBytes()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related transaction-id fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related transaction-id fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if !bytes.Equal(bodyHash, txIDBytes) {
-			return 0, fmt.Errorf("transaction/txid mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"transaction/txid mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -637,15 +877,27 @@ func executeDijkstraConsensusTransactionIDFixture(
 ) (int, error) {
 	txIDBytes, err := fixture.LedgerTransactionIDBytes()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode transaction-id fixture %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode transaction-id fixture %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	if len(txIDBytes) != 32 {
-		return 0, fmt.Errorf("unexpected transaction-id length for %s: got %d", fixture.RelPath, len(txIDBytes))
+		return 0, fmt.Errorf(
+			"unexpected transaction-id length for %s: got %d",
+			fixture.RelPath,
+			len(txIDBytes),
+		)
 	}
 
 	envelope, err := fixture.ConsensusEnvelope()
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode consensus transaction-id envelope %s: %w", fixture.RelPath, err)
+		return 0, fmt.Errorf(
+			"failed to decode consensus transaction-id envelope %s: %w",
+			fixture.RelPath,
+			err,
+		)
 	}
 	expectedType, err := ledgerTransactionTypeForEra(fixture.Era)
 	if err != nil {
@@ -663,18 +915,34 @@ func executeDijkstraConsensusTransactionIDFixture(
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindTransaction); ok {
 		consensusTx, err := counterpart.ConsensusEnvelope()
 		if err != nil {
-			return 0, fmt.Errorf("failed to decode related transaction fixture %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to decode related transaction fixture %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		payloadBytes, err := consensusTx.BytesPayload()
 		if err != nil {
-			return 0, fmt.Errorf("failed to extract related Dijkstra transaction payload %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to extract related Dijkstra transaction payload %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		bodyHash, err := dijkstraConsensusTransactionBodyHash(payloadBytes)
 		if err != nil {
-			return 0, fmt.Errorf("failed to validate related Dijkstra transaction %s: %w", counterpart.RelPath, err)
+			return 0, fmt.Errorf(
+				"failed to validate related Dijkstra transaction %s: %w",
+				counterpart.RelPath,
+				err,
+			)
 		}
 		if !bytes.Equal(bodyHash, txIDBytes) {
-			return 0, fmt.Errorf("transaction-id/transaction mismatch between %s and %s", fixture.RelPath, counterpart.RelPath)
+			return 0, fmt.Errorf(
+				"transaction-id/transaction mismatch between %s and %s",
+				fixture.RelPath,
+				counterpart.RelPath,
+			)
 		}
 	}
 
@@ -684,17 +952,30 @@ func executeDijkstraConsensusTransactionIDFixture(
 func dijkstraConsensusTransactionBodyHash(payload []byte) ([]byte, error) {
 	var items []cbor.RawMessage
 	if _, err := cbor.Decode(payload, &items); err != nil {
-		return nil, fmt.Errorf("failed to decode Dijkstra transaction payload: %w", err)
+		return nil, fmt.Errorf(
+			"failed to decode Dijkstra transaction payload: %w",
+			err,
+		)
 	}
 	if len(items) != 3 {
-		return nil, fmt.Errorf("unexpected Dijkstra transaction payload width: got %d want 3", len(items))
+		return nil, fmt.Errorf(
+			"unexpected Dijkstra transaction payload width: got %d want 3",
+			len(items),
+		)
 	}
 	for idx, item := range items {
 		if len(item) == 0 {
-			return nil, fmt.Errorf("empty Dijkstra transaction payload item %d", idx)
+			return nil, fmt.Errorf(
+				"empty Dijkstra transaction payload item %d",
+				idx,
+			)
 		}
 		if err := validateArbitraryCbor(item, fmt.Sprintf("Dijkstra transaction payload item %d", idx)); err != nil {
-			return nil, fmt.Errorf("failed to decode Dijkstra transaction payload item %d: %w", idx, err)
+			return nil, fmt.Errorf(
+				"failed to decode Dijkstra transaction payload item %d: %w",
+				idx,
+				err,
+			)
 		}
 	}
 	hash := gcommon.Blake2b256Hash(items[0])
@@ -710,12 +991,18 @@ type translationProtocolVersion struct {
 func validateTranslationCase(items []cbor.RawMessage) error {
 	var version translationProtocolVersion
 	if _, err := cbor.Decode(items[0], &version); err != nil {
-		return fmt.Errorf("failed to decode translation protocol version: %w", err)
+		return fmt.Errorf(
+			"failed to decode translation protocol version: %w",
+			err,
+		)
 	}
 
 	var language uint
 	if _, err := cbor.Decode(items[1], &language); err != nil {
-		return fmt.Errorf("failed to decode translation language selector: %w", err)
+		return fmt.Errorf(
+			"failed to decode translation language selector: %w",
+			err,
+		)
 	}
 
 	if err := validateArbitraryCbor(items[2], "translation context"); err != nil {
@@ -733,10 +1020,16 @@ func validateTranslationCase(items []cbor.RawMessage) error {
 func validateTranslationTransaction(data []byte) error {
 	var txItems []cbor.RawMessage
 	if _, err := cbor.Decode(data, &txItems); err != nil {
-		return fmt.Errorf("failed to decode translation transaction container: %w", err)
+		return fmt.Errorf(
+			"failed to decode translation transaction container: %w",
+			err,
+		)
 	}
 	if len(txItems) != 4 {
-		return fmt.Errorf("unexpected translation transaction width: got %d want 4", len(txItems))
+		return fmt.Errorf(
+			"unexpected translation transaction width: got %d want 4",
+			len(txItems),
+		)
 	}
 
 	for idx, item := range txItems {
@@ -752,7 +1045,10 @@ func validateTranslationTransaction(data []byte) error {
 	}
 	var isValid bool
 	if _, err := cbor.Decode(txItems[2], &isValid); err != nil {
-		return fmt.Errorf("failed to decode translation transaction validity flag: %w", err)
+		return fmt.Errorf(
+			"failed to decode translation transaction validity flag: %w",
+			err,
+		)
 	}
 	if err := validateArbitraryCbor(txItems[3], "translation transaction auxiliary data"); err != nil {
 		return err
@@ -779,7 +1075,9 @@ func validateArbitraryCbor(data []byte, label string) error {
 	return nil
 }
 
-func validateDecodedProtocolParameters(params gcommon.ProtocolParameters) error {
+func validateDecodedProtocolParameters(
+	params gcommon.ProtocolParameters,
+) error {
 	switch pp := params.(type) {
 	case *shelley.ShelleyProtocolParameters:
 		if pp.A0 == nil || pp.Rho == nil || pp.Tau == nil {
@@ -861,7 +1159,11 @@ func sameDirectoryFixture(
 	return related, ok
 }
 
-func stringsReplacePrefix(name string, oldPrefix string, newPrefix string) string {
+func stringsReplacePrefix(
+	name string,
+	oldPrefix string,
+	newPrefix string,
+) string {
 	if len(name) >= len(oldPrefix) && name[:len(oldPrefix)] == oldPrefix {
 		return newPrefix + name[len(oldPrefix):]
 	}

@@ -84,6 +84,12 @@ func (f Filter) Matches(fixture Fixture) bool {
 		if !strings.HasPrefix(fixture.RelPath, prefix) {
 			return false
 		}
+		// Enforce directory boundary so "foo/bar" does not match "foo/bar-baz/…"
+		if len(fixture.RelPath) > len(prefix) &&
+			!strings.HasSuffix(prefix, "/") &&
+			fixture.RelPath[len(prefix)] != '/' {
+			return false
+		}
 	}
 	return true
 }
@@ -94,17 +100,27 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 
 	switch {
 	case strings.HasPrefix(baseName, "Block_"):
-		return KindBlock, FormatCBOR, normalizeConsensusEra(strings.TrimPrefix(baseName, "Block_"))
+		return KindBlock, FormatCBOR, normalizeConsensusEra(
+			strings.TrimPrefix(baseName, "Block_"),
+		)
 	case strings.HasPrefix(baseName, "Header_"):
-		return KindHeader, FormatCBOR, normalizeConsensusEra(strings.TrimPrefix(baseName, "Header_"))
+		return KindHeader, FormatCBOR, normalizeConsensusEra(
+			strings.TrimPrefix(baseName, "Header_"),
+		)
 	case strings.HasPrefix(baseName, "GenTxId_"):
-		return KindTransactionID, FormatCBOR, normalizeConsensusEra(strings.TrimPrefix(baseName, "GenTxId_"))
+		return KindTransactionID, FormatCBOR, normalizeConsensusEra(
+			strings.TrimPrefix(baseName, "GenTxId_"),
+		)
 	case strings.HasPrefix(baseName, "GenTx_"):
-		return KindTransaction, FormatCBOR, normalizeConsensusEra(strings.TrimPrefix(baseName, "GenTx_"))
+		return KindTransaction, FormatCBOR, normalizeConsensusEra(
+			strings.TrimPrefix(baseName, "GenTx_"),
+		)
 	case baseName == "pparams.json":
 		return KindProtocolParameters, FormatJSON, eraFromPath(normalizedPath)
 	case baseName == "pparams-update.json":
-		return KindProtocolParametersUpdate, FormatJSON, eraFromPath(normalizedPath)
+		return KindProtocolParametersUpdate, FormatJSON, eraFromPath(
+			normalizedPath,
+		)
 	case baseName == "translations.cbor":
 		return KindTranslation, FormatCBOR, eraFromPath(normalizedPath)
 	case strings.HasPrefix(baseName, "hex-block-"):
@@ -112,7 +128,7 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 	case baseName == "block.cbor":
 		return KindBlock, FormatCBOR, eraFromPath(normalizedPath)
 	case baseName == "tx.cbor":
-		return KindTransaction, formatFromFilename(baseName), eraFromPath(normalizedPath)
+		return KindTransaction, FormatCBOR, eraFromPath(normalizedPath)
 	case baseName == "tx-canonical.json":
 		return KindTransaction, formatFromFilename(baseName), "conway"
 	case baseName == "LegacyProtocolParameters.json":
@@ -122,9 +138,17 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 	case isGenesisName(baseName):
 		return KindGenesis, FormatJSON, eraFromPath(normalizedPath)
 	case strings.Contains(normalizedPath, "protocol-parameters/"):
-		return KindProtocolParameters, formatFromFilename(baseName), eraFromPath(normalizedPath)
+		return KindProtocolParameters, formatFromFilename(
+				baseName,
+			), eraFromPath(
+				normalizedPath,
+			)
 	default:
-		return KindUnknown, formatFromFilename(baseName), eraFromPath(normalizedPath)
+		return KindUnknown, formatFromFilename(
+				baseName,
+			), eraFromPath(
+				normalizedPath,
+			)
 	}
 }
 

@@ -40,24 +40,28 @@ func ExtractEmbeddedFixtures(destDir string) (string, error) {
 func extractFS(fsys embed.FS, root string, destDir string) (string, error) {
 	fixturesRoot := filepath.Join(destDir, root)
 
-	err := fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	err := fs.WalkDir(
+		fsys,
+		root,
+		func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
 
-		destPath := filepath.Join(destDir, path)
+			destPath := filepath.Join(destDir, path)
 
-		if d.IsDir() {
-			return os.MkdirAll(destPath, 0o755)
-		}
+			if d.IsDir() {
+				return os.MkdirAll(destPath, 0o755)
+			}
 
-		data, err := fsys.ReadFile(path)
-		if err != nil {
-			return err
-		}
+			data, err := fsys.ReadFile(path)
+			if err != nil {
+				return err
+			}
 
-		return os.WriteFile(destPath, data, 0o600)
-	})
+			return os.WriteFile(destPath, data, 0o600)
+		},
+	)
 	if err != nil {
 		return "", err
 	}

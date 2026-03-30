@@ -16,8 +16,11 @@ package fixtures_test
 
 import (
 	"bytes"
+	"io/fs"
 	"maps"
+	"path/filepath"
 	"slices"
+	"sort"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -27,14 +30,27 @@ import (
 
 func TestHarnessIntegration(t *testing.T) {
 	harness := fixtures.NewHarness(fixtures.HarnessConfig{})
+	// fixtures/upstream/manifest.txt is the source of truth for the curated corpus.
+	expectedFixtures := expectedFixturesFromManifest(t, harness)
+	expectedFixtureCount := len(expectedFixtures)
+	expectedCounts := repoCounts(expectedFixtures)
+	expectedConsensusBlockCount := countMatchingFixtures(expectedFixtures, fixtures.Filter{
+		Repo:   fixtures.RepoOuroborosConsensus,
+		Kind:   fixtures.KindBlock,
+		Format: fixtures.FormatCBOR,
+	})
 
 	t.Run("CollectFixtures", func(t *testing.T) {
 		collected, err := harness.Collect()
 		if err != nil {
 			t.Fatalf("Collect failed: %v", err)
 		}
-		if len(collected) != 61 {
-			t.Fatalf("expected 61 fixtures, got %d", len(collected))
+		if len(collected) != expectedFixtureCount {
+			t.Fatalf(
+				"expected %d fixtures from manifest, got %d",
+				expectedFixtureCount,
+				len(collected),
+			)
 		}
 
 		repoCounts := map[fixtures.Repo]int{}
@@ -47,52 +63,58 @@ func TestHarnessIntegration(t *testing.T) {
 				t.Fatalf("fixture %s has empty source path", fixture.Path)
 			}
 		}
-
-		expectedCounts := map[fixtures.Repo]int{
-			fixtures.RepoCardanoAPI:         7,
-			fixtures.RepoCardanoLedger:      18,
-			fixtures.RepoCardanoNode:        2,
-			fixtures.RepoOuroborosConsensus: 34,
-		}
 		if !maps.Equal(repoCounts, expectedCounts) {
-			t.Fatalf("unexpected repo counts: got %v want %v", repoCounts, expectedCounts)
+			t.Fatalf(
+				"unexpected repo counts: got %v want %v",
+				repoCounts,
+				expectedCounts,
+			)
 		}
 	})
 
-	t.Run("ManifestMatchesCollectedPaths", func(t *testing.T) {
-		manifest, err := fixtures.LoadManifest(harness.FixturesRoot())
+	t.Run("ManifestMatchesOnDiskPaths", func(t *testing.T) {
+		root := harness.FixturesRoot()
+		manifest, err := fixtures.LoadManifest(root)
 		if err != nil {
 			t.Fatalf("LoadManifest failed: %v", err)
 		}
 
-		collected, err := harness.Collect()
+		onDisk, err := walkFixtureFiles(root)
 		if err != nil {
-			t.Fatalf("Collect failed: %v", err)
+			t.Fatalf("walkFixtureFiles failed: %v", err)
 		}
 
-		collectedPaths := make([]string, 0, len(collected))
-		for _, fixture := range collected {
-			collectedPaths = append(collectedPaths, fixture.RelPath)
-		}
-
-		if !slices.Equal(manifest, collectedPaths) {
-			t.Fatalf("manifest mismatch")
+		if !slices.Equal(manifest, onDisk) {
+			diffIndex, expectedPath, actualPath := firstSliceDifference(
+				manifest,
+				onDisk,
+			)
+			t.Fatalf(
+				"manifest mismatch at index %d: expected %q, got %q; expected=%v actual=%v",
+				diffIndex,
+				expectedPath,
+				actualPath,
+				manifest,
+				onDisk,
+			)
 		}
 	})
 
 	t.Run("RunMatching", func(t *testing.T) {
 		var blockCount int
 		harness.RunMatching(t, fixtures.Filter{
-			Repo: fixtures.RepoOuroborosConsensus,
-			Kind: fixtures.KindBlock,
+			Repo:   fixtures.RepoOuroborosConsensus,
+			Kind:   fixtures.KindBlock,
+			Format: fixtures.FormatCBOR,
 		}, func(t *testing.T, fixture fixtures.Fixture) {
 			blockCount++
-			if fixture.Format != fixtures.FormatCBOR {
-				t.Fatalf("expected cbor block fixture, got %s", fixture.Format)
-			}
 		})
-		if blockCount != 9 {
-			t.Fatalf("expected 9 consensus block fixtures, got %d", blockCount)
+		if blockCount != expectedConsensusBlockCount {
+			t.Fatalf(
+				"expected %d consensus block fixtures from manifest, got %d",
+				expectedConsensusBlockCount,
+				blockCount,
+			)
 		}
 	})
 
@@ -138,14 +160,19 @@ func TestHarnessIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Collect on extracted fixtures failed: %v", err)
 		}
-		if len(collected) != 61 {
-			t.Fatalf("expected 61 extracted fixtures, got %d", len(collected))
+		if len(collected) != expectedFixtureCount {
+			t.Fatalf(
+				"expected %d extracted fixtures, got %d",
+				expectedFixtureCount,
+				len(collected),
+			)
 		}
 	})
 }
 
 func TestFixtureExecutionHarness(t *testing.T) {
 	harness := fixtures.NewHarness(fixtures.HarnessConfig{})
+	expectedFixtureCount := len(expectedFixturesFromManifest(t, harness))
 
 	t.Run("RunAllExecutions", func(t *testing.T) {
 		harness.RunAllExecutions(t)
@@ -156,22 +183,37 @@ func TestFixtureExecutionHarness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RunAllExecutionsWithResults failed: %v", err)
 		}
-		if len(results) != 61 {
-			t.Fatalf("expected 61 execution results, got %d", len(results))
+		if len(results) != expectedFixtureCount {
+			t.Fatalf(
+				"expected %d execution results, got %d",
+				expectedFixtureCount,
+				len(results),
+			)
 		}
 
 		var totalCases int
 		for _, result := range results {
 			totalCases += result.CaseCount
 			if !result.Success {
-				t.Fatalf("%s execution failed: %v", result.Fixture.RelPath, result.Error)
+				t.Fatalf(
+					"%s execution failed: %v",
+					result.Fixture.RelPath,
+					result.Error,
+				)
 			}
 			if result.CaseCount == 0 {
-				t.Fatalf("%s reported zero execution cases", result.Fixture.RelPath)
+				t.Fatalf(
+					"%s reported zero execution cases",
+					result.Fixture.RelPath,
+				)
 			}
 		}
 		if totalCases <= len(results) {
-			t.Fatalf("expected multi-case execution coverage, got %d total cases for %d fixtures", totalCases, len(results))
+			t.Fatalf(
+				"expected multi-case execution coverage, got %d total cases for %d fixtures",
+				totalCases,
+				len(results),
+			)
 		}
 	})
 
@@ -198,7 +240,11 @@ func TestFixtureExecutionHarness(t *testing.T) {
 			t.Fatalf("DecodeLedgerHeader failed: %v", err)
 		}
 		if block.Hash() != header.Hash() {
-			t.Fatalf("block/header hash mismatch: %s != %s", block.Hash(), header.Hash())
+			t.Fatalf(
+				"block/header hash mismatch: %s != %s",
+				block.Hash(),
+				header.Hash(),
+			)
 		}
 
 		txFixture, err := harness.Fixture(
@@ -234,10 +280,16 @@ func TestFixtureExecutionHarness(t *testing.T) {
 		}
 		canonicalTx, err := canonicalTxFixture.DecodeLedgerTransaction()
 		if err != nil {
-			t.Fatalf("DecodeLedgerTransaction on cardano-api canonical tx failed: %v", err)
+			t.Fatalf(
+				"DecodeLedgerTransaction on cardano-api canonical tx failed: %v",
+				err,
+			)
 		}
 		if canonicalTx.Type() != int(ledger.TxTypeConway) {
-			t.Fatalf("expected Conway transaction type, got %d", canonicalTx.Type())
+			t.Fatalf(
+				"expected Conway transaction type, got %d",
+				canonicalTx.Type(),
+			)
 		}
 
 		baseParamsFixture, err := harness.Fixture(
@@ -267,7 +319,10 @@ func TestFixtureExecutionHarness(t *testing.T) {
 		}
 		conwayUpdate, ok := update.Conway()
 		if !ok {
-			t.Fatalf("expected Conway protocol-parameter update, got %T", update.Value())
+			t.Fatalf(
+				"expected Conway protocol-parameter update, got %T",
+				update.Value(),
+			)
 		}
 		if conwayUpdate.GovActionDeposit == nil {
 			t.Fatal("expected Conway update to include governance deposit")
@@ -284,7 +339,104 @@ func TestFixtureExecutionHarness(t *testing.T) {
 			)
 		}
 		if conwayParams.GovActionDeposit == beforeGovActionDeposit {
-			t.Fatal("expected protocol parameters to change after applying update")
+			t.Fatal(
+				"expected protocol parameters to change after applying update",
+			)
 		}
 	})
+}
+
+func expectedFixturesFromManifest(
+	t *testing.T,
+	harness *fixtures.Harness,
+) []fixtures.Fixture {
+	t.Helper()
+
+	root := harness.FixturesRoot()
+	manifest, err := fixtures.LoadManifest(root)
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+
+	expected := make([]fixtures.Fixture, 0, len(manifest))
+	for _, relPath := range manifest {
+		fixture, err := fixtures.NewFixture(
+			root,
+			filepath.Join(root, filepath.FromSlash(relPath)),
+		)
+		if err != nil {
+			t.Fatalf("NewFixture failed for manifest entry %q: %v", relPath, err)
+		}
+		expected = append(expected, fixture)
+	}
+	return expected
+}
+
+func repoCounts(collected []fixtures.Fixture) map[fixtures.Repo]int {
+	counts := make(map[fixtures.Repo]int, len(collected))
+	for _, fixture := range collected {
+		counts[fixture.Repo]++
+	}
+	return counts
+}
+
+func countMatchingFixtures(
+	collected []fixtures.Fixture,
+	filter fixtures.Filter,
+) int {
+	var count int
+	for _, fixture := range collected {
+		if filter.Matches(fixture) {
+			count++
+		}
+	}
+	return count
+}
+
+func walkFixtureFiles(root string) ([]string, error) {
+	var paths []string
+	err := filepath.WalkDir(
+		root,
+		func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if filepath.Base(path) == "manifest.txt" {
+				return nil
+			}
+			relPath, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			paths = append(paths, filepath.ToSlash(relPath))
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func firstSliceDifference(expected []string, actual []string) (int, string, string) {
+	maxIndex := len(expected)
+	if len(actual) < maxIndex {
+		maxIndex = len(actual)
+	}
+	for idx := 0; idx < maxIndex; idx++ {
+		if expected[idx] != actual[idx] {
+			return idx, expected[idx], actual[idx]
+		}
+	}
+	if len(expected) > maxIndex {
+		return maxIndex, expected[maxIndex], "<missing>"
+	}
+	if len(actual) > maxIndex {
+		return maxIndex, "<missing>", actual[maxIndex]
+	}
+	return -1, "", ""
 }

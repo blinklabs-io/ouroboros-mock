@@ -375,7 +375,7 @@ func TestPParamsLoaderLoadFileRejectsEscapedPath(t *testing.T) {
 
 	linkPath := filepath.Join(pparamsDir, "escape")
 	if err := os.Symlink(outsidePath, linkPath); err != nil {
-		t.Fatalf("Symlink failed: %v", err)
+		t.Skipf("skipping: symlinks not supported: %v", err)
 	}
 
 	loader := NewPParamsLoader(pparamsDir)
