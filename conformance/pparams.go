@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -188,10 +189,36 @@ func (l *PParamsLoader) findFile(hashHex string) (string, error) {
 func (l *PParamsLoader) loadFile(
 	filePath string,
 ) (common.ProtocolParameters, error) {
-	data, err := os.ReadFile(filePath)
+	relativePath, resolvedPath, err := l.resolveContainedPath(filePath)
 	if err != nil {
 		return nil, &PParamsError{
-			Message: "failed to read file: " + filePath,
+			Message: "invalid protocol parameters file path: " + filePath,
+			Err:     err,
+		}
+	}
+
+	root, err := os.OpenRoot(l.pparamsDir)
+	if err != nil {
+		return nil, &PParamsError{
+			Message: "failed to open pparams directory: " + l.pparamsDir,
+			Err:     err,
+		}
+	}
+	defer root.Close()
+
+	file, err := root.Open(relativePath)
+	if err != nil {
+		return nil, &PParamsError{
+			Message: "failed to open file: " + resolvedPath,
+			Err:     err,
+		}
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, &PParamsError{
+			Message: "failed to read file: " + resolvedPath,
 			Err:     err,
 		}
 	}
@@ -200,12 +227,58 @@ func (l *PParamsLoader) loadFile(
 	pp := &conway.ConwayProtocolParameters{}
 	if _, err := cbor.Decode(data, pp); err != nil {
 		return nil, &PParamsError{
-			Message: "failed to decode protocol parameters: " + filePath,
+			Message: "failed to decode protocol parameters: " + resolvedPath,
 			Err:     err,
 		}
 	}
 
 	return pp, nil
+}
+
+func (l *PParamsLoader) resolveContainedPath(
+	filePath string,
+) (string, string, error) {
+	pparamsDirAbs, err := filepath.Abs(l.pparamsDir)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"failed to resolve pparams directory: %w",
+			err,
+		)
+	}
+	pparamsDirReal, err := filepath.EvalSymlinks(pparamsDirAbs)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"failed to evaluate pparams directory: %w",
+			err,
+		)
+	}
+
+	filePathAbs, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve file path: %w", err)
+	}
+	filePathReal, err := filepath.EvalSymlinks(filePathAbs)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to evaluate file path: %w", err)
+	}
+
+	relPath, err := filepath.Rel(pparamsDirReal, filePathReal)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"failed to compare file path to pparams directory: %w",
+			err,
+		)
+	}
+	if relPath == ".." ||
+		strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf(
+			"path %s escapes pparams directory %s",
+			filePathReal,
+			pparamsDirReal,
+		)
+	}
+
+	return relPath, filePathReal, nil
 }
 
 // clearCostModels returns a copy of the protocol parameters with cost models cleared.

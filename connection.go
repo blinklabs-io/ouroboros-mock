@@ -279,7 +279,9 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	if numBytesRead < buf.Len() {
 		// There is another message in the same muxer segment, so we reset the buffer with just
 		// the remaining data
-		c.inputBuffers[entry.ProtocolId] = bytes.NewBuffer(buf.Bytes()[numBytesRead:])
+		c.inputBuffers[entry.ProtocolId] = bytes.NewBuffer(
+			buf.Bytes()[numBytesRead:],
+		)
 	} else {
 		// Empty out our buffer since we successfully processed the message
 		buf.Reset()
