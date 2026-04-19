@@ -15,8 +15,11 @@
 package conformance
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
@@ -356,6 +359,38 @@ func TestExtractPParamsHashFromVector(t *testing.T) {
 	}
 
 	t.Logf("extracted pparams hash: %x", hash)
+}
+
+func TestPParamsLoaderLoadFileRejectsEscapedPath(t *testing.T) {
+	rootDir := t.TempDir()
+	pparamsDir := filepath.Join(rootDir, "pparams-by-hash")
+	if err := os.MkdirAll(pparamsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	outsidePath := filepath.Join(rootDir, "outside.cbor")
+	if err := os.WriteFile(outsidePath, []byte{0x80}, 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	linkPath := filepath.Join(pparamsDir, "escape")
+	if err := os.Symlink(outsidePath, linkPath); err != nil {
+		t.Skipf("skipping: symlinks not supported: %v", err)
+	}
+
+	loader := NewPParamsLoader(pparamsDir)
+	_, err := loader.loadFile(linkPath)
+	if err == nil {
+		t.Fatal("expected loadFile to reject escaped path")
+	}
+
+	var ppErr *PParamsError
+	if !errors.As(err, &ppErr) {
+		t.Fatalf("expected PParamsError, got %T", err)
+	}
+	if !strings.Contains(err.Error(), "escapes pparams directory") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 // containsNoCostModel checks if a title indicates a "No cost model" test.
