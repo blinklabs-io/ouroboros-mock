@@ -70,6 +70,7 @@ func TestError(t *testing.T) {
 				ProtocolId:    999,
 				ExpectedError: "input muxer segment protocol ID did not match expected value: expected 999, got 0",
 			},
+			ouroboros_mock.ConversationEntryClose{},
 		},
 	)
 	// Async mock connection error handler
