@@ -27,11 +27,6 @@
 // can only succeed if the rollback restored the UTxOs that tx2 consumed,
 // so the synthetic vector verifies state reversion through the full
 // file-decode + harness execution path.
-//
-// The generator rejects bases whose candidate transactions perform
-// reward-account withdrawals, because the harness's future-withdrawal
-// precomputation does not currently account for rollbacks (tracked
-// separately as phase 2B in the conformance-rollback workstream).
 package main
 
 import (
@@ -42,8 +37,6 @@ import (
 	"path/filepath"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
-	"github.com/blinklabs-io/gouroboros/ledger/common"
-	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/conformance"
 )
 
@@ -96,13 +89,6 @@ func generate(basePath, outPath, titleOverride string) error {
 	tx1, tx2, err := selectSplicePair(vec.Events)
 	if err != nil {
 		return err
-	}
-
-	if err := assertNoWithdrawals(tx1); err != nil {
-		return fmt.Errorf("base tx1 (slot %d): %w", tx1.Slot, err)
-	}
-	if err := assertNoWithdrawals(tx2); err != nil {
-		return fmt.Errorf("base tx2 (slot %d): %w", tx2.Slot, err)
 	}
 
 	// Pick a rollback target strictly between the two tx slots so tx1 is
@@ -194,30 +180,6 @@ func selectSplicePair(
 	return conformance.VectorEvent{}, conformance.VectorEvent{}, errors.New(
 		"base vector has no pair of successful txs separated by >=2 slots",
 	)
-}
-
-func assertNoWithdrawals(ev conformance.VectorEvent) error {
-	tx := &conway.ConwayTransaction{}
-	if _, err := cbor.Decode(ev.TxBytes, tx); err != nil {
-		return fmt.Errorf("decode tx: %w", err)
-	}
-	if hasWithdrawals(tx) {
-		return errors.New(
-			"transaction contains reward withdrawals; " +
-				"the harness future-withdrawal precomputation does " +
-				"not yet account for rollbacks (phase 2B)",
-		)
-	}
-	return nil
-}
-
-func hasWithdrawals(tx common.Transaction) bool {
-	for _, amount := range tx.Withdrawals() {
-		if amount != nil && amount.Uint64() > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func txEvent(txBytes []byte, success bool, slot uint64) []any {
