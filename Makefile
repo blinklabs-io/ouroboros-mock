@@ -21,7 +21,8 @@ GO_LDFLAGS=-ldflags "-s -w"
 	golines \
 	test \
 	download-amaru-testdata \
-	download-upstream-fixtures
+	download-upstream-fixtures \
+	gen-synthetic-vectors
 
 # Alias for building program binary
 build: $(BINARIES)
@@ -69,6 +70,22 @@ download-amaru-testdata:
 	@find $(ROOT_DIR)/conformance/testdata/eras -depth -execdir bash -c 'name="$${1#./}"; safe=$$(printf "%s" "$$name" | tr -c "[:alnum:]._-" "_" | sed "s/__*/_/g; s/_$$//"); [ "$$name" != "$$safe" ] && mv -- "$$name" "$$safe" || true' _ {} \;
 	@rm -rf /tmp/amaru-testdata
 	@echo "Download complete. Test data is now in conformance/testdata/eras/"
+
+# Regenerate the locally-authored synthetic conformance vectors. These
+# splice rollback events into existing Amaru-derived bases to exercise
+# harness code paths the upstream corpus does not cover. Re-run this
+# target after `make download-amaru-testdata` so the synthetic vectors
+# track the refreshed bases. The output lives under
+# conformance/testdata/synthetic/ (outside conformance/testdata/eras/)
+# so it is preserved across Amaru-corpus refreshes.
+SYNTHETIC_ROLLBACK_BASE=conformance/testdata/eras/conway/impl/dump/Conway/Imp/ConwayImpSpec_-_Version_10/UTXOS/Conway_features_fail_in_Plutusdescribe_v1_and_v2/Unsupported_Fields/CurrentTreasuryValue/V1
+SYNTHETIC_ROLLBACK_OUT=conformance/testdata/synthetic/rollback/CurrentTreasuryValue_V1
+
+gen-synthetic-vectors: gen-rollback-vector
+	./gen-rollback-vector \
+		-base $(SYNTHETIC_ROLLBACK_BASE) \
+		-out $(SYNTHETIC_ROLLBACK_OUT) \
+		-title "synthetic/rollback/CurrentTreasuryValue-V1"
 
 # Download and update curated upstream fixtures used for block/message tests.
 # Sources:

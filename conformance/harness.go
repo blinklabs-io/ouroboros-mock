@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -125,10 +126,31 @@ func NewHarness(stateManager StateManager, config HarnessConfig) *Harness {
 	}
 }
 
+// collectAllVectors walks both the Amaru-derived eras/ corpus and the
+// repo-local synthetic/ corpus under testdataRoot. The synthetic root is
+// optional; if it is absent the call is silently skipped.
+func (h *Harness) collectAllVectors() ([]string, error) {
+	var all []string
+	for _, sub := range []string{"eras", "synthetic"} {
+		root := filepath.Join(h.testdataRoot, sub)
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		paths, err := CollectVectorFiles(root)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, paths...)
+	}
+	return all, nil
+}
+
 // RunAllVectors runs all conformance test vectors.
 func (h *Harness) RunAllVectors(t *testing.T) {
-	root := filepath.Join(h.testdataRoot, "eras")
-	vectors, err := CollectVectorFiles(root)
+	vectors, err := h.collectAllVectors()
 	if err != nil {
 		t.Fatalf("failed to collect vectors: %v", err)
 	}
@@ -415,8 +437,7 @@ type VectorResult struct {
 
 // RunAllVectorsWithResults runs all vectors and returns detailed results.
 func (h *Harness) RunAllVectorsWithResults() ([]VectorResult, error) {
-	root := filepath.Join(h.testdataRoot, "eras")
-	vectors, err := CollectVectorFiles(root)
+	vectors, err := h.collectAllVectors()
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect vectors: %w", err)
 	}
