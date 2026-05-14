@@ -474,6 +474,13 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 		return result
 	}
 
+	// Cache the parsed initial state and pparams so rollback events can
+	// restore them without re-parsing. Reset the journal so a previous
+	// vector's events don't leak in.
+	h.initialState = initialState
+	h.initialProtocolParams = pp
+	h.appliedEvents = h.appliedEvents[:0]
+
 	// Parse epoch length from config (index 2 in the config array)
 	h.epochLength = parseEpochLength(vector.Config)
 	if h.epochLength == 0 {

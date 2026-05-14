@@ -572,3 +572,36 @@ func TestHarnessRollbackRequiresInitialState(t *testing.T) {
 		t.Error("expected error rolling back without initial state")
 	}
 }
+
+// TestHarnessRollbackCachePopulatedByBothPaths guards against the
+// runVector / runVectorWithResult parity bug: both vector-execution
+// entry points must populate the rollback cache (initialState and the
+// applied-events journal) so that a rollback event encountered later in
+// the same vector can replay against a known starting point.
+func TestHarnessRollbackCachePopulatedByBothPaths(t *testing.T) {
+	root := filepath.Join("testdata", "eras")
+	vectors, err := CollectVectorFiles(root)
+	if err != nil {
+		t.Fatalf("CollectVectorFiles failed: %v", err)
+	}
+	if len(vectors) == 0 {
+		t.Skip("no vectors available")
+	}
+	vectorPath := vectors[0]
+
+	t.Run("runVectorFile", func(t *testing.T) {
+		h := NewHarness(NewMockStateManager(), HarnessConfig{})
+		h.runVectorFile(t, vectorPath)
+		if h.initialState == nil {
+			t.Error("runVectorFile did not populate rollback cache")
+		}
+	})
+
+	t.Run("runVectorWithResult", func(t *testing.T) {
+		h := NewHarness(NewMockStateManager(), HarnessConfig{})
+		_ = h.runVectorWithResult(vectorPath)
+		if h.initialState == nil {
+			t.Error("runVectorWithResult did not populate rollback cache")
+		}
+	})
+}
