@@ -154,6 +154,32 @@ func TestEventTypes(t *testing.T) {
 	if EventTypePassEpoch != 2 {
 		t.Errorf("EventTypePassEpoch should be 2, got %d", EventTypePassEpoch)
 	}
+	if EventTypeRollback != 3 {
+		t.Errorf("EventTypeRollback should be 3, got %d", EventTypeRollback)
+	}
+}
+
+func TestDecodeRollbackEvent(t *testing.T) {
+	ev, err := decodeRollbackEvent([]any{uint64(3), uint64(42)}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ev.Type != EventTypeRollback {
+		t.Errorf("expected EventTypeRollback, got %d", ev.Type)
+	}
+	if ev.RollbackSlot != 42 {
+		t.Errorf("expected RollbackSlot=42, got %d", ev.RollbackSlot)
+	}
+
+	if _, err := decodeRollbackEvent([]any{uint64(3)}, 0); err == nil {
+		t.Error("expected error for missing target slot field")
+	}
+	if _, err := decodeRollbackEvent(
+		[]any{uint64(3), "not-a-uint"},
+		0,
+	); err == nil {
+		t.Error("expected error for non-uint target slot")
+	}
 }
 
 func TestVectorError(t *testing.T) {

@@ -493,3 +493,82 @@ func TestMockStateManager(t *testing.T) {
 
 	// This test documents current state; we expect failures until full implementation
 }
+
+// TestHarnessRollback exercises the rollback dispatch and journal-filtering
+// logic without going through a CBOR-encoded test vector. We seed the
+// harness's applied-event journal with a sequence of PassTick events
+// (they touch only harness-level slot tracking) then invoke rollback
+// directly and assert the journal is filtered, the state manager was
+// reset, and the slot was rewound.
+func TestHarnessRollback(t *testing.T) {
+	sm := NewMockStateManager()
+	h := NewHarness(sm, HarnessConfig{})
+
+	// Minimal cached initial state — LoadInitialState tolerates nil maps.
+	h.initialState = &ParsedInitialState{CurrentEpoch: 7}
+	h.initialProtocolParams = nil
+	h.initialEpoch = 7
+	h.startSlot = 100
+	h.currentEpoch = 7
+	h.currentSlot = 100
+
+	for _, s := range []uint64{105, 110, 115, 120} {
+		h.appliedEvents = append(h.appliedEvents, appliedEvent{
+			event: VectorEvent{Type: EventTypePassTick, TickSlot: s},
+			slot:  s,
+		})
+		h.currentSlot = s
+	}
+
+	if err := h.rollback(112); err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	if h.currentSlot != 112 {
+		t.Errorf("expected currentSlot=112, got %d", h.currentSlot)
+	}
+	if h.currentEpoch != 7 {
+		t.Errorf("expected currentEpoch=7, got %d", h.currentEpoch)
+	}
+
+	wantSlots := []uint64{105, 110}
+	if len(h.appliedEvents) != len(wantSlots) {
+		t.Fatalf(
+			"journal length: want %d, got %d",
+			len(wantSlots), len(h.appliedEvents),
+		)
+	}
+	for i, ae := range h.appliedEvents {
+		if ae.slot != wantSlots[i] {
+			t.Errorf(
+				"journal[%d].slot: want %d, got %d",
+				i, wantSlots[i], ae.slot,
+			)
+		}
+	}
+
+	// A second rollback past the new tail must yield an empty journal.
+	if err := h.rollback(0); err != nil {
+		t.Fatalf("second rollback failed: %v", err)
+	}
+	if len(h.appliedEvents) != 0 {
+		t.Errorf(
+			"expected empty journal after rollback past start, got %d entries",
+			len(h.appliedEvents),
+		)
+	}
+	if h.currentSlot != 0 {
+		t.Errorf("expected currentSlot=0 after rollback past start, got %d",
+			h.currentSlot)
+	}
+}
+
+// TestHarnessRollbackRequiresInitialState ensures rollback fails cleanly if
+// invoked before a vector has been loaded.
+func TestHarnessRollbackRequiresInitialState(t *testing.T) {
+	sm := NewMockStateManager()
+	h := NewHarness(sm, HarnessConfig{})
+	if err := h.rollback(0); err == nil {
+		t.Error("expected error rolling back without initial state")
+	}
+}
