@@ -68,6 +68,35 @@ type Harness struct {
 	// initialEpoch is the epoch at startSlot from the vector's initial state.
 	// Used to calculate the actual epoch from slot numbers.
 	initialEpoch uint64
+
+	// initialState holds the parsed initial state for the active vector so
+	// rollback events can restore it before replaying retained events.
+	initialState *ParsedInitialState
+
+	// initialProtocolParams holds the protocol parameters that accompanied
+	// the active vector's initial state. Reloaded on rollback.
+	initialProtocolParams common.ProtocolParameters
+
+	// appliedEvents records events that have been applied to the state
+	// manager for the active vector, together with the slot at which each
+	// was applied. On rollback the harness keeps entries whose appliedSlot
+	// is <= the rollback target and replays them against a freshly
+	// reset state manager.
+	appliedEvents []appliedEvent
+
+	// replaying is true while the harness is re-applying journaled events
+	// after a rollback. Event handlers skip journaling and skip stateful
+	// side-effects that are unsafe to repeat (e.g., reward-balance updates
+	// that depend on the original future-withdrawal precomputation).
+	replaying bool
+}
+
+// appliedEvent is a journaled event together with the slot at which it
+// was applied. The slot is what rollback semantics filter on: entries
+// whose slot is > the rollback target are discarded.
+type appliedEvent struct {
+	event VectorEvent
+	slot  uint64
 }
 
 // HarnessConfig configures the test harness.
@@ -157,6 +186,13 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 		t.Fatalf("failed to load initial state: %v", err)
 	}
 
+	// Cache the parsed initial state and pparams so rollback events can
+	// restore them without re-parsing. Reset the journal so a previous
+	// vector's events don't leak in.
+	h.initialState = initialState
+	h.initialProtocolParams = pp
+	h.appliedEvents = h.appliedEvents[:0]
+
 	// Parse epoch length from config (index 2 in the config array)
 	h.epochLength = parseEpochLength(vector.Config)
 	if h.epochLength == 0 {
@@ -211,6 +247,8 @@ func (h *Harness) processEvent(
 		return h.processPassTickEvent(event)
 	case EventTypePassEpoch:
 		return h.processPassEpochEvent(event)
+	case EventTypeRollback:
+		return h.processRollbackEvent(t, event)
 	default:
 		return fmt.Errorf("unknown event type: %d", event.Type)
 	}
@@ -268,12 +306,14 @@ func (h *Harness) processTransactionEvent(
 		}
 	}
 
+	h.journal(event, event.Slot)
 	return nil
 }
 
 // processPassTickEvent processes a pass tick event.
 func (h *Harness) processPassTickEvent(event VectorEvent) error {
 	h.currentSlot = event.TickSlot
+	h.journal(event, event.TickSlot)
 	return nil
 }
 
@@ -289,6 +329,10 @@ func (h *Harness) processPassEpochEvent(event VectorEvent) error {
 
 	// Update protocol parameters in case any ParameterChange proposals were enacted
 	h.protocolParams = h.stateManager.GetProtocolParameters()
+
+	// Epoch events have no native slot; journal them at the prevailing
+	// current slot so rollback decisions can compare consistently.
+	h.journal(event, h.currentSlot)
 
 	return nil
 }
@@ -430,6 +474,13 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 		return result
 	}
 
+	// Cache the parsed initial state and pparams so rollback events can
+	// restore them without re-parsing. Reset the journal so a previous
+	// vector's events don't leak in.
+	h.initialState = initialState
+	h.initialProtocolParams = pp
+	h.appliedEvents = h.appliedEvents[:0]
+
 	// Parse epoch length from config (index 2 in the config array)
 	h.epochLength = parseEpochLength(vector.Config)
 	if h.epochLength == 0 {
@@ -486,6 +537,8 @@ func (h *Harness) processEventWithoutT(eventIdx int, event VectorEvent) error {
 		return h.processPassTickEvent(event)
 	case EventTypePassEpoch:
 		return h.processPassEpochEvent(event)
+	case EventTypeRollback:
+		return h.processRollbackEventWithoutT(event)
 	default:
 		return fmt.Errorf("unknown event type: %d", event.Type)
 	}
@@ -526,6 +579,87 @@ func (h *Harness) processTransactionEventWithoutT(
 		}
 	}
 
+	h.journal(event, event.Slot)
+	return nil
+}
+
+// journal appends an event to the replay log keyed by the slot at which
+// it was applied. Suppressed during a replay so the log is not duplicated.
+func (h *Harness) journal(event VectorEvent, slot uint64) {
+	if h.replaying {
+		return
+	}
+	h.appliedEvents = append(h.appliedEvents, appliedEvent{
+		event: event,
+		slot:  slot,
+	})
+}
+
+// processRollbackEvent restores the state manager to the parsed initial
+// state and replays journaled events whose applied slot is <= the target
+// slot. The harness's currentSlot is set to the rollback target so any
+// subsequent transaction events advance from there.
+func (h *Harness) processRollbackEvent(
+	t *testing.T,
+	event VectorEvent,
+) error {
+	if err := h.rollback(event.RollbackSlot); err != nil {
+		if t != nil {
+			t.Logf("rollback to slot %d failed: %v", event.RollbackSlot, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// processRollbackEventWithoutT is the t-less variant used by the results
+// reporting harness.
+func (h *Harness) processRollbackEventWithoutT(event VectorEvent) error {
+	return h.rollback(event.RollbackSlot)
+}
+
+// rollback resets the state manager and replays retained events.
+func (h *Harness) rollback(targetSlot uint64) error {
+	if h.initialState == nil {
+		return errors.New(
+			"rollback requested before initial state was loaded",
+		)
+	}
+
+	retained := h.appliedEvents[:0:0]
+	for _, ae := range h.appliedEvents {
+		if ae.slot <= targetSlot {
+			retained = append(retained, ae)
+		}
+	}
+
+	if err := h.stateManager.Reset(); err != nil {
+		return fmt.Errorf("rollback: reset failed: %w", err)
+	}
+	if err := h.stateManager.LoadInitialState(
+		h.initialState,
+		h.initialProtocolParams,
+	); err != nil {
+		return fmt.Errorf("rollback: reload initial state failed: %w", err)
+	}
+
+	h.protocolParams = h.initialProtocolParams
+	h.currentEpoch = h.initialEpoch
+	h.currentSlot = h.startSlot
+
+	h.replaying = true
+	defer func() { h.replaying = false }()
+	for i, ae := range retained {
+		if err := h.processEventWithoutT(i, ae.event); err != nil {
+			return fmt.Errorf(
+				"rollback: replay of event %d (slot %d) failed: %w",
+				i, ae.slot, err,
+			)
+		}
+	}
+
+	h.appliedEvents = append(h.appliedEvents[:0], retained...)
+	h.currentSlot = targetSlot
 	return nil
 }
 

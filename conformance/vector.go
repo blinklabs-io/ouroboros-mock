@@ -42,6 +42,13 @@ const (
 	// EventTypePassEpoch represents an epoch advancement event.
 	// Format: [2, epoch_delta:uint64]
 	EventTypePassEpoch EventType = 2
+
+	// EventTypeRollback represents a chain rollback event. The harness undoes
+	// previously applied events whose effective slot is greater than the
+	// target slot, then continues processing the remaining events in the
+	// vector against the rolled-back state.
+	// Format: [3, target_slot:uint64]
+	EventTypeRollback EventType = 3
 )
 
 // VectorEvent represents an event in a test vector.
@@ -58,6 +65,9 @@ type VectorEvent struct {
 
 	// PassEpoch event fields (Type == EventTypePassEpoch)
 	EpochDelta uint64
+
+	// Rollback event fields (Type == EventTypeRollback)
+	RollbackSlot uint64
 }
 
 // TestVector represents a parsed conformance test vector.
@@ -241,6 +251,8 @@ func decodeEvent(
 		return decodePassTickEvent(payload, index)
 	case EventTypePassEpoch:
 		return decodePassEpochEvent(payload, index)
+	case EventTypeRollback:
+		return decodeRollbackEvent(payload, index)
 	default:
 		return VectorEvent{}, &EventError{
 			Index:   index,
@@ -333,6 +345,29 @@ func decodePassEpochEvent(payload []any, index int) (VectorEvent, error) {
 	return VectorEvent{
 		Type:       EventTypePassEpoch,
 		EpochDelta: epochDelta,
+	}, nil
+}
+
+// decodeRollbackEvent decodes a rollback event: [3, targetSlot]
+func decodeRollbackEvent(payload []any, index int) (VectorEvent, error) {
+	if len(payload) < 2 {
+		return VectorEvent{}, &EventError{
+			Index:   index,
+			Message: "Rollback event missing target slot field",
+		}
+	}
+
+	targetSlot, ok := payload[1].(uint64)
+	if !ok {
+		return VectorEvent{}, &EventError{
+			Index:   index,
+			Message: "unexpected Rollback target slot type",
+		}
+	}
+
+	return VectorEvent{
+		Type:         EventTypeRollback,
+		RollbackSlot: targetSlot,
 	}, nil
 }
 
