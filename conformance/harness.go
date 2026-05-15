@@ -131,15 +131,18 @@ func NewHarness(stateManager StateManager, config HarnessConfig) *Harness {
 }
 
 // collectAllVectors walks both the Amaru-derived eras/ corpus and the
-// repo-local synthetic/ corpus under testdataRoot. The synthetic root is
-// optional; if it is absent the call is silently skipped.
+// repo-local synthetic/ corpus under testdataRoot. The eras/ root is
+// required; a missing synthetic/ root is silently skipped.
 func (h *Harness) collectAllVectors() ([]string, error) {
 	var all []string
 	for _, sub := range []string{"eras", "synthetic"} {
 		root := filepath.Join(h.testdataRoot, sub)
 		if _, err := os.Stat(root); err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) && sub == "synthetic" {
 				continue
+			}
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("required vector root missing: %s", root)
 			}
 			return nil, err
 		}

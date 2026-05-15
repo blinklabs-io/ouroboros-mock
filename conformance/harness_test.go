@@ -614,19 +614,36 @@ func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
 	h.finalStateBalances = map[common.Blake2b224]uint64{cred: 1000}
 	// futureWithdrawals[i] is the cumulative withdrawal from event i to
 	// the end (inclusive of i). adjustRewardBalances looks up index i+1.
+	// Indices 2 and 3 hold distinct values so the assertion below
+	// differentiates between the journaled originalIdx (correct) and the
+	// replay-loop index (buggy) being used to look up the adjustment.
 	h.futureWithdrawals = []map[common.Blake2b224]uint64{
-		{cred: 500},
+		{cred: 900},
+		{cred: 900},
 		{cred: 500},
 		{cred: 0},
 		{cred: 0},
 	}
 
-	// Pre-seed the journal with a tx event at slot 105 (originalIdx=0).
+	// Pre-seed the journal with two retained events:
+	//   [0] PassTick at slot 101 (originalIdx=0) — adjustRewardBalances
+	//       skips non-transaction events, so it does not call SetRewardBalances.
+	//   [1] Transaction at slot 105 (originalIdx=2) — replay-loop index 1
+	//       differs from originalIdx 2, so the lookup index used can be
+	//       inferred from which futureWithdrawals slot the call reads.
 	// Empty TxBytes combined with Success=false makes
 	// processTransactionEventWithoutT return nil after the decode failure,
-	// so we exercise the pre-decode SetRewardBalances call without
+	// so the test exercises the pre-decode SetRewardBalances call without
 	// needing a valid Conway transaction.
 	h.appliedEvents = []appliedEvent{
+		{
+			event: VectorEvent{
+				Type:     EventTypePassTick,
+				TickSlot: 101,
+			},
+			slot:        101,
+			originalIdx: 0,
+		},
 		{
 			event: VectorEvent{
 				Type:    EventTypeTransaction,
@@ -635,7 +652,7 @@ func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
 				Slot:    105,
 			},
 			slot:        105,
-			originalIdx: 0,
+			originalIdx: 2,
 		},
 	}
 
@@ -650,7 +667,11 @@ func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
 		)
 	}
 	got := sm.setRewardBalancesCalls[0][cred]
-	const want uint64 = 1000 + 500 // finalStateBalance + futureWithdrawals[1]
+	// Correct path uses originalIdx=2 → futureWithdrawals[3]={cred:0}
+	// → adjusted balance = 1000 + 0 = 1000.
+	// A bug that uses the replay-loop index i=1 would read
+	// futureWithdrawals[2]={cred:500} → 1500, failing this assertion.
+	const want uint64 = 1000
 	if got != want {
 		t.Errorf("replay adjusted balance: got %d, want %d", got, want)
 	}

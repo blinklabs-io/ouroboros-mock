@@ -138,7 +138,7 @@ func generate(basePath, outPath, titleOverride string) error {
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	if err := os.WriteFile(outPath, outBytes, 0o644); err != nil {
+	if err := os.WriteFile(outPath, outBytes, 0o600); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
 
