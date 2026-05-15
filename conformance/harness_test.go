@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"go.uber.org/goleak"
 )
 
@@ -570,6 +571,109 @@ func TestHarnessRollbackRequiresInitialState(t *testing.T) {
 	h := NewHarness(sm, HarnessConfig{})
 	if err := h.rollback(0); err == nil {
 		t.Error("expected error rolling back without initial state")
+	}
+}
+
+// recordingStateManager wraps MockStateManager to capture SetRewardBalances
+// invocations so tests can assert on rollback-replay behavior.
+type recordingStateManager struct {
+	*MockStateManager
+	setRewardBalancesCalls []map[common.Blake2b224]uint64
+}
+
+func (r *recordingStateManager) SetRewardBalances(
+	b map[common.Blake2b224]uint64,
+) {
+	snapshot := make(map[common.Blake2b224]uint64, len(b))
+	for k, v := range b {
+		snapshot[k] = v
+	}
+	r.setRewardBalancesCalls = append(r.setRewardBalancesCalls, snapshot)
+	r.MockStateManager.SetRewardBalances(b)
+}
+
+// TestHarnessRollbackReappliesRewardBalances guards against the
+// retained-tx-replay bug where SetRewardBalances was not re-applied
+// during rollback replay. A retained transaction that performs a reward
+// withdrawal validates against the harness's "final state plus future
+// withdrawals" view of the balance, not the bare LoadInitialState
+// figure, so the replay path must re-apply the adjustment using the
+// journaled originalIdx.
+func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
+	sm := &recordingStateManager{MockStateManager: NewMockStateManager()}
+	h := NewHarness(sm, HarnessConfig{})
+
+	h.initialState = &ParsedInitialState{CurrentEpoch: 0}
+	h.initialProtocolParams = nil
+	h.startSlot = 100
+	h.currentSlot = 105
+	h.initialEpoch = 0
+	h.currentEpoch = 0
+
+	cred := common.NewBlake2b224(make([]byte, 28))
+	h.finalStateBalances = map[common.Blake2b224]uint64{cred: 1000}
+	// futureWithdrawals[i] is the cumulative withdrawal from event i to
+	// the end (inclusive of i). adjustRewardBalances looks up index i+1.
+	// Indices 2 and 3 hold distinct values so the assertion below
+	// differentiates between the journaled originalIdx (correct) and the
+	// replay-loop index (buggy) being used to look up the adjustment.
+	h.futureWithdrawals = []map[common.Blake2b224]uint64{
+		{cred: 900},
+		{cred: 900},
+		{cred: 500},
+		{cred: 0},
+		{cred: 0},
+	}
+
+	// Pre-seed the journal with two retained events:
+	//   [0] PassTick at slot 101 (originalIdx=0) — adjustRewardBalances
+	//       skips non-transaction events, so it does not call SetRewardBalances.
+	//   [1] Transaction at slot 105 (originalIdx=2) — replay-loop index 1
+	//       differs from originalIdx 2, so the lookup index used can be
+	//       inferred from which futureWithdrawals slot the call reads.
+	// Empty TxBytes combined with Success=false makes
+	// processTransactionEventWithoutT return nil after the decode failure,
+	// so the test exercises the pre-decode SetRewardBalances call without
+	// needing a valid Conway transaction.
+	h.appliedEvents = []appliedEvent{
+		{
+			event: VectorEvent{
+				Type:     EventTypePassTick,
+				TickSlot: 101,
+			},
+			slot:        101,
+			originalIdx: 0,
+		},
+		{
+			event: VectorEvent{
+				Type:    EventTypeTransaction,
+				TxBytes: nil,
+				Success: false,
+				Slot:    105,
+			},
+			slot:        105,
+			originalIdx: 2,
+		},
+	}
+
+	if err := h.rollback(200); err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	if len(sm.setRewardBalancesCalls) != 1 {
+		t.Fatalf(
+			"expected 1 SetRewardBalances call during replay, got %d",
+			len(sm.setRewardBalancesCalls),
+		)
+	}
+	got := sm.setRewardBalancesCalls[0][cred]
+	// Correct path uses originalIdx=2 → futureWithdrawals[3]={cred:0}
+	// → adjusted balance = 1000 + 0 = 1000.
+	// A bug that uses the replay-loop index i=1 would read
+	// futureWithdrawals[2]={cred:500} → 1500, failing this assertion.
+	const want uint64 = 1000
+	if got != want {
+		t.Errorf("replay adjusted balance: got %d, want %d", got, want)
 	}
 }
 

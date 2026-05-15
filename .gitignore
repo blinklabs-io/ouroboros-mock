@@ -22,3 +22,4 @@ go.work
 
 # Program binaries
 /ouroboros-mock
+/gen-rollback-vector

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -93,10 +94,14 @@ type Harness struct {
 
 // appliedEvent is a journaled event together with the slot at which it
 // was applied. The slot is what rollback semantics filter on: entries
-// whose slot is > the rollback target are discarded.
+// whose slot is > the rollback target are discarded. originalIdx is the
+// event's position in the active vector's Events slice; the rollback
+// replay path uses it to look up the per-tx reward-balance adjustment
+// computed from futureWithdrawals.
 type appliedEvent struct {
-	event VectorEvent
-	slot  uint64
+	event       VectorEvent
+	slot        uint64
+	originalIdx int
 }
 
 // HarnessConfig configures the test harness.
@@ -125,10 +130,34 @@ func NewHarness(stateManager StateManager, config HarnessConfig) *Harness {
 	}
 }
 
+// collectAllVectors walks both the Amaru-derived eras/ corpus and the
+// repo-local synthetic/ corpus under testdataRoot. The eras/ root is
+// required; a missing synthetic/ root is silently skipped.
+func (h *Harness) collectAllVectors() ([]string, error) {
+	var all []string
+	for _, sub := range []string{"eras", "synthetic"} {
+		root := filepath.Join(h.testdataRoot, sub)
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) && sub == "synthetic" {
+				continue
+			}
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("required vector root missing: %s", root)
+			}
+			return nil, err
+		}
+		paths, err := CollectVectorFiles(root)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, paths...)
+	}
+	return all, nil
+}
+
 // RunAllVectors runs all conformance test vectors.
 func (h *Harness) RunAllVectors(t *testing.T) {
-	root := filepath.Join(h.testdataRoot, "eras")
-	vectors, err := CollectVectorFiles(root)
+	vectors, err := h.collectAllVectors()
 	if err != nil {
 		t.Fatalf("failed to collect vectors: %v", err)
 	}
@@ -217,16 +246,7 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 
 	// Process events
 	for i, event := range vector.Events {
-		// Compute adjusted reward balances for this transaction:
-		// balance_at_i = final_state_balance + futureWithdrawals[i+1]
-		// We use i+1 because futureWithdrawals[i] includes this TX's withdrawal
-		if event.Type == EventTypeTransaction && len(h.finalStateBalances) > 0 {
-			adjustedBalances := make(map[common.Blake2b224]uint64)
-			for cred, balance := range h.finalStateBalances {
-				adjustedBalances[cred] = balance + h.futureWithdrawals[i+1][cred]
-			}
-			h.stateManager.SetRewardBalances(adjustedBalances)
-		}
+		h.adjustRewardBalances(i, event)
 
 		if err := h.processEvent(t, i, event); err != nil {
 			t.Errorf("event %d failed: %v", i, err)
@@ -244,9 +264,9 @@ func (h *Harness) processEvent(
 	case EventTypeTransaction:
 		return h.processTransactionEvent(t, eventIdx, event)
 	case EventTypePassTick:
-		return h.processPassTickEvent(event)
+		return h.processPassTickEvent(eventIdx, event)
 	case EventTypePassEpoch:
-		return h.processPassEpochEvent(event)
+		return h.processPassEpochEvent(eventIdx, event)
 	case EventTypeRollback:
 		return h.processRollbackEvent(t, event)
 	default:
@@ -306,19 +326,25 @@ func (h *Harness) processTransactionEvent(
 		}
 	}
 
-	h.journal(event, event.Slot)
+	h.journal(eventIdx, event, event.Slot)
 	return nil
 }
 
 // processPassTickEvent processes a pass tick event.
-func (h *Harness) processPassTickEvent(event VectorEvent) error {
+func (h *Harness) processPassTickEvent(
+	eventIdx int,
+	event VectorEvent,
+) error {
 	h.currentSlot = event.TickSlot
-	h.journal(event, event.TickSlot)
+	h.journal(eventIdx, event, event.TickSlot)
 	return nil
 }
 
 // processPassEpochEvent processes a pass epoch event.
-func (h *Harness) processPassEpochEvent(event VectorEvent) error {
+func (h *Harness) processPassEpochEvent(
+	eventIdx int,
+	event VectorEvent,
+) error {
 	// Advance epoch
 	h.currentEpoch += event.EpochDelta
 
@@ -332,7 +358,7 @@ func (h *Harness) processPassEpochEvent(event VectorEvent) error {
 
 	// Epoch events have no native slot; journal them at the prevailing
 	// current slot so rollback decisions can compare consistently.
-	h.journal(event, h.currentSlot)
+	h.journal(eventIdx, event, h.currentSlot)
 
 	return nil
 }
@@ -415,8 +441,7 @@ type VectorResult struct {
 
 // RunAllVectorsWithResults runs all vectors and returns detailed results.
 func (h *Harness) RunAllVectorsWithResults() ([]VectorResult, error) {
-	root := filepath.Join(h.testdataRoot, "eras")
-	vectors, err := CollectVectorFiles(root)
+	vectors, err := h.collectAllVectors()
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect vectors: %w", err)
 	}
@@ -506,16 +531,7 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 
 	// Process events
 	for i, event := range vector.Events {
-		// Compute adjusted reward balances for this transaction:
-		// balance_at_i = final_state_balance + futureWithdrawals[i+1]
-		// We use i+1 because futureWithdrawals[i] includes this TX's withdrawal
-		if event.Type == EventTypeTransaction && len(h.finalStateBalances) > 0 {
-			adjustedBalances := make(map[common.Blake2b224]uint64)
-			for cred, balance := range h.finalStateBalances {
-				adjustedBalances[cred] = balance + h.futureWithdrawals[i+1][cred]
-			}
-			h.stateManager.SetRewardBalances(adjustedBalances)
-		}
+		h.adjustRewardBalances(i, event)
 
 		if err := h.processEventWithoutT(i, event); err != nil {
 			result.Error = err
@@ -534,9 +550,9 @@ func (h *Harness) processEventWithoutT(eventIdx int, event VectorEvent) error {
 	case EventTypeTransaction:
 		return h.processTransactionEventWithoutT(eventIdx, event)
 	case EventTypePassTick:
-		return h.processPassTickEvent(event)
+		return h.processPassTickEvent(eventIdx, event)
 	case EventTypePassEpoch:
-		return h.processPassEpochEvent(event)
+		return h.processPassEpochEvent(eventIdx, event)
 	case EventTypeRollback:
 		return h.processRollbackEventWithoutT(event)
 	default:
@@ -579,19 +595,21 @@ func (h *Harness) processTransactionEventWithoutT(
 		}
 	}
 
-	h.journal(event, event.Slot)
+	h.journal(eventIdx, event, event.Slot)
 	return nil
 }
 
 // journal appends an event to the replay log keyed by the slot at which
-// it was applied. Suppressed during a replay so the log is not duplicated.
-func (h *Harness) journal(event VectorEvent, slot uint64) {
+// it was applied and its index in the active vector's Events slice.
+// Suppressed during a replay so the log is not duplicated.
+func (h *Harness) journal(eventIdx int, event VectorEvent, slot uint64) {
 	if h.replaying {
 		return
 	}
 	h.appliedEvents = append(h.appliedEvents, appliedEvent{
-		event: event,
-		slot:  slot,
+		event:       event,
+		slot:        slot,
+		originalIdx: eventIdx,
 	})
 }
 
@@ -650,6 +668,13 @@ func (h *Harness) rollback(targetSlot uint64) error {
 	h.replaying = true
 	defer func() { h.replaying = false }()
 	for i, ae := range retained {
+		// Re-apply the per-tx reward-balance adjustment that the main
+		// runVector loop applied on first execution. Without this,
+		// retained txs validate against the bare LoadInitialState
+		// balances, which differ from the harness's "final state plus
+		// future withdrawals" view and will reject any withdrawal that
+		// depends on the adjusted figure.
+		h.adjustRewardBalances(ae.originalIdx, ae.event)
 		if err := h.processEventWithoutT(i, ae.event); err != nil {
 			return fmt.Errorf(
 				"rollback: replay of event %d (slot %d) failed: %w",
@@ -661,6 +686,29 @@ func (h *Harness) rollback(targetSlot uint64) error {
 	h.appliedEvents = append(h.appliedEvents[:0], retained...)
 	h.currentSlot = targetSlot
 	return nil
+}
+
+// adjustRewardBalances applies the per-tx reward-balance hack derived
+// from finalStateBalances and futureWithdrawals to the state manager.
+// Called both from the main vector loop (with the linear event index)
+// and from the rollback replay loop (with the journaled originalIdx)
+// so retained txs see the same adjusted balances on every execution.
+func (h *Harness) adjustRewardBalances(eventIdx int, event VectorEvent) {
+	if event.Type != EventTypeTransaction {
+		return
+	}
+	if len(h.finalStateBalances) == 0 {
+		return
+	}
+	if eventIdx+1 >= len(h.futureWithdrawals) {
+		return
+	}
+	future := h.futureWithdrawals[eventIdx+1]
+	adjusted := make(map[common.Blake2b224]uint64, len(h.finalStateBalances))
+	for cred, balance := range h.finalStateBalances {
+		adjusted[cred] = balance + future[cred]
+	}
+	h.stateManager.SetRewardBalances(adjusted)
 }
 
 // computeFutureWithdrawals computes cumulative withdrawals from each TX index to the end.
