@@ -99,6 +99,21 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 	}
 	finalTip := lastRollForwardTip(downstream)
 
+	// Strict invariant: the observation must have selected the
+	// longest peer. Any committed vector that violates this would
+	// silently bless a wrong-selector outcome at replay time, so
+	// refuse to write it. The failure surfaces a capture-pipeline
+	// flake (observation didn't settle on the longer chain in time)
+	// rather than letting it land in the corpus.
+	if err := assertObservationPickedLongestPeer(
+		peers, finalTip,
+	); err != nil {
+		return format.TestVector{}, fmt.Errorf(
+			"observation %s: %w",
+			args.ObservationCapturePath, err,
+		)
+	}
+
 	title := args.Title
 	if title == "" {
 		title = fmt.Sprintf("multi-peer-%d", len(peers))

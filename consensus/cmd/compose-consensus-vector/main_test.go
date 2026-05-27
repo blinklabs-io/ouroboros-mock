@@ -15,8 +15,11 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/ouroboros-mock/consensus"
@@ -260,10 +263,18 @@ func TestDiffAgainstGoldenFlagsPeerCountMismatch(t *testing.T) {
 		t.Fatalf("WriteVector: %v", err)
 	}
 
-	// Fresh dropped a peer — should flag.
+	// Fresh dropped a peer — should flag. Use a fresh observation
+	// matching peer A's tip (since peer A is now the only peer in
+	// the fresh vector), so the compose-time longest-peer invariant
+	// is satisfied and the diff is exercised on the peer-count delta.
+	obsFresh := writeSinglePeerCapture(t, dir, "obs-fresh",
+		[]format.ServedMessage{
+			rollForward(t, 6, "aa", 10, "1111"),
+		},
+	)
 	fresh, err := consensus.Compose(consensus.ComposeArgs{
 		PeerCapturePaths:       []string{peerA},
-		ObservationCapturePath: obs,
+		ObservationCapturePath: obsFresh,
 	})
 	if err != nil {
 		t.Fatalf("Compose fresh: %v", err)
@@ -333,6 +344,118 @@ func TestDiffAgainstGoldenFlagsFinalTipSlotMismatch(t *testing.T) {
 	}
 }
 
+// TestDiffFlagsWrongPeerSelected guards the diff's longest-peer
+// invariant directly: a multi-peer vector whose final_tip points at
+// the shorter peer is the wrong-selector regression wolf31o2 flagged
+// in PR #207. The diff must catch it on both golden and fresh paths
+// so a broken committed corpus doesn't silently approve every
+// future capture against itself.
+func TestDiffFlagsWrongPeerSelected(t *testing.T) {
+	dir := t.TempDir()
+	// Hand-craft a vector that bypasses Compose's same invariant:
+	// peer B is longer (slot/block 20 vs peer A's 10), but final_tip
+	// points at peer A. Compose would refuse to emit this; we write
+	// the JSON directly to simulate a hand-edited or pre-existing
+	// broken golden.
+	era := uint(6)
+	broken := format.TestVector{
+		SchemaVersion: format.CurrentSchemaVersion,
+		Title:         "wrong-peer-golden",
+		Category:      format.CategoryConsensus,
+		Capture: &format.ConsensusCapture{
+			Peers: []format.PeerInput{
+				{
+					PeerID: 0,
+					Served: []format.ServedMessage{
+						rollBackwardToOrigin(t),
+						rollForward(t, era, "aa", 10, "11aa"),
+					},
+				},
+				{
+					PeerID: 1,
+					Served: []format.ServedMessage{
+						rollBackwardToOrigin(t),
+						rollForward(t, era, "bb", 20, "22bb"),
+					},
+				},
+			},
+			ExpectedOutput: format.ExpectedOutput{
+				DownstreamChainSync: []format.ServedMessage{
+					rollForward(t, era, "aa", 10, "11aa"),
+				},
+				FinalTip: format.Tip{
+					Slot:        10,
+					Hash:        mustHexBytes(t, "11aa"),
+					BlockNumber: 10,
+				},
+			},
+		},
+	}
+	// Bypass EncodeTestVector (which we don't have a "skip validate"
+	// hook for) by writing the JSON via the unvalidated stdlib path.
+	raw, err := json.MarshalIndent(broken, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	goldenPath := filepath.Join(dir, "broken-golden.json")
+	if err := os.WriteFile(goldenPath, raw, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// A clean fresh vector built through Compose (which now refuses
+	// to emit one with the wrong-peer pattern). Use distinct slots
+	// so the longest peer is unambiguous.
+	peerA := writeSinglePeerCapture(t, dir, "fresh-a",
+		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
+			rollForward(t, era, "aa", 10, "11aa"),
+		},
+	)
+	peerB := writeSinglePeerCapture(t, dir, "fresh-b",
+		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
+			rollForward(t, era, "bb", 20, "22bb"),
+		},
+	)
+	obs := writeSinglePeerCapture(t, dir, "fresh-obs",
+		[]format.ServedMessage{
+			rollForward(t, era, "bb", 20, "22bb"),
+		},
+	)
+	fresh, err := consensus.Compose(consensus.ComposeArgs{
+		PeerCapturePaths:       []string{peerA, peerB},
+		ObservationCapturePath: obs,
+	})
+	if err != nil {
+		t.Fatalf("Compose fresh: %v", err)
+	}
+
+	res, err := consensus.DiffAgainstGolden(goldenPath, fresh)
+	if err != nil {
+		t.Fatalf("DiffAgainstGolden: %v", err)
+	}
+	if res.Match {
+		t.Fatal("expected mismatch on broken-golden longest-peer invariant")
+	}
+	// The diff should specifically attribute the failure to the
+	// golden, not the fresh — fresh was composed through the strict
+	// invariant and is internally consistent.
+	var sawGoldenFailure bool
+	for _, d := range res.Differences {
+		if strings.HasPrefix(d, "golden:") &&
+			strings.Contains(d, "observation selected peer_id=0") {
+			sawGoldenFailure = true
+			break
+		}
+	}
+	if !sawGoldenFailure {
+		t.Fatalf(
+			"expected diff to flag the golden's wrong-peer selection, got: %v",
+			res.Differences,
+		)
+	}
+}
+
 // --- helpers ----------------------------------------------------------
 
 func writeSinglePeerCapture(
@@ -391,6 +514,13 @@ func rollBackwardToOrigin(t *testing.T) format.ServedMessage {
 	}
 }
 
+// rollForward synthesizes a roll_forward ServedMessage. tipSlot is
+// used as both the tip's slot AND its block_number; real captures
+// have block_number != slot (slots can be skipped under Praos), but
+// for synthetic two-peer test vectors this preserves the
+// longest-chain ordering by construction so the compose-time
+// invariant (final_tip = longest peer's tip) holds without each
+// test having to pick block numbers by hand.
 func rollForward(
 	t *testing.T,
 	era uint,
@@ -406,8 +536,9 @@ func rollForward(
 		Era:        &e,
 		HeaderCbor: mustHexBytes(t, headerHex),
 		Tip: &format.Tip{
-			Slot: tipSlot,
-			Hash: mustHexBytes(t, tipHashHex),
+			Slot:        tipSlot,
+			Hash:        mustHexBytes(t, tipHashHex),
+			BlockNumber: tipSlot,
 		},
 	}
 }

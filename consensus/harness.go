@@ -100,6 +100,19 @@ func RunConsensusVector(
 			"consensus vector %q has no capture", v.Title,
 		)
 	}
+	// Vector self-consistency: every committed vector must satisfy
+	// the longest-peer invariant, otherwise the assertion below
+	// (BestPeerTip == final_tip) would silently bless a wrong-
+	// selector outcome for any vector whose final_tip points at a
+	// non-longest peer. Catch that at vector-load time with a clear
+	// error rather than masking it as a SUT bug.
+	if err := assertObservationPickedLongestPeer(
+		v.Capture.Peers, v.Capture.ExpectedOutput.FinalTip,
+	); err != nil {
+		return fmt.Errorf(
+			"vector %q is self-inconsistent: %w", v.Title, err,
+		)
+	}
 	return runConsensusVector(t, v.Title, v.Capture, sel)
 }
 

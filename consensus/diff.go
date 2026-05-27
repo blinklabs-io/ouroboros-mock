@@ -50,14 +50,19 @@ const FinalTipSlotTolerance = 20
 //     roll_forward;
 //   - expected_output.final_tip.slot must be within
 //     FinalTipSlotTolerance of the golden's;
+//   - both vectors must individually satisfy the longest-peer
+//     invariant: expected_output.final_tip must match the per-peer
+//     tip with the highest block_number. A vector that violates this
+//     blesses a wrong-selector outcome at replay time;
 //   - opaque bytes (header_cbor / block_cbor) and per-message slot /
 //     hash content are NOT compared.
 //
 // The diff catches structural regressions (peer count drops, peers
 // fall silent, observation tip lands way outside the forge-duration
-// window) without tripping on the forge nondeterminism that
-// forge nondeterminism (different VRF wins across runs ⇒ different
-// block counts and tip slots) inherently produces.
+// window, observation selected the wrong peer) without tripping on
+// the forge nondeterminism (different VRF wins across runs ⇒
+// different block counts and tip slots) that the testnet inherently
+// produces.
 func DiffAgainstGolden(
 	goldenPath string,
 	fresh format.TestVector,
@@ -142,6 +147,24 @@ func diffVectors(golden, fresh format.TestVector) DiffResult {
 			"expected_output.final_tip.slot: golden=%d fresh=%d (|Δ|>%d)",
 			gs, fs, FinalTipSlotTolerance,
 		))
+	}
+
+	// Longest-peer invariant on both sides. Compose already enforces
+	// this when writing a vector, but the check is repeated here so
+	// the diff also rejects a hand-edited or pre-existing broken
+	// golden — without this guard, a corrupt golden expecting the
+	// wrong peer would silently approve every fresh capture.
+	if err := assertObservationPickedLongestPeer(
+		golden.Capture.Peers,
+		golden.Capture.ExpectedOutput.FinalTip,
+	); err != nil {
+		diffs = append(diffs, "golden: "+err.Error())
+	}
+	if err := assertObservationPickedLongestPeer(
+		fresh.Capture.Peers,
+		fresh.Capture.ExpectedOutput.FinalTip,
+	); err != nil {
+		diffs = append(diffs, "fresh: "+err.Error())
 	}
 
 	return DiffResult{Match: len(diffs) == 0, Differences: diffs}

@@ -19,6 +19,7 @@
 package consensus
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -217,4 +218,87 @@ func lastRollForwardTip(served []format.ServedMessage) format.Tip {
 		}
 	}
 	return format.Tip{}
+}
+
+// assertObservationPickedLongestPeer confirms that finalTip (the
+// observation's last roll_forward tip) matches the per-peer tip with
+// the highest block_number — i.e. the observation node really did
+// select the longest chain. A multi-way tie at the top is rejected
+// because Praos breaks ties by VRF, which the format does not
+// currently carry; an apparent tie therefore means the configurator
+// did not produce sufficient chain-length asymmetry and the vector
+// would be ambiguous.
+//
+// Single-peer vectors trivially satisfy the invariant (the lone
+// peer's tip is both the max and what observation served).
+func assertObservationPickedLongestPeer(
+	peers []format.PeerInput, finalTip format.Tip,
+) error {
+	if len(peers) == 0 {
+		return errors.New("no peers in vector")
+	}
+	maxBlock := uint64(0)
+	winners := make([]int, 0, 1)
+	winnerTips := make([]format.Tip, 0, 1)
+	for i, p := range peers {
+		tip := lastRollForwardTip(p.Served)
+		if !servedHasRollForward(p.Served) {
+			return fmt.Errorf(
+				"peers[%d] (peer_id=%d): served trace has no roll_forward",
+				i, p.PeerID,
+			)
+		}
+		switch {
+		case tip.BlockNumber > maxBlock:
+			maxBlock = tip.BlockNumber
+			winners = winners[:0]
+			winnerTips = winnerTips[:0]
+			winners = append(winners, i)
+			winnerTips = append(winnerTips, tip)
+		case tip.BlockNumber == maxBlock:
+			winners = append(winners, i)
+			winnerTips = append(winnerTips, tip)
+		}
+	}
+	if len(winners) > 1 {
+		var ids []uint64
+		for _, i := range winners {
+			ids = append(ids, peers[i].PeerID)
+		}
+		return fmt.Errorf(
+			"ambiguous longest chain: peers %v all reach block_number=%d "+
+				"— Praos tie-break by VRF is not encoded in the vector",
+			ids, maxBlock,
+		)
+	}
+	want := winnerTips[0]
+	if finalTip.Slot != want.Slot ||
+		!bytes.Equal(finalTip.Hash, want.Hash) ||
+		finalTip.BlockNumber != want.BlockNumber {
+		return fmt.Errorf(
+			"observation selected peer_id=%d (slot=%d block=%d), "+
+				"but the longest peer is peer_id=%d (slot=%d block=%d)",
+			peerIDFor(peers, finalTip),
+			finalTip.Slot, finalTip.BlockNumber,
+			peers[winners[0]].PeerID,
+			want.Slot, want.BlockNumber,
+		)
+	}
+	return nil
+}
+
+// peerIDFor returns the PeerID of the peer whose last roll_forward
+// tip matches t, or 0 with a synthetic "<unknown>" sentinel encoded
+// in the diagnostic if no peer matches (e.g. observation served a
+// chain none of the captured peers did).
+func peerIDFor(peers []format.PeerInput, t format.Tip) uint64 {
+	for _, p := range peers {
+		pt := lastRollForwardTip(p.Served)
+		if pt.Slot == t.Slot &&
+			bytes.Equal(pt.Hash, t.Hash) &&
+			pt.BlockNumber == t.BlockNumber {
+			return p.PeerID
+		}
+	}
+	return 0
 }
