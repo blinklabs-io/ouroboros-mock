@@ -22,7 +22,8 @@ GO_LDFLAGS=-ldflags "-s -w"
 	test \
 	download-amaru-testdata \
 	download-upstream-fixtures \
-	gen-synthetic-vectors
+	gen-synthetic-vectors \
+	capture-consensus-vectors
 
 # Alias for building program binary
 build: $(BINARIES)
@@ -86,6 +87,13 @@ gen-synthetic-vectors: gen-rollback-vector
 		-base $(SYNTHETIC_ROLLBACK_BASE) \
 		-out $(SYNTHETIC_ROLLBACK_OUT) \
 		-title "synthetic/rollback/CurrentTreasuryValue-V1"
+
+# Regenerate every committed consensus-conformance vector by running
+# the full docker-compose capture stack for each scenario. Each
+# scenario writes its output to consensus/testdata/captured/<name>.json,
+# overwriting the existing golden. Requires docker.
+capture-consensus-vectors:
+	$(ROOT_DIR)/consensus/capture-all.sh
 
 # Download and update curated upstream fixtures used for block/message tests.
 # Sources:
