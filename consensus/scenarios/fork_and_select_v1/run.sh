@@ -123,20 +123,25 @@ docker compose -f "${COMPOSE_FILE}" up -d \
 
 log "Waiting for cardano-* to become healthy..."
 # Resolve container ids through compose so renames in
-# docker-compose.yml don't silently break health polling.
-declare -A CIDS
-for svc in cardano-peer-a cardano-peer-b cardano-observation; do
+# docker-compose.yml don't silently break health polling. Parallel
+# indexed arrays (not `declare -A`) keep the script compatible with
+# bash 3.2, which is still what macOS ships by default.
+SERVICES=(cardano-peer-a cardano-peer-b cardano-observation)
+CIDS=()
+for svc in "${SERVICES[@]}"; do
     cid="$(docker compose -f "${COMPOSE_FILE}" ps -q "${svc}")"
     [[ -n "${cid}" ]] || die "could not resolve container id for ${svc}"
-    CIDS[$svc]="${cid}"
+    CIDS+=("${cid}")
 done
 MAX_WAIT=900
 ELAPSED=0
 while [[ ${ELAPSED} -lt ${MAX_WAIT} ]]; do
     HEALTHY=0
-    for svc in cardano-peer-a cardano-peer-b cardano-observation; do
+    for i in "${!SERVICES[@]}"; do
+        svc="${SERVICES[$i]}"
+        cid="${CIDS[$i]}"
         status="$(docker inspect --format='{{.State.Health.Status}}' \
-            "${CIDS[$svc]}" 2>/dev/null || echo missing)"
+            "${cid}" 2>/dev/null || echo missing)"
         case "${status}" in
             healthy)   HEALTHY=$((HEALTHY + 1));;
             unhealthy) die "${svc} reported unhealthy";;

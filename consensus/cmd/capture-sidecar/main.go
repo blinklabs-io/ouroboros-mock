@@ -87,7 +87,7 @@ func run(
 	// (dialTimeout); reject them with a clear error.
 	if runTimeout <= 0 {
 		return fmt.Errorf(
-			"capture-sidecar: -run-timeout must be > 0, got %s",
+			"capture-sidecar: -timeout must be > 0, got %s",
 			runTimeout,
 		)
 	}
