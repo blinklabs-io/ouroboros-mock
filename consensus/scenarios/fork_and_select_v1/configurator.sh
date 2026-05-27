@@ -188,6 +188,14 @@ run_forge_phase() {
             kill -KILL "${node_pid}" 2>/dev/null || true
             return 1
         fi
+        # Fail fast if cardano-node has exited rather than waiting
+        # the full PHASE_TIMEOUT_SECS for the tip check to time out.
+        if ! kill -0 "${node_pid}" 2>/dev/null; then
+            log "phase ${label}: cardano-node exited prematurely (last observed slot ${last_slot})"
+            log "phase ${label}: tail of ${logfile}:"
+            tail -n 80 "${logfile}" | sed "s/^/[phase-${label}] /" >&2
+            return 1
+        fi
         local slot
         slot=$(cardano-cli conway query tip \
                  --socket-path "${sock}" \
@@ -229,6 +237,10 @@ run_forge_phase() {
     # chunk truncation on the runtime cardano-node.
     if [[ "$(readlink -f "${db}")" != "$(readlink -f "${dst}")" ]]; then
         log "phase ${label}: snapshotting ${db} -> ${dst} (final tip slot ${last_slot})"
+        # Clear destination first so we don't overlay stale ChainDB
+        # files from a previous configurator run that lingered in the
+        # named volume.
+        rm -rf "${dst}"
         mkdir -p "${dst}"
         cp -r "${db}/." "${dst}/"
         sync

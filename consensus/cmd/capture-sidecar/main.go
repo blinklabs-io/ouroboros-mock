@@ -82,6 +82,21 @@ func run(
 	title string,
 	runTimeout, dialTimeout time.Duration,
 ) error {
+	// Non-positive durations would silently turn into immediate
+	// context cancellation (runTimeout) or an invalid dial
+	// (dialTimeout); reject them with a clear error.
+	if runTimeout <= 0 {
+		return fmt.Errorf(
+			"capture-sidecar: -run-timeout must be > 0, got %s",
+			runTimeout,
+		)
+	}
+	if dialTimeout <= 0 {
+		return fmt.Errorf(
+			"capture-sidecar: -dial-timeout must be > 0, got %s",
+			dialTimeout,
+		)
+	}
 	conv, err := consensus.LoadConversation(conversationPath)
 	if err != nil {
 		return err

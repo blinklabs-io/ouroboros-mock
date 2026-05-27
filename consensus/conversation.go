@@ -202,10 +202,30 @@ type RequestNextStep struct {
 
 func (s *RequestNextStep) Type() string { return stepTypeRequestNext }
 
-func (s *RequestNextStep) Run(_ context.Context, sc *Sidecar) error {
+func (s *RequestNextStep) Run(ctx context.Context, sc *Sidecar) error {
 	before := sc.recorder.Count()
-	_ = sc.recorder.WaitForNextOrDeadline(before, requestNextWaitDeadline)
-	return nil
+	// Honor context cancellation while we wait for the next message.
+	// requestNextWaitDeadline is the long backstop; we poll in
+	// shorter slices so a SIGINT/SIGTERM during the wait aborts
+	// promptly instead of stalling shutdown by up to 30s.
+	const slice = 250 * time.Millisecond
+	deadline := time.Now().Add(requestNextWaitDeadline)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil // implicit AwaitReply
+		}
+		wait := slice
+		if remaining < wait {
+			wait = remaining
+		}
+		if sc.recorder.WaitForNextOrDeadline(before, wait) {
+			return nil
+		}
+	}
 }
 
 // DrainToTipStep loops "wait for next chainsync message" until the
@@ -227,6 +247,11 @@ type DrainToTipStep struct {
 func (s *DrainToTipStep) Type() string { return stepTypeDrainToTip }
 
 func (s *DrainToTipStep) Run(ctx context.Context, sc *Sidecar) error {
+	// Snapshot the recorder position at entry so the roll_forward
+	// check below only inspects messages this step observed —
+	// otherwise a prior step's roll_forward would satisfy the
+	// invariant even if the drain itself served nothing.
+	start := sc.recorder.Count()
 	deadline := time.Now().Add(drainOverallDeadline)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -247,7 +272,11 @@ func (s *DrainToTipStep) Run(ctx context.Context, sc *Sidecar) error {
 			break // quiescent for drainInterBlockDeadline → AwaitReply
 		}
 	}
-	if !servedHasRollForward(sc.recorder.Snapshot()) {
+	served := sc.recorder.Snapshot()
+	if start > len(served) {
+		start = len(served)
+	}
+	if !servedHasRollForward(served[start:]) {
 		return errors.New(
 			"drain_to_tip: server reached AwaitReply without serving " +
 				"any roll_forward — testnet likely silent",
@@ -291,6 +320,12 @@ func parsePoints(in []string) ([]pcommon.Point, error) {
 				return nil, fmt.Errorf(
 					"points[%d]: slot %q: %w",
 					i, parts[0], err,
+				)
+			}
+			if parts[1] == "" {
+				return nil, fmt.Errorf(
+					"points[%d]: missing hash after slot %q",
+					i, parts[0],
 				)
 			}
 			hash, err := hex.DecodeString(parts[1])

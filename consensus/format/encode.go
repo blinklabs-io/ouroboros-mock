@@ -74,6 +74,16 @@ func (c *ConsensusCapture) validate() error {
 		}
 	}
 	for i, m := range c.ExpectedOutput.DownstreamChainSync {
+		// The field name is "downstream_chainsync"; reject anything
+		// outside the chainsync protocol so a misplaced blockfetch
+		// entry fails encoding rather than smuggling into a golden.
+		if m.Protocol != ProtocolChainSync {
+			return fmt.Errorf(
+				"expected_output.downstream_chainsync[%d]: "+
+					"protocol %q is not chainsync",
+				i, m.Protocol,
+			)
+		}
 		if err := validateServedMessage(m); err != nil {
 			return fmt.Errorf(
 				"expected_output.downstream_chainsync[%d]: %w", i, err,

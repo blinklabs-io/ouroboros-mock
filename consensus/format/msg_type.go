@@ -125,7 +125,10 @@ func validateServedMessage(m ServedMessage) error {
 			m.Protocol, m.MsgType,
 		)
 	}
-	if !schema.points && len(m.Points) > 0 {
+	// Reject presence (non-nil), not just non-empty length: an
+	// explicit `"points": []` decodes to a non-nil empty slice and
+	// would otherwise bypass the check.
+	if !schema.points && m.Points != nil {
 		return fmt.Errorf("%s/%s: points unexpected",
 			m.Protocol, m.MsgType,
 		)

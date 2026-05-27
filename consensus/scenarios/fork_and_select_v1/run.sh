@@ -122,15 +122,21 @@ docker compose -f "${COMPOSE_FILE}" up -d \
     configurator cardano-peer-a cardano-peer-b cardano-observation
 
 log "Waiting for cardano-* to become healthy..."
+# Resolve container ids through compose so renames in
+# docker-compose.yml don't silently break health polling.
+declare -A CIDS
+for svc in cardano-peer-a cardano-peer-b cardano-observation; do
+    cid="$(docker compose -f "${COMPOSE_FILE}" ps -q "${svc}")"
+    [[ -n "${cid}" ]] || die "could not resolve container id for ${svc}"
+    CIDS[$svc]="${cid}"
+done
 MAX_WAIT=900
 ELAPSED=0
 while [[ ${ELAPSED} -lt ${MAX_WAIT} ]]; do
     HEALTHY=0
-    for svc in consensus-fork-cardano-peer-a \
-               consensus-fork-cardano-peer-b \
-               consensus-fork-cardano-observation; do
+    for svc in cardano-peer-a cardano-peer-b cardano-observation; do
         status="$(docker inspect --format='{{.State.Health.Status}}' \
-            "${svc}" 2>/dev/null || echo missing)"
+            "${CIDS[$svc]}" 2>/dev/null || echo missing)"
         case "${status}" in
             healthy)   HEALTHY=$((HEALTHY + 1));;
             unhealthy) die "${svc} reported unhealthy";;

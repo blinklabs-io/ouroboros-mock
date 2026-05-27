@@ -73,7 +73,7 @@ directly. Existing scenarios:
 
 | Scenario | Peers | What it tests |
 |---|---|---|
-| `intersect_origin_one_rollforward` | 1 | Smoke-test: handshake → find_intersect[origin] → roll_backward → roll_forward |
+| `intersect_origin_one_rollforward` | 1 | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
 | `fork_and_select_v1` | 2 | Praos chain selection + rollback to non-genesis intersect across two divergent chains with a shared prefix |
 
 Multi-peer scenarios use the `cmd/compose-consensus-vector` binary to
@@ -110,23 +110,25 @@ hand-crafted examples.
 ## Replay harness
 
 ```go
-import "github.com/blinklabs-io/ouroboros-mock/consensus"
+import (
+    "github.com/blinklabs-io/gouroboros/protocol/chainsync"
+    "github.com/blinklabs-io/ouroboros-mock/consensus"
+)
 
 // 1. Adapt your chain-selection implementation to the harness's
-//    ChainSelector interface.
+//    ChainSelector interface. peerID is the vector's peer_id (a
+//    uint64); your adapter is free to map it to whatever internal
+//    peer-routing type your selector uses.
 type myAdapter struct{ /* ... */ }
-func (a *myAdapter) UpdatePeerTip(id ConnectionId, tip Tip, vrf []byte) bool { ... }
-func (a *myAdapter) EvaluateAndSwitch() { ... }
-func (a *myAdapter) BestPeerTip() (Tip, bool) { ... }
+func (a *myAdapter) UpdatePeerTip(peerID uint64, tip chainsync.Tip, vrf []byte) bool { /* ... */ }
+func (a *myAdapter) EvaluateAndSwitch() { /* ... */ }
+func (a *myAdapter) BestPeerTip() (chainsync.Tip, bool) { /* ... */ }
 
-// 2. Iterate the committed corpus.
-for _, path := range consensus.CapturedVectorPaths() {
-    t.Run(filepath.Base(path), func(t *testing.T) {
-        v, err := consensus.LoadVector(path)
-        if err != nil { t.Fatal(err) }
-        if err := consensus.RunConsensusVector(t, v, &myAdapter{}); err != nil {
-            t.Fatalf("%s: %v", v.Title, err)
-        }
+// 2. Run the embedded corpus. The factory is called once per
+//    subtest so each vector replays against a fresh selector.
+func TestConsensusConformance(t *testing.T) {
+    consensus.RunAllCapturedVectors(t, func() consensus.ChainSelector {
+        return &myAdapter{}
     })
 }
 ```
@@ -135,6 +137,11 @@ The harness derives each peer's last `roll_forward` tip from the
 served trace, feeds it to the adapter via `UpdatePeerTip`, calls
 `EvaluateAndSwitch`, and asserts the adapter's best tip matches
 `expected_output.final_tip` (slot + hash + block_number).
+
+For ad-hoc iteration outside the harness's subtest loop, use
+`consensus.CapturedVectors()` to get the embedded corpus as
+`[]CapturedVector` and `consensus.LoadVector(path)` to decode a
+vector from disk.
 
 ## Tests
 

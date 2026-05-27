@@ -4,16 +4,20 @@ Smallest possible consensus-capture scenario. Smoke-tests the whole
 pipeline end to end with the absolute minimum protocol surface:
 
 1. Capture-sidecar handshake against a single-pool cardano-node.
-2. `find_intersect [origin]` →  cardano-node replies `intersect_found`.
-3. `request_next` → cardano-node replies `roll_forward` carrying the
-   first forged block.
-4. Sidecar writes a `category=consensus` JSON vector and exits 0.
+2. `find_intersect [origin]` → cardano-node replies `intersect_found`.
+3. First `request_next` → cardano-node replies `roll_backward` to the
+   origin intersect (standard chainsync semantics — the server
+   confirms the agreed reference point before sending any new
+   blocks).
+4. Second `request_next` → cardano-node replies `roll_forward`
+   carrying the first forged block.
+5. Sidecar writes a `category=consensus` JSON vector and exits 0.
 
 The vector has exactly one `peers` entry (`peer_id: 0`) whose `served`
-array contains the captured RollForward;
+array contains the captured roll_backward + roll_forward pair;
 `expected_output.downstream_chainsync` mirrors that served trace
 (single peer = no chain-selection ambiguity);
-`expected_output.final_tip` matches the RollForward's tip.
+`expected_output.final_tip` matches the roll_forward's tip.
 
 ## How to run
 

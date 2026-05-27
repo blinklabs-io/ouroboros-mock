@@ -23,6 +23,10 @@ RUN CGO_ENABLED=0 go build -o /out/capture-sidecar \
 FROM debian:bookworm-slim AS final
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system sidecar && \
+    useradd --system --gid sidecar --home /nonexistent \
+            --shell /usr/sbin/nologin sidecar
 COPY --from=build /out/capture-sidecar /usr/local/bin/capture-sidecar
+USER sidecar:sidecar
 ENTRYPOINT ["/usr/local/bin/capture-sidecar"]

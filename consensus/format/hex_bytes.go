@@ -17,6 +17,7 @@ package format
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -40,6 +41,9 @@ func (h HexBytes) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON decodes a JSON hex string (case-insensitive) into raw
 // bytes.
 func (h *HexBytes) UnmarshalJSON(data []byte) error {
+	if h == nil {
+		return errors.New("hex bytes: nil receiver")
+	}
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
 		return fmt.Errorf("hex bytes: not a JSON string: %w", err)

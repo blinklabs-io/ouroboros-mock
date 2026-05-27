@@ -41,12 +41,16 @@ func NewRecorder(peerID uint64) *Recorder {
 	return r
 }
 
-// Snapshot returns a copy of the served list as it stands.
+// Snapshot returns a deep copy of the served list as it stands.
+// Nested slices and pointer fields are cloned so callers can mutate
+// the result without bleeding back into recorder state.
 func (r *Recorder) Snapshot() []format.ServedMessage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]format.ServedMessage, len(r.served))
-	copy(out, r.served)
+	for i, m := range r.served {
+		out[i] = cloneServedMessage(m)
+	}
 	return out
 }
 
@@ -78,20 +82,21 @@ func (r *Recorder) WaitForNextOrDeadline(
 	since int,
 	timeout time.Duration,
 ) bool {
-	cancel := make(chan struct{})
-	defer close(cancel)
-	go func() {
-		select {
-		case <-time.After(timeout):
-			r.mu.Lock()
-			r.cond.Broadcast()
-			r.mu.Unlock()
-		case <-cancel:
-		}
-	}()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Register the timer AFTER taking the lock so its broadcast
+	// can't fire before this goroutine has entered cond.Wait()
+	// (which atomically drops the lock). A naïve `go func(){…}()`
+	// pattern races: the goroutine could grab the lock and
+	// broadcast first, and that broadcast would be lost — Go's
+	// sync.Cond is edge-triggered.
 	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		r.mu.Lock()
+		r.cond.Broadcast()
+		r.mu.Unlock()
+	})
+	defer timer.Stop()
 	for len(r.served) <= since && time.Now().Before(deadline) {
 		r.cond.Wait()
 	}

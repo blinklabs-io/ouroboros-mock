@@ -228,13 +228,18 @@ func TestDiffAgainstGoldenToleratesLengthDifference(t *testing.T) {
 
 func TestDiffAgainstGoldenFlagsPeerCountMismatch(t *testing.T) {
 	dir := t.TempDir()
+	// Each peer trace must start with roll_backward so the diff's
+	// served-shape check passes and we isolate the failure to the
+	// peer-count assertion this test exercises.
 	peerA := writeSinglePeerCapture(t, dir, "a",
 		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
 			rollForward(t, 6, "aa", 10, "1111"),
 		},
 	)
 	peerB := writeSinglePeerCapture(t, dir, "b",
 		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
 			rollForward(t, 6, "bb", 20, "2222"),
 		},
 	)
@@ -274,8 +279,12 @@ func TestDiffAgainstGoldenFlagsPeerCountMismatch(t *testing.T) {
 
 func TestDiffAgainstGoldenFlagsFinalTipSlotMismatch(t *testing.T) {
 	dir := t.TempDir()
+	// Each peer trace must start with roll_backward so the diff's
+	// served-shape check passes and we isolate the failure to the
+	// final-tip-slot assertion this test exercises.
 	peer := writeSinglePeerCapture(t, dir, "peer",
 		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
 			rollForward(t, 6, "aa", 10, "1111"),
 		},
 	)
@@ -299,6 +308,7 @@ func TestDiffAgainstGoldenFlagsFinalTipSlotMismatch(t *testing.T) {
 	// Fresh observation tip is at a different slot — should flag.
 	peerFresh := writeSinglePeerCapture(t, dir, "peer-fresh",
 		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
 			rollForward(t, 6, "aa", 99, "1111"),
 		},
 	)

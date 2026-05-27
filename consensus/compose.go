@@ -90,6 +90,14 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 		)
 	}
 	downstream := cloneServedSlice(obs.Capture.Peers[0].Served)
+	if !servedHasRollForward(downstream) {
+		return format.TestVector{}, fmt.Errorf(
+			"observation %s: served trace has no roll_forward — "+
+				"cannot derive expected_output.final_tip",
+			args.ObservationCapturePath,
+		)
+	}
+	finalTip := lastRollForwardTip(downstream)
 
 	title := args.Title
 	if title == "" {
@@ -104,7 +112,7 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 			Peers: peers,
 			ExpectedOutput: format.ExpectedOutput{
 				DownstreamChainSync: downstream,
-				FinalTip:            lastRollForwardTip(downstream),
+				FinalTip:            finalTip,
 			},
 		},
 	}

@@ -124,11 +124,15 @@ log "Bringing configurator + cardano-node up (detached)..."
 docker compose -f "${COMPOSE_FILE}" up -d configurator cardano-node
 
 log "Waiting for cardano-node to become healthy..."
+# Resolve the container id through compose so a rename in
+# docker-compose.yml doesn't silently break health polling.
+CARDANO_CID="$(docker compose -f "${COMPOSE_FILE}" ps -q cardano-node)"
+[[ -n "${CARDANO_CID}" ]] || die "could not resolve cardano-node container id"
 MAX_WAIT=180
 ELAPSED=0
 while [[ ${ELAPSED} -lt ${MAX_WAIT} ]]; do
     status="$(docker inspect --format='{{.State.Health.Status}}' \
-        consensus-capture-cardano-node 2>/dev/null || echo missing)"
+        "${CARDANO_CID}" 2>/dev/null || echo missing)"
     case "${status}" in
         healthy)
             log "cardano-node healthy after ${ELAPSED}s"
