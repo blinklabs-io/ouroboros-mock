@@ -454,6 +454,36 @@ func TestDiffFlagsWrongPeerSelected(t *testing.T) {
 			res.Differences,
 		)
 	}
+
+	// Reciprocal: write the valid fresh as the golden and pass the
+	// broken vector in as fresh. If the diff ever stops validating
+	// fresh, the symmetric check this test exists for would silently
+	// pass. Require a `fresh:`-prefixed diff message.
+	goodGoldenPath := filepath.Join(dir, "good-golden.json")
+	if err := consensus.WriteVector(goodGoldenPath, fresh); err != nil {
+		t.Fatalf("WriteVector good golden: %v", err)
+	}
+	resFresh, err := consensus.DiffAgainstGolden(goodGoldenPath, broken)
+	if err != nil {
+		t.Fatalf("DiffAgainstGolden fresh-broken: %v", err)
+	}
+	if resFresh.Match {
+		t.Fatal("expected mismatch on fresh longest-peer invariant")
+	}
+	var sawFreshFailure bool
+	for _, d := range resFresh.Differences {
+		if strings.HasPrefix(d, "fresh:") &&
+			strings.Contains(d, "observation selected peer_id=0") {
+			sawFreshFailure = true
+			break
+		}
+	}
+	if !sawFreshFailure {
+		t.Fatalf(
+			"expected diff to flag the fresh's wrong-peer selection, got: %v",
+			resFresh.Differences,
+		)
+	}
 }
 
 // TestDiffFlagsUnknownSelectedPeer guards the unknown-peer

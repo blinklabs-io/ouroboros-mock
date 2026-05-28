@@ -128,8 +128,11 @@ func (s *Sidecar) Connect() error {
 	return nil
 }
 
-// Run executes every conversation step in order, then drains and
-// closes the connection.
+// Run executes every conversation step in order and returns. It
+// does NOT close the underlying NtN connection — callers must call
+// Sidecar.Close() (typically in a defer) to release it. Returning
+// early on a step error or ctx cancellation also leaves the
+// connection open for the caller's deferred Close.
 func (s *Sidecar) Run(ctx context.Context) error {
 	if s.conn == nil {
 		return errors.New("sidecar: Connect must be called before Run")
