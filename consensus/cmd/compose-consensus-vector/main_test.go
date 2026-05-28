@@ -456,6 +456,106 @@ func TestDiffFlagsWrongPeerSelected(t *testing.T) {
 	}
 }
 
+// TestDiffFlagsUnknownSelectedPeer guards the unknown-peer
+// diagnostic path: when the observation's final_tip matches NONE
+// of the captured peers (e.g. a forge nondeterminism flake where
+// observation served a chain none of the recorded peers did),
+// the diff must say `peer_id=<unknown>` rather than misattributing
+// the tip to peer_id=0.
+func TestDiffFlagsUnknownSelectedPeer(t *testing.T) {
+	dir := t.TempDir()
+	era := uint(6)
+	broken := format.TestVector{
+		SchemaVersion: format.CurrentSchemaVersion,
+		Title:         "unknown-peer-golden",
+		Category:      format.CategoryConsensus,
+		Capture: &format.ConsensusCapture{
+			Peers: []format.PeerInput{
+				{
+					PeerID: 0,
+					Served: []format.ServedMessage{
+						rollBackwardToOrigin(t),
+						rollForward(t, era, "aa", 10, "11aa"),
+					},
+				},
+				{
+					PeerID: 1,
+					Served: []format.ServedMessage{
+						rollBackwardToOrigin(t),
+						rollForward(t, era, "bb", 20, "22bb"),
+					},
+				},
+			},
+			ExpectedOutput: format.ExpectedOutput{
+				DownstreamChainSync: []format.ServedMessage{
+					rollForward(t, era, "cc", 99, "deadbeef"),
+				},
+				// final_tip matches no captured peer.
+				FinalTip: format.Tip{
+					Slot:        99,
+					Hash:        mustHexBytes(t, "deadbeef"),
+					BlockNumber: 99,
+				},
+			},
+		},
+	}
+	raw, err := json.MarshalIndent(broken, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	goldenPath := filepath.Join(dir, "broken-golden.json")
+	if err := os.WriteFile(goldenPath, raw, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	peerA := writeSinglePeerCapture(t, dir, "fresh-a",
+		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
+			rollForward(t, era, "aa", 10, "11aa"),
+		},
+	)
+	peerB := writeSinglePeerCapture(t, dir, "fresh-b",
+		[]format.ServedMessage{
+			rollBackwardToOrigin(t),
+			rollForward(t, era, "bb", 20, "22bb"),
+		},
+	)
+	obs := writeSinglePeerCapture(t, dir, "fresh-obs",
+		[]format.ServedMessage{
+			rollForward(t, era, "bb", 20, "22bb"),
+		},
+	)
+	fresh, err := consensus.Compose(consensus.ComposeArgs{
+		PeerCapturePaths:       []string{peerA, peerB},
+		ObservationCapturePath: obs,
+	})
+	if err != nil {
+		t.Fatalf("Compose fresh: %v", err)
+	}
+
+	res, err := consensus.DiffAgainstGolden(goldenPath, fresh)
+	if err != nil {
+		t.Fatalf("DiffAgainstGolden: %v", err)
+	}
+	if res.Match {
+		t.Fatal("expected mismatch on unknown-peer golden")
+	}
+	var sawUnknown bool
+	for _, d := range res.Differences {
+		if strings.HasPrefix(d, "golden:") &&
+			strings.Contains(d, "peer_id=<unknown>") {
+			sawUnknown = true
+			break
+		}
+	}
+	if !sawUnknown {
+		t.Fatalf(
+			"expected diff to report peer_id=<unknown>, got: %v",
+			res.Differences,
+		)
+	}
+}
+
 // --- helpers ----------------------------------------------------------
 
 func writeSinglePeerCapture(

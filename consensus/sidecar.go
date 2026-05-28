@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
@@ -275,10 +276,14 @@ func assertObservationPickedLongestPeer(
 	if finalTip.Slot != want.Slot ||
 		!bytes.Equal(finalTip.Hash, want.Hash) ||
 		finalTip.BlockNumber != want.BlockNumber {
+		selected := "<unknown>"
+		if id, ok := peerIDFor(peers, finalTip); ok {
+			selected = strconv.FormatUint(id, 10)
+		}
 		return fmt.Errorf(
-			"observation selected peer_id=%d (slot=%d block=%d), "+
+			"observation selected peer_id=%s (slot=%d block=%d), "+
 				"but the longest peer is peer_id=%d (slot=%d block=%d)",
-			peerIDFor(peers, finalTip),
+			selected,
 			finalTip.Slot, finalTip.BlockNumber,
 			peers[winners[0]].PeerID,
 			want.Slot, want.BlockNumber,
@@ -288,17 +293,19 @@ func assertObservationPickedLongestPeer(
 }
 
 // peerIDFor returns the PeerID of the peer whose last roll_forward
-// tip matches t, or 0 with a synthetic "<unknown>" sentinel encoded
-// in the diagnostic if no peer matches (e.g. observation served a
-// chain none of the captured peers did).
-func peerIDFor(peers []format.PeerInput, t format.Tip) uint64 {
+// tip matches t. The second return is false when no captured peer
+// matches — observation may have served a chain none of the
+// recorded peers did (e.g. a forge nondeterminism flake), in which
+// case callers should format an explicit unknown-peer sentinel
+// rather than misattributing the tip to peer_id=0.
+func peerIDFor(peers []format.PeerInput, t format.Tip) (uint64, bool) {
 	for _, p := range peers {
 		pt := lastRollForwardTip(p.Served)
 		if pt.Slot == t.Slot &&
 			bytes.Equal(pt.Hash, t.Hash) &&
 			pt.BlockNumber == t.BlockNumber {
-			return p.PeerID
+			return p.PeerID, true
 		}
 	}
-	return 0
+	return 0, false
 }
