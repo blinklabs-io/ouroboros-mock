@@ -1,0 +1,34 @@
+# Consensus compose-consensus-vector image.
+#
+# Multi-stage build of consensus/cmd/compose-consensus-vector/. Used
+# by scenarios whose run.sh invokes the composer to merge multiple
+# single-peer captures into a multi-peer vector and (with -golden)
+# diff against the committed corpus.
+#
+# Build context is the ouroboros-mock repo root so the Go build sees
+# the full module tree. Each scenarios/<name>/docker-compose.yml that
+# uses the composer references this Dockerfile at
+# consensus/Dockerfile.compose_consensus_vector with a build context
+# of ../../../ (the repo root).
+
+FROM ghcr.io/blinklabs-io/go:1.26.1-1 AS build
+
+WORKDIR /code
+RUN go env -w GOCACHE=/go-cache
+RUN go env -w GOMODCACHE=/gomod-cache
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/compose-consensus-vector \
+    ./consensus/cmd/compose-consensus-vector
+
+FROM debian:bookworm-slim AS final
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system composer && \
+    useradd --system --gid composer --home /nonexistent \
+            --shell /usr/sbin/nologin composer
+COPY --from=build /out/compose-consensus-vector /usr/local/bin/compose-consensus-vector
+USER composer:composer
+ENTRYPOINT ["/usr/local/bin/compose-consensus-vector"]

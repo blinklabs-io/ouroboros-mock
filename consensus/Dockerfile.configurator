@@ -1,0 +1,53 @@
+# Consensus shared configurator image.
+#
+# Provides the cardano-node + cardano-cli + bash + jq toolchain plus
+# the cardano-foundation testnet-generation-tool. Per-scenario
+# configurator.sh is mounted into the container at runtime (see each
+# scenarios/<name>/docker-compose.yml), so the image itself is
+# scenario-agnostic. Adding a new scenario does not require rebuilding
+# this image.
+#
+# Modeled on internal/test/devnet/Dockerfile.configurator and
+# internal/test/erastest/Dockerfile.configurator.
+
+# Pin to same version used downstream in scenario docker-compose files.
+FROM ghcr.io/blinklabs-io/cardano-node:11.0.1
+
+# Runs as root because the entrypoint writes to docker named volumes
+# (/configs, /peer-*-data, /ipc) shared with downstream cardano-node
+# services. Dropping privileges here would require coordinating the
+# UID with the cardano-node base image, which is out of scope for a
+# one-shot configurator that exits 0 before any network listener
+# opens.
+USER root
+
+RUN apt update && \
+    apt install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        tar \
+        tree \
+        python3 \
+        python3-pip \
+        jq && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --break-system-packages uv
+
+RUN install --directory --owner=root --group=root --mode=0755 /usr/local/src/cardano-node
+
+# Pin to the exact commit so re-builds are bit-reproducible — tags
+# can be force-moved upstream, commit hashes cannot.
+ARG TESTNET_GENERATION_TOOL_COMMIT=abab0b3ce616928cae4ea5c36a41654ec068e2e4
+WORKDIR /usr/local/src
+RUN git clone https://github.com/cardano-foundation/testnet-generation-tool.git && \
+    cd testnet-generation-tool && \
+    git checkout "${TESTNET_GENERATION_TOOL_COMMIT}"
+
+WORKDIR /usr/local/src/testnet-generation-tool
+RUN uv sync && mkdir -p cardano-node && ln -sf /usr/local/bin ./cardano-node/bin
+
+# No COPY of configurator.sh — each scenario mounts its own at
+# /configurator.sh via docker-compose volumes:.
+ENTRYPOINT ["/configurator.sh"]
