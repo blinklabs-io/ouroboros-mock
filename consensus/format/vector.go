@@ -181,3 +181,15 @@ type Tip struct {
 	Hash        HexBytes `json:"hash"`
 	BlockNumber uint64   `json:"block_number"`
 }
+
+// SwitchEvent is a SUT fork-choice decision the replay harness reads back
+// from the Replayer: PreviousTip is the chain the SUT was following, NewTip
+// the chain it switched to. It is a runtime projection of the node-internal
+// switch event — NOT a serialized vector field — so it carries only the
+// switch endpoints. The rollback point is deliberately absent (the SUT's
+// switch event does not carry it; the expected rollback point is derived
+// from the vector instead).
+type SwitchEvent struct {
+	PreviousTip Tip
+	NewTip      Tip
+}
