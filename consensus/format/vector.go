@@ -82,6 +82,19 @@ type TestVector struct {
 type ConsensusCapture struct {
 	Peers          []PeerInput    `json:"peers"`
 	ExpectedOutput ExpectedOutput `json:"expected_output"`
+
+	// SecurityParam (k) is the stability window the scenario was forged
+	// with. Zero — the default for vectors that predate this field —
+	// leaves the SUT's k-bounded rollback logic disabled at replay.
+	SecurityParam uint64 `json:"security_param,omitempty"`
+
+	// LocalTip is the chain tip the observation node had already adopted
+	// (on the incumbent chain) before the captured peers were evaluated.
+	// Set it when a peer's announced tip is more than k blocks ahead of
+	// the others: without it the SUT's implausibility guard rejects that
+	// peer as a spoof, even though the real node — already at LocalTip —
+	// would accept it. Nil when k is zero or no peer leads by more than k.
+	LocalTip *Tip `json:"local_tip,omitempty"`
 }
 
 // PeerInput is the trace cardano-node served on one upstream

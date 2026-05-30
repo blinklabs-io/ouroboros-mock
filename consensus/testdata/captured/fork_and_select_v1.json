@@ -491,6 +491,12 @@
         "hash": "497f5c243909e4b1f5a817923d826ceb09415b318be299ac0eb59db40054152e",
         "block_number": 15
       }
+    },
+    "security_param": 6,
+    "local_tip": {
+      "slot": 26,
+      "hash": "832965cdc00f10a694e911657adcbf5741ead14f4e8cdb92cbf527eade9f644a",
+      "block_number": 6
     }
   }
 }

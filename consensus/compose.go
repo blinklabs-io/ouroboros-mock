@@ -15,6 +15,7 @@
 package consensus
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -34,6 +35,13 @@ type ComposeArgs struct {
 	// Title is the composed vector's top-level title. Defaults to
 	// "multi-peer-<N>" when empty.
 	Title string
+	// SecurityParam (k) is the stability window the scenario was forged
+	// with — the configurator knows it (e.g. k=6 in the fork_and_select
+	// genesis). Zero leaves capture.security_param unset. When non-zero
+	// and the winning peer leads the next-longest peer by more than k,
+	// Compose also derives capture.local_tip so the replay SUT does not
+	// reject the winner as implausible (see deriveLocalTip).
+	SecurityParam uint64
 }
 
 // Compose merges N single-peer captures and one observation capture
@@ -129,6 +137,8 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 				DownstreamChainSync: downstream,
 				FinalTip:            finalTip,
 			},
+			SecurityParam: args.SecurityParam,
+			LocalTip:      deriveLocalTip(peers, finalTip, args.SecurityParam),
 		},
 	}
 	// Round-trip through the encoder so format-level invariants
@@ -138,6 +148,45 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 		return format.TestVector{}, fmt.Errorf("compose: %w", err)
 	}
 	return vec, nil
+}
+
+// deriveLocalTip returns the chain tip the observation node would have
+// been following before it switched to the winner, or nil when no
+// local_tip is needed. It is the highest-block tip among the non-winning
+// peers, returned only when the winner (final_tip) leads it by more than
+// k — exactly the case where the replay SUT's implausibility guard would
+// otherwise reject the winner as a spoof. Returns nil when k is zero,
+// there is no second peer, or the lead is within k.
+func deriveLocalTip(
+	peers []format.PeerInput, finalTip format.Tip, k uint64,
+) *format.Tip {
+	if k == 0 {
+		return nil
+	}
+	var incumbent *format.Tip
+	for i := range peers {
+		tip := lastRollForwardTip(peers[i].Served)
+		if tipsEqual(tip, finalTip) {
+			continue // the winner
+		}
+		if incumbent == nil || tip.BlockNumber > incumbent.BlockNumber {
+			t := tip
+			incumbent = &t
+		}
+	}
+	if incumbent == nil {
+		return nil
+	}
+	if finalTip.BlockNumber <= incumbent.BlockNumber+k {
+		return nil
+	}
+	return incumbent
+}
+
+func tipsEqual(a, b format.Tip) bool {
+	return a.Slot == b.Slot &&
+		a.BlockNumber == b.BlockNumber &&
+		bytes.Equal(a.Hash, b.Hash)
 }
 
 // loadCaptureVector reads a JSON vector file, decodes it via

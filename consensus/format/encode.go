@@ -64,6 +64,9 @@ func (v TestVector) validate() error {
 }
 
 func (c *ConsensusCapture) validate() error {
+	if c.LocalTip != nil && len(c.LocalTip.Hash) == 0 {
+		return errors.New("local_tip: hash is required when local_tip is set")
+	}
 	for i, p := range c.Peers {
 		for j, m := range p.Served {
 			if err := validateServedMessage(m); err != nil {

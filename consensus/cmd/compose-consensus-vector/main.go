@@ -45,6 +45,10 @@ func main() {
 		"destination path for the composed vector")
 	goldenPath := flag.String("golden", "",
 		"committed golden vector to diff against; non-zero exit on mismatch")
+	securityParam := flag.Uint64("security-param", 0,
+		"stability window k the scenario was forged with; sets "+
+			"capture.security_param and derives capture.local_tip when a "+
+			"peer leads by more than k")
 	flag.Parse()
 
 	if len(peerCaptures) == 0 ||
@@ -62,6 +66,7 @@ func main() {
 		PeerCapturePaths:       peerCaptures,
 		ObservationCapturePath: *observationCapture,
 		Title:                  *title,
+		SecurityParam:          *securityParam,
 	})
 	if err != nil {
 		log.Fatalf("compose-consensus-vector: %v", err)

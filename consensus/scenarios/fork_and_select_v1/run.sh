@@ -212,6 +212,7 @@ docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \
     -observation /capture-output/observation.json \
     -title fork_and_select_v1 \
     -out /capture-output/composed.json \
+    -security-param 6 \
     "${GOLDEN_ARGS[@]}"
 COMPOSE_EXIT=$?
 set -e
