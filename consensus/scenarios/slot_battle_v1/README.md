@@ -49,15 +49,15 @@ per-CI-regenerated artifact.
 
 ## What the replay asserts
 
-- **VRF tiebreak agreement.** Replayed through the W5.1 fixture (dingo's
-  real chainsync handler), which arms the Conway VRF tiebreaker via
+- **VRF tiebreak agreement.** Replayed through the real-handler fixture
+  (dingo's real chainsync handler), which arms the Conway VRF tiebreaker via
   `GetPraosTiebreakerView` + the captured header VRF. The harness's
-  longest-peer self-consistency check **accepts the tie** (W5.3) as long
+  longest-peer self-consistency check **accepts the tie** as long
   as `final_tip` matches one of the tied peers; the conformance assertion
   is that dingo independently reaches that same `final_tip`. The tip-only
   `UpdatePeerTip` path could never arm the tiebreaker — the real-handler
   fixture is mandatory here.
-- **Switch decision** (W5.4). The observation adopts one block then
+- **Switch decision.** The observation adopts one block then
   switches to the VRF winner; the replay asserts dingo emits the
   corresponding switch off the loser onto `final_tip`.
 

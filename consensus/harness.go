@@ -62,9 +62,9 @@ type Replayer interface {
 	BestTip() (format.Tip, bool)
 
 	// DrainSwitchEvents returns the SUT's fork-choice decisions emitted
-	// during the replay, oldest first. W5.1 only requires the method to
-	// exist and surface the SUT's switch endpoints; the switch-decision
-	// assertion that consumes it is W5.4.
+	// during the replay, oldest first. The method surfaces the SUT's switch
+	// endpoints; the switch-decision assertion that consumes them lives in
+	// the harness (assertSwitchedToWinner).
 	DrainSwitchEvents() []format.SwitchEvent
 }
 
@@ -192,7 +192,7 @@ func runConsensusVector(
 	); err != nil {
 		return fmt.Errorf("%s: final_tip: %w", title, err)
 	}
-	// Switch-decision assertion (W5.4). When the vector expects a fork
+	// Switch-decision assertion. When the vector expects a fork
 	// switch, the SUT must not merely *end* on the winning chain — it must
 	// have *switched* onto it off a shorter chain. This catches a SUT that
 	// adopts the longest tip from the start without ever considering the

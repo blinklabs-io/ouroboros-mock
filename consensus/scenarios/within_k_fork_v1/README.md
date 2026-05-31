@@ -8,7 +8,7 @@ B; the produced vector asserts the replay SUT reaches the same `final_tip`.
 
 This is the complement to `fork_and_select_v1`. There, peer B leads by ~14
 blocks (**> k**), so the SUT's implausibility guard would reject B's
-single announced tip as a spoof unless `local_tip` is set (W5.2). Here the
+single announced tip as a spoof unless `local_tip` is set. Here the
 lead is **≤ k**, so the guard accepts B directly and **no `local_tip` is
 needed** — the normal, no-rescue switch path. Together the two scenarios
 bracket the k boundary from both sides.
@@ -42,10 +42,10 @@ Inspect each capture before committing:
 
 ## What the replay asserts
 
-- **Longest-chain selection + switch** (W5.1/W5.4): dingo adopts peer A,
+- **Longest-chain selection + switch:** dingo adopts peer A,
   then switches to the longer peer B, reaching `final_tip` = peer B's tip
   — asserted via the emitted switch decision.
-- **k accepts the within-window peer** (W5.2): replayed at `security_param`
+- **k accepts the within-window peer:** replayed at `security_param`
   = 6 with no `local_tip`; the implausibility guard must accept peer B
   because its lead is within k. (The `fork_and_select_v1` k-guard-is-live
   test covers the > k rejection.)

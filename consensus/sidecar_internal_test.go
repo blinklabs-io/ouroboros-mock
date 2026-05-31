@@ -20,7 +20,7 @@ import (
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
 
-// TestAssertObservationPickedLongestPeerTie covers the W5.3 relaxation:
+// TestAssertObservationPickedLongestPeerTie covers the VRF-tie relaxation:
 // a multi-way block_number tie is accepted when final_tip matches one of
 // the tied longest peers (the oracle resolved the tie by VRF), and
 // rejected when final_tip matches a shorter peer or no peer at all.
@@ -33,7 +33,7 @@ func TestAssertObservationPickedLongestPeerTie(t *testing.T) {
 	tipB := *b.Served[0].Tip
 	tipC := *c.Served[0].Tip
 
-	// Tie resolved to peer A: accept (was "ambiguous" rejection before W5.3).
+	// Tie resolved to peer A: accept (the oracle resolved it by VRF).
 	if err := assertObservationPickedLongestPeer(peers, tipA, 0); err != nil {
 		t.Fatalf("tie, final_tip=A: want accept, got %v", err)
 	}
@@ -63,7 +63,7 @@ func TestAssertObservationPickedLongestPeerTie(t *testing.T) {
 	}
 }
 
-// TestAssertObservationKeptShorterPeerExceedsK covers the W5.5 exceeds-k
+// TestAssertObservationKeptShorterPeerExceedsK covers the exceeds-k
 // no-switch case: the oracle keeps a shorter incumbent (final_tip)
 // because the longest peer leads it by more than k, so adopting it would
 // exceed the stability window. Accepted only when that lead exceeds k.

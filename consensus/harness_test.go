@@ -103,7 +103,7 @@ func TestHarnessFailsBadReplayer(t *testing.T) {
 // maxTipNoSwitchStub reaches the correct final_tip (it reports the
 // highest-block tip it was fed) but never reports a switch — modelling a
 // SUT that "adopts" the longest chain from the start without ever
-// switching off a competing chain. It must fail the W5.4 switch-decision
+// switching off a competing chain. It must fail the switch-decision
 // assertion on any vector that carries expected_rollback.
 type maxTipNoSwitchStub struct {
 	have bool
@@ -136,7 +136,7 @@ func (s *maxTipNoSwitchStub) DrainSwitchEvents() []format.SwitchEvent {
 	return nil
 }
 
-// TestHarnessRequiresSwitchDecision proves the W5.4 switch assertion bites
+// TestHarnessRequiresSwitchDecision proves the switch assertion bites
 // independently of final_tip: a Replayer that reaches final_tip but emits
 // no switch must fail any vector carrying expected_rollback.
 func TestHarnessRequiresSwitchDecision(t *testing.T) {
