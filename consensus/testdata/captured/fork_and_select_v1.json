@@ -490,6 +490,17 @@
         "slot": 90,
         "hash": "497f5c243909e4b1f5a817923d826ceb09415b318be299ac0eb59db40054152e",
         "block_number": 15
+      },
+      "expected_rollback": {
+        "point": {
+          "slot": 10,
+          "hash": "9e4b9fe0dab7e85b5fcf3a0fa7fab5b64b0d796d7d2d219fd50f4027857ecfc0"
+        },
+        "tip": {
+          "slot": 90,
+          "hash": "497f5c243909e4b1f5a817923d826ceb09415b318be299ac0eb59db40054152e",
+          "block_number": 15
+        }
       }
     },
     "security_param": 6,

@@ -90,14 +90,23 @@ The vector exercises three things at replay time:
 
 1. **Praos longest-chain selection** with two upstream peers serving
    divergent chains.
-2. **Rollback to a non-genesis intersect point.** The observation node,
-   having adopted some of peer A's tail, must roll back to the shared
-   prefix tip and re-apply peer B's tail. The "find common ancestor at
-   slot K > 0" path is the one real consensus failures hit; the
-   forge-in-isolation alternative (no shared prefix) would short-
-   circuit to slot 0 and not exercise it.
+2. **Switch off a shorter chain onto the longer one.** The observation
+   node adopts some of peer A's tail, then switches to peer B. The replay
+   asserts this *decision* (a chain switch whose new tip is `final_tip`,
+   off a shorter peer) via the SUT's emitted switch events — catching a
+   SUT that merely lands on the longest tip without ever switching.
 3. **Stabilized chain agreement.** The replay SUT must reach the same
    `final_tip` (peer B's tip) given the same per-peer inputs.
+
+The vector also records `expected_output.expected_rollback`: the
+shared-prefix intersect point (the common ancestor at slot K > 0 —
+`PREFIX_KILL_SLOT`, here slot 10) plus the resulting tip. **Header-only
+replay asserts the switch decision and that the resulting tip is
+`final_tip`, but does not verify the SUT rolls back to exactly the
+intersect point** — the canonical rollback is applied to block bodies,
+which the chainsync-only capture does not carry. Verifying the rollback
+*target* would require capturing blockfetch bodies and replaying them; the
+`expected_rollback.point` is recorded for that future check.
 
 ## Determinism caveats
 

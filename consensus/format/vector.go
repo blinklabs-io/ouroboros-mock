@@ -180,6 +180,26 @@ type Point struct {
 type ExpectedOutput struct {
 	DownstreamChainSync []ServedMessage `json:"downstream_chainsync"`
 	FinalTip            Tip             `json:"final_tip"`
+
+	// ExpectedRollback, when set, records the fork switch the SUT is
+	// expected to perform. Present on multi-peer fork scenarios; nil for
+	// single-peer or no-switch captures.
+	ExpectedRollback *ExpectedRollback `json:"expected_rollback,omitempty"`
+}
+
+// ExpectedRollback describes the fork switch the SUT should make: roll
+// back to Point — the shared-prefix common ancestor of the competing
+// chains — and adopt the chain ending at Tip (which equals
+// expected_output.final_tip).
+//
+// The replay harness uses Tip to assert the SUT's switch *decision* (it
+// must emit a switch onto Tip off a shorter chain). Point is recorded for
+// body-based verification: header-only replay cannot check that the SUT
+// rolls back to exactly Point, because the canonical rollback is applied
+// to block bodies the header-only trace does not carry.
+type ExpectedRollback struct {
+	Point Point `json:"point"`
+	Tip   Tip   `json:"tip"`
 }
 
 // Tip is a structured chain tip suitable for fast equality checks. Hash

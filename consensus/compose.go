@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
 
@@ -127,6 +128,11 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 		title = fmt.Sprintf("multi-peer-%d", len(peers))
 	}
 
+	expectedRollback, err := deriveExpectedRollback(peers, finalTip)
+	if err != nil {
+		return format.TestVector{}, fmt.Errorf("compose: %w", err)
+	}
+
 	vec := format.TestVector{
 		SchemaVersion: format.CurrentSchemaVersion,
 		Title:         title,
@@ -136,6 +142,7 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 			ExpectedOutput: format.ExpectedOutput{
 				DownstreamChainSync: downstream,
 				FinalTip:            finalTip,
+				ExpectedRollback:    expectedRollback,
 			},
 			SecurityParam: args.SecurityParam,
 			LocalTip:      deriveLocalTip(peers, finalTip, args.SecurityParam),
@@ -187,6 +194,78 @@ func tipsEqual(a, b format.Tip) bool {
 	return a.Slot == b.Slot &&
 		a.BlockNumber == b.BlockNumber &&
 		bytes.Equal(a.Hash, b.Hash)
+}
+
+// deriveExpectedRollback computes the fork switch the SUT should perform:
+// roll back to the shared-prefix common ancestor of the winning chain
+// (final_tip) and the incumbent (the highest-block non-winning peer), then
+// adopt final_tip. The intersect point is the last header byte-identical
+// between the two peers' roll_forward sequences. Returns nil when there is
+// no incumbent (single peer) or no shared prefix (the rollback target
+// would be origin, which the fork scenarios are designed to avoid).
+func deriveExpectedRollback(
+	peers []format.PeerInput, finalTip format.Tip,
+) (*format.ExpectedRollback, error) {
+	winnerIdx, incumbentIdx := -1, -1
+	var incumbentBlock uint64
+	for i := range peers {
+		tip := lastRollForwardTip(peers[i].Served)
+		if tipsEqual(tip, finalTip) {
+			winnerIdx = i
+			continue
+		}
+		if incumbentIdx == -1 || tip.BlockNumber > incumbentBlock {
+			incumbentIdx = i
+			incumbentBlock = tip.BlockNumber
+		}
+	}
+	if winnerIdx < 0 || incumbentIdx < 0 {
+		return nil, nil
+	}
+	w := rollForwardHeaders(peers[winnerIdx].Served)
+	in := rollForwardHeaders(peers[incumbentIdx].Served)
+	last := -1
+	for k := 0; k < len(w) && k < len(in); k++ {
+		if !bytes.Equal(w[k].cbor, in[k].cbor) {
+			break
+		}
+		last = k
+	}
+	if last < 0 {
+		return nil, nil
+	}
+	pt, err := headerPoint(w[last].era, w[last].cbor)
+	if err != nil {
+		return nil, fmt.Errorf("expected_rollback intersect: %w", err)
+	}
+	return &format.ExpectedRollback{Point: pt, Tip: finalTip}, nil
+}
+
+type servedHeader struct {
+	era  uint
+	cbor []byte
+}
+
+func rollForwardHeaders(served []format.ServedMessage) []servedHeader {
+	var out []servedHeader
+	for _, m := range served {
+		if m.MsgType != format.ChainSyncMsgRollForward || m.Era == nil {
+			continue
+		}
+		out = append(out, servedHeader{era: *m.Era, cbor: m.HeaderCbor})
+	}
+	return out
+}
+
+func headerPoint(era uint, cbor []byte) (format.Point, error) {
+	h, err := gledger.NewBlockHeaderFromCbor(era, cbor)
+	if err != nil {
+		return format.Point{}, err
+	}
+	return format.Point{
+		Slot: h.SlotNumber(),
+		Hash: format.HexBytes(h.Hash().Bytes()),
+	}, nil
 }
 
 // loadCaptureVector reads a JSON vector file, decodes it via

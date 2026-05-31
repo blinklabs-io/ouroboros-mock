@@ -99,3 +99,70 @@ func TestHarnessFailsBadReplayer(t *testing.T) {
 		)
 	}
 }
+
+// maxTipNoSwitchStub reaches the correct final_tip (it reports the
+// highest-block tip it was fed) but never reports a switch — modelling a
+// SUT that "adopts" the longest chain from the start without ever
+// switching off a competing chain. It must fail the W5.4 switch-decision
+// assertion on any vector that carries expected_rollback.
+type maxTipNoSwitchStub struct {
+	have bool
+	tip  format.Tip
+}
+
+func (s *maxTipNoSwitchStub) RollForward(
+	_ uint64, _ uint, _ []byte, tip format.Tip,
+) error {
+	if !s.have || tip.BlockNumber > s.tip.BlockNumber {
+		s.have = true
+		s.tip = tip
+	}
+	return nil
+}
+
+func (s *maxTipNoSwitchStub) RollBackward(
+	_ uint64, _ format.Point, _ format.Tip,
+) error {
+	return nil
+}
+
+func (s *maxTipNoSwitchStub) Stabilize() {}
+
+func (s *maxTipNoSwitchStub) BestTip() (format.Tip, bool) {
+	return s.tip, s.have
+}
+
+func (s *maxTipNoSwitchStub) DrainSwitchEvents() []format.SwitchEvent {
+	return nil
+}
+
+// TestHarnessRequiresSwitchDecision proves the W5.4 switch assertion bites
+// independently of final_tip: a Replayer that reaches final_tip but emits
+// no switch must fail any vector carrying expected_rollback.
+func TestHarnessRequiresSwitchDecision(t *testing.T) {
+	vectors, err := consensus.CapturedVectors()
+	if err != nil {
+		t.Fatalf("CapturedVectors: %v", err)
+	}
+	checked := 0
+	for _, cv := range vectors {
+		if cv.Vector.Capture == nil ||
+			cv.Vector.Capture.ExpectedOutput.ExpectedRollback == nil {
+			continue
+		}
+		checked++
+		if err := consensus.RunConsensusVector(
+			t, cv.Vector, &maxTipNoSwitchStub{},
+		); err == nil {
+			t.Fatalf(
+				"%s: a Replayer that reaches final_tip but never switches "+
+					"must fail the switch-decision assertion", cv.Name,
+			)
+		} else {
+			t.Logf("%s: no-switch stub correctly failed: %v", cv.Name, err)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no vector carries expected_rollback")
+	}
+}

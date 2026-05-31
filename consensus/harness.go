@@ -17,6 +17,7 @@ package consensus
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -190,7 +191,52 @@ func runConsensusVector(
 	); err != nil {
 		return fmt.Errorf("%s: final_tip: %w", title, err)
 	}
+	// Switch-decision assertion (W5.4). When the vector expects a fork
+	// switch, the SUT must not merely *end* on the winning chain — it must
+	// have *switched* onto it off a shorter chain. This catches a SUT that
+	// adopts the longest tip from the start without ever considering the
+	// competing chain. The rollback *point* is not checked here: the
+	// switch event carries only endpoints, and verifying the canonical
+	// rollback target needs block bodies the header-only trace omits.
+	if capture.ExpectedOutput.ExpectedRollback != nil {
+		if err := assertSwitchedToWinner(
+			r.DrainSwitchEvents(),
+			capture.Peers,
+			capture.ExpectedOutput.FinalTip,
+		); err != nil {
+			return fmt.Errorf("%s: switch decision: %w", title, err)
+		}
+	}
 	return nil
+}
+
+// assertSwitchedToWinner verifies the SUT emitted a fork switch onto the
+// winning chain (final_tip) from a different, shorter peer — i.e. it
+// adopted a competing chain first and then switched. Returns an error
+// when no such switch is present among the drained events.
+func assertSwitchedToWinner(
+	switches []format.SwitchEvent,
+	peers []format.PeerInput,
+	finalTip format.Tip,
+) error {
+	for _, sw := range switches {
+		if !tipsEqual(sw.NewTip, finalTip) {
+			continue
+		}
+		// The chain we switched away from must be a real, non-winning
+		// peer (the incumbent shorter chain).
+		for _, p := range peers {
+			pt := lastRollForwardTip(p.Served)
+			if tipsEqual(pt, sw.PreviousTip) && !tipsEqual(pt, finalTip) {
+				return nil
+			}
+		}
+	}
+	return errors.New(
+		"SUT never switched onto the winning chain off a shorter peer " +
+			"(no ChainSwitchEvent with new_tip==final_tip from a " +
+			"non-winning peer)",
+	)
 }
 
 // assertTipMatches compares the SUT's selected tip against the vector's
