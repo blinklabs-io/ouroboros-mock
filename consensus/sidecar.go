@@ -225,13 +225,17 @@ func lastRollForwardTip(served []format.ServedMessage) format.Tip {
 }
 
 // assertObservationPickedLongestPeer confirms that finalTip (the
-// observation's last roll_forward tip) matches the per-peer tip with
-// the highest block_number — i.e. the observation node really did
-// select the longest chain. A multi-way tie at the top is rejected
-// because Praos breaks ties by VRF, which the format does not
-// currently carry; an apparent tie therefore means the configurator
-// did not produce sufficient chain-length asymmetry and the vector
-// would be ambiguous.
+// observation's last roll_forward tip) matches one of the per-peer tips
+// with the highest block_number — i.e. the observation node really did
+// settle on a longest chain.
+//
+// A multi-way tie at the top block_number is accepted, not rejected:
+// Praos breaks such ties by VRF, and while this format does not encode
+// the VRF, the oracle (cardano-node) already resolved the tie when it
+// produced finalTip. We trust that resolution and only require that
+// finalTip matches one of the tied longest peers. The replay then checks
+// that the SUT independently reaches the same finalTip (BestTip ==
+// final_tip), which is the conformance assertion that actually bites.
 //
 // Single-peer vectors trivially satisfy the invariant (the lone
 // peer's tip is both the max and what observation served).
@@ -264,35 +268,31 @@ func assertObservationPickedLongestPeer(
 			winnerTips = append(winnerTips, tip)
 		}
 	}
-	if len(winners) > 1 {
-		var ids []uint64
-		for _, i := range winners {
-			ids = append(ids, peers[i].PeerID)
+	// Accept iff final_tip matches one of the longest peers. A single
+	// winner is the common case; multiple winners means a VRF tie the
+	// oracle already resolved (see the doc comment).
+	for _, want := range winnerTips {
+		if finalTip.Slot == want.Slot &&
+			bytes.Equal(finalTip.Hash, want.Hash) &&
+			finalTip.BlockNumber == want.BlockNumber {
+			return nil
 		}
-		return fmt.Errorf(
-			"ambiguous longest chain: peers %v all reach block_number=%d "+
-				"— Praos tie-break by VRF is not encoded in the vector",
-			ids, maxBlock,
-		)
 	}
-	want := winnerTips[0]
-	if finalTip.Slot != want.Slot ||
-		!bytes.Equal(finalTip.Hash, want.Hash) ||
-		finalTip.BlockNumber != want.BlockNumber {
-		selected := "<unknown>"
-		if id, ok := peerIDFor(peers, finalTip); ok {
-			selected = strconv.FormatUint(id, 10)
-		}
-		return fmt.Errorf(
-			"observation selected peer_id=%s (slot=%d block=%d), "+
-				"but the longest peer is peer_id=%d (slot=%d block=%d)",
-			selected,
-			finalTip.Slot, finalTip.BlockNumber,
-			peers[winners[0]].PeerID,
-			want.Slot, want.BlockNumber,
-		)
+	var ids []uint64
+	for _, i := range winners {
+		ids = append(ids, peers[i].PeerID)
 	}
-	return nil
+	selected := "<unknown>"
+	if id, ok := peerIDFor(peers, finalTip); ok {
+		selected = strconv.FormatUint(id, 10)
+	}
+	return fmt.Errorf(
+		"observation selected peer_id=%s (slot=%d block=%d), but the "+
+			"longest peer(s) %v reach block_number=%d",
+		selected,
+		finalTip.Slot, finalTip.BlockNumber,
+		ids, maxBlock,
+	)
 }
 
 // peerIDFor returns the PeerID of the peer whose last roll_forward
