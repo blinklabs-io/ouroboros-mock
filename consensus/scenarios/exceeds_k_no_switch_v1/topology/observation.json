@@ -1,0 +1,14 @@
+{
+  "localRoots": [
+    {
+      "accessPoints": [
+        {"address": "cardano-peer-a", "port": 3001}
+      ],
+      "advertise": false,
+      "trustable": true,
+      "valency": 1
+    }
+  ],
+  "publicRoots": [],
+  "useLedgerAfterSlot": -1
+}
