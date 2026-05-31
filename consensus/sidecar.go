@@ -237,10 +237,18 @@ func lastRollForwardTip(served []format.ServedMessage) format.Tip {
 // that the SUT independently reaches the same finalTip (BestTip ==
 // final_tip), which is the conformance assertion that actually bites.
 //
+// A finalTip that is a SHORTER, non-longest peer is also accepted, but
+// only as an exceeds-k no-switch: securityParam must be > 0 and the
+// longest peer must lead finalTip by more than securityParam. That is the
+// shape where the SUT's implausibility guard (with no local_tip) rejects
+// the far-ahead peer and keeps the incumbent, so the oracle and the SUT
+// agree on the shorter chain. A non-longest finalTip without that
+// justification is rejected.
+//
 // Single-peer vectors trivially satisfy the invariant (the lone
 // peer's tip is both the max and what observation served).
 func assertObservationPickedLongestPeer(
-	peers []format.PeerInput, finalTip format.Tip,
+	peers []format.PeerInput, finalTip format.Tip, securityParam uint64,
 ) error {
 	if len(peers) == 0 {
 		return errors.New("no peers in vector")
@@ -282,9 +290,20 @@ func assertObservationPickedLongestPeer(
 	for _, i := range winners {
 		ids = append(ids, peers[i].PeerID)
 	}
+	// final_tip is not a longest peer. The one consistent reason is an
+	// exceeds-k no-switch: the oracle kept a shorter incumbent because
+	// adopting the longest peer would have required rolling back more than
+	// the stability window k. That holds only when final_tip matches a
+	// captured peer AND the longest peer leads it by more than k — exactly
+	// when the replay SUT's implausibility guard (with no local_tip) also
+	// rejects the longer peer and stays on the incumbent.
 	selected := "<unknown>"
 	if id, ok := peerIDFor(peers, finalTip); ok {
 		selected = strconv.FormatUint(id, 10)
+		if securityParam > 0 &&
+			maxBlock > finalTip.BlockNumber+securityParam {
+			return nil
+		}
 	}
 	return fmt.Errorf(
 		"observation selected peer_id=%s (slot=%d block=%d), but the "+

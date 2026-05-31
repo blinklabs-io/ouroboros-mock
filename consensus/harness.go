@@ -115,6 +115,7 @@ func RunConsensusVector(
 	// SUT bug.
 	if err := assertObservationPickedLongestPeer(
 		v.Capture.Peers, v.Capture.ExpectedOutput.FinalTip,
+		v.Capture.SecurityParam,
 	); err != nil {
 		return fmt.Errorf(
 			"vector %q is self-inconsistent: %w", v.Title, err,

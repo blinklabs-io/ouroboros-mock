@@ -115,7 +115,7 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 	// flake (observation didn't settle on the longer chain in time)
 	// rather than letting it land in the corpus.
 	if err := assertObservationPickedLongestPeer(
-		peers, finalTip,
+		peers, finalTip, args.SecurityParam,
 	); err != nil {
 		return format.TestVector{}, fmt.Errorf(
 			"observation %s: %w",
@@ -220,6 +220,12 @@ func deriveExpectedRollback(
 		}
 	}
 	if winnerIdx < 0 || incumbentIdx < 0 {
+		return nil, nil
+	}
+	// No-switch case (exceeds-k): final_tip is a SHORTER peer than the
+	// incumbent — the oracle kept the shorter chain because adopting the
+	// longer one would exceed k. There is no switch to record.
+	if finalTip.BlockNumber < incumbentBlock {
 		return nil, nil
 	}
 	w := rollForwardHeaders(peers[winnerIdx].Served)

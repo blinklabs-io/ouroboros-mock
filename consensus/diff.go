@@ -157,12 +157,14 @@ func diffVectors(golden, fresh format.TestVector) DiffResult {
 	if err := assertObservationPickedLongestPeer(
 		golden.Capture.Peers,
 		golden.Capture.ExpectedOutput.FinalTip,
+		golden.Capture.SecurityParam,
 	); err != nil {
 		diffs = append(diffs, "golden: "+err.Error())
 	}
 	if err := assertObservationPickedLongestPeer(
 		fresh.Capture.Peers,
 		fresh.Capture.ExpectedOutput.FinalTip,
+		fresh.Capture.SecurityParam,
 	); err != nil {
 		diffs = append(diffs, "fresh: "+err.Error())
 	}
