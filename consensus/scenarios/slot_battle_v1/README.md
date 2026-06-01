@@ -21,10 +21,22 @@ The configurator (`configurator.sh`) drives three forge phases:
 | B | pool 1 | copy of shared prefix | `+ PEER_A_EXTENSION_SLOTS` (default +4) | peer A |
 | C | pool 2 | copy of shared prefix | `+ PEER_B_EXTENSION_SLOTS` (default +4) | peer B |
 
-Phases B and C use the **same small window** so each pool forges ~one
-block extending the shared prefix, landing at the same height a few slots
-apart. No key splicing or hand-synthesized blocks — just two pools forging
-from the same parent.
+Phases B and C use the **same small window** so each pool extends the
+shared prefix to the **same height** a few slots apart. No key splicing or
+hand-synthesized blocks — just two pools forging from the same parent. The
+divergent segment may be one block or several; what matters for a tie is
+only that both peers reach the **same `block_number`** with their tips
+within 5 slots (see below), not how many blocks each forged.
+
+In the committed snapshot both peers reach `block_number` 7 with tips at
+slots 21 and 24 (3 apart), diverging just after the shared prefix at slot
+11. The peers are ordered so the VRF **loser** is `peer_id` 0 (replayed
+first) and the **winner** — the chain the observation node settled on,
+i.e. `final_tip` — is `peer_id` 1 (replayed last). That mirrors
+`fork_and_select_v1`: the SUT adopts the first chain, then must use the VRF
+tiebreaker to *switch* onto the equal-length winner. A SUT that ignored VRF
+and kept the first chain would land on the loser and fail, which is what
+gives this vector teeth.
 
 ## Capture, inspect, commit (this scenario is not push-button)
 
@@ -33,9 +45,11 @@ is **inherently non-deterministic** to forge and must be inspected before
 committing. Two things must hold, and neither is guaranteed on any single
 run (`activeSlotsCoeff=0.4`, two equal pools, each wins ~0.225/slot):
 
-1. **Both peers add exactly one block** at the same height. A pool that
-   wins 0 slots in the window leaves its peer with no divergent block; a
-   pool that wins 2 makes the chains unequal length (a fork, not a tie).
+1. **Both peers reach the same height** (equal `block_number`, each at
+   least one block past the shared prefix). A pool that wins 0 slots leaves
+   its peer on the bare prefix (no divergent block); pools that win
+   *different* counts make the chains unequal length (a fork, not a tie).
+   Equal counts ≥ 1 — whether one block each or several — give a tie.
 2. **The two blocks are within 5 slots** of each other. Conway's VRF
    tiebreaker is *restricted* (`praosRestrictedTiebreakerMaxSlotDistance`
    = 5); beyond that, the SUT returns `ChainEqual` and the pick is
@@ -57,9 +71,11 @@ per-CI-regenerated artifact.
   is that dingo independently reaches that same `final_tip`. The tip-only
   `UpdatePeerTip` path could never arm the tiebreaker — the real-handler
   fixture is mandatory here.
-- **Switch decision.** The observation adopts one block then
-  switches to the VRF winner; the replay asserts dingo emits the
-  corresponding switch off the loser onto `final_tip`.
+- **Switch decision.** Replaying the loser (`peer_id` 0) first and the
+  winner (`peer_id` 1) last, the SUT adopts the loser's chain, then must
+  switch onto the equal-length VRF winner; the replay asserts dingo emits
+  the corresponding switch off the loser onto `final_tip`. The switch
+  rolls back to the shared prefix, so the divergent segment stays within k.
 
 ## Stack contents
 
