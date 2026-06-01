@@ -77,6 +77,14 @@ per-CI-regenerated artifact.
   the corresponding switch off the loser onto `final_tip`. The switch
   rolls back to the shared prefix, so the divergent segment stays within k.
 
+**Limitation — outcome, not mechanism.** The harness only checks that dingo
+reaches the same `final_tip` the oracle did. On this single vector several
+*wrong* heuristics — pick lowest tip slot, pick lowest header hash — happen to
+coincide with the genuine VRF winner, so a green result proves outcome
+agreement, not that dingo used the VRF tiebreaker specifically. Pinning the
+mechanism would need a second tie vector where lowest-hash / lowest-slot and
+the VRF winner disagree; that is left as a follow-up.
+
 ## Stack contents
 
 Same shape as `fork_and_select_v1`: `configurator` (genesis + 3-phase

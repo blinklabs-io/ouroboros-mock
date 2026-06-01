@@ -2,25 +2,27 @@
 #
 # Per-scenario configurator for exceeds_k_no_switch_v1.
 #
-# Generates a 2-pool genesis, then drives cardano-node through three
-# forge phases to stage two divergent chains sharing a common prefix,
-# where peer B leads peer A by MORE than k blocks:
+# Generates a 2-pool genesis, then drives cardano-node through three forge
+# phases to stage two divergent chains sharing a common prefix, where the
+# incumbent peer A is forged MORE than k blocks past the fork (so switching to
+# the longer peer B is a > k rollback a conformant node refuses):
 #
 #   Phase A: pool 1 forges in isolation until tip slot >= PREFIX_KILL_SLOT.
-#            Snapshot becomes the shared prefix.
+#            Snapshot becomes the shared prefix (the fork point).
 #   Phase B: pool 1 extends the shared prefix until tip slot >=
-#            PREFIX_KILL_SLOT + PEER_A_EXTENSION_SLOTS.
-#            Snapshot becomes peer-a's chain DB.
+#            PREFIX_KILL_SLOT + PEER_A_EXTENSION_SLOTS. Snapshot becomes
+#            peer-a's chain DB — the deep incumbent, > k blocks past the fork.
 #   Phase C: pool 2 extends the shared prefix until tip slot >=
 #            PREFIX_KILL_SLOT + PEER_B_EXTENSION_SLOTS. Snapshot becomes
-#            peer-b's chain DB. PEER_B_EXTENSION_SLOTS is well above
-#            PEER_A_EXTENSION_SLOTS so peer B leads peer A by > k.
+#            peer-b's chain DB — longer than peer A (and by > k, so the SUT's
+#            guard rejects its tip), but reachable only by a > k rollback.
 #
-# Unlike fork_and_select_v1, the observation node's topology pins ONLY
-# peer A (see topology/observation.json), so it settles on peer A's
-# shorter chain. The vector still records BOTH peers; the replay SUT,
-# offered both, must reject the > k-ahead peer B (implausibility guard,
-# no local_tip) and stay on peer A — the exceeds-k no-switch outcome.
+# Unlike fork_and_select_v1 (shallow fork, rollback <= k, the node switches),
+# the observation node's topology pins ONLY peer A (see
+# topology/observation.json), so it settles on peer A's shorter chain. The
+# vector still records BOTH peers; the replay SUT, offered both, must reject
+# the > k-ahead peer B (implausibility guard, no local_tip) and stay on peer A
+# — the exceeds-k no-switch outcome.
 #
 # During each forge phase cardano-node runs as a subprocess of this
 # script (not a sibling docker service) so the configurator owns the
@@ -41,26 +43,35 @@ set -euo pipefail
 # (Byron) genesis hash, and cardano-node rejects the inherited
 # chain DB on hash mismatch.
 #
-# At activeSlotsCoeff=0.4 with two equal-stake pools each pool wins
-# ~0.225 of slots (1 - (1-0.4)^(1/2)). For exceeds-k, peer B must lead
-# peer A by MORE than k=6 blocks (the replay SUT's implausibility guard
-# only rejects peer B's tip when it is > k ahead of peer A). With:
-#   prefix expected blocks  ≈ 0.225 * 10 ≈ 2.3
-#   peer A extension blocks ≈ 0.225 *  8 ≈ 1.8
-#   peer B extension blocks ≈ 0.225 * 60 ≈ 13.5
-# peer B leads by ~12 blocks in expectation — robustly > k=6. Peer A is
-# kept SHORT on purpose: isolated single-pool forging is high-variance on
-# a small slot count, and an over-performing peer A is what erodes the
-# lead (an early capture forged peer A to block 10 vs ~6 expected, leaving
-# a lead of only 5). A short peer A both lowers its expected blocks and
-# shrinks its absolute variance window. Both extensions stay within epoch
-# 0 (total slot < epochLength=75) to avoid an epoch-boundary nonce change
-# mid-forge. Inspect each capture (README "capture, inspect, commit"): the
-# lead must be > k, else the composer rejects the non-longest final_tip;
-# re-run on the occasional drift to <= k.
+# Exceeds-k NO-SWITCH staged by ROLLBACK DEPTH, not tip-length lead. Both
+# peers fork from the shared prefix, so the rollback needed to switch from
+# the incumbent (peer A) to the longer peer B equals peer A's extension
+# BLOCK COUNT. For a conformant Praos node to REFUSE that switch, peer A must
+# be forged DEEP — strictly more than k=6 blocks past the fork — so adopting
+# peer B would exceed the k-deep rollback bound. Peer B is forged longer
+# still, so it is genuinely the longer chain that is nonetheless unreachable.
+# (This is the inverse of fork_and_select_v1, which keeps peer A SHALLOW so
+# the same longest-peer-B is reachable within k and the node switches.)
+#
+# Peer A's depth past the fork must be > k. The hard part is the forge
+# tolerance: each phase pays cardano-node startup before it can forge, so by
+# phase C the wall-clock is already well past the prefix. If peer A's window
+# is wide, phase B ends at a high slot and phase C starts beyond cardano-node's
+# "CaughtUp" tolerance (~3k/f ≈ 45 slots) and refuses to forge. So peer A's
+# window is kept SMALL in slots and we rely on a high realized forge rate
+# (variance pushes 0.225 up toward ~0.45) to reach > k blocks within it. At
+# PEER_A=22 a rate >= ~0.32 yields rollback > k; the capture loop re-rolls until
+# variance delivers it (and peer B's lead > k so the SUT's guard rejects it).
+#
+# The observation pins ONLY peer A (topology/observation.json, valency 1): a
+# faithful both-peers oracle would need a sequenced bring-up (settle deep on A,
+# THEN be offered B's > k fork) that this all-at-once configurator cannot stage,
+# and with both peers up from genesis the oracle simply takes the longest. The
+# pin deterministically produces the SAME final_tip = peer A that a node which
+# had settled deep on A would reach — see README "Mechanism caveat".
 PREFIX_KILL_SLOT="${PREFIX_KILL_SLOT:-10}"
-PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-8}"
-PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-60}"
+PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-22}"
+PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-80}"
 # Each phase's deadline. Phase C's kill slot is the biggest
 # (PREFIX + B_EXT), so this must accommodate that wait.
 PHASE_TIMEOUT_SECS="${PHASE_TIMEOUT_SECS:-180}"

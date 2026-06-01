@@ -42,14 +42,26 @@ set -euo pipefail
 # not slot number, so if A and B end up with similar block counts
 # the observation node may pick A on a run where pool 1's VRF wins
 # happened to cluster early. With:
-#   prefix expected blocks  ≈ 0.225 * 10 ≈ 2.3
-#   peer A extension blocks ≈ 0.225 * 15 ≈ 3.4
-#   peer B extension blocks ≈ 0.225 * 80 ≈ 18.0
-# peer B has a ~14-block lead in expectation, far outside reasonable
-# variance.
+# This is a SWITCH vector with two coupled constraints, both relative to the
+# shared-prefix fork point:
+#
+#  1. ROLLBACK <= k: peer A's extension block count is the rollback depth to
+#     switch off it onto peer B. It must stay <= k=6, or a conformant node
+#     refuses the switch and the vector degenerates into an exceeds-k
+#     no-switch (which exceeds_k_no_switch_v1 stages on purpose).
+#  2. LEAD <= 2k: in the replay each peer announces its FINAL tip on its first
+#     header, so peer B's tip jumps ahead of peer A at once. The SUT's
+#     implausibility guard rejects a tip more than k ahead unless a local_tip
+#     arms the catch-up relaxation, which only reaches local_tip + 2k. So peer
+#     B's lead over peer A must be <= 2k=12 (and > k, so the local_tip path is
+#     actually exercised — that is this vector's distinct job vs within_k).
+#
+# Net: peer A a few blocks past the fork (rollback ~3-5), peer B leading by
+# roughly k+1..2k. The capture loop gates on real dingo conformance and
+# re-rolls when variance lands outside the window.
 PREFIX_KILL_SLOT="${PREFIX_KILL_SLOT:-10}"
-PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-15}"
-PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-80}"
+PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-8}"
+PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-55}"
 # Each phase's deadline. Phase C's kill slot is the biggest
 # (PREFIX + B_EXT), so this must accommodate that wait.
 PHASE_TIMEOUT_SECS="${PHASE_TIMEOUT_SECS:-180}"

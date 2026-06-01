@@ -15,6 +15,7 @@
 package consensus
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
@@ -63,36 +64,96 @@ func TestAssertObservationPickedLongestPeerTie(t *testing.T) {
 	}
 }
 
-// TestAssertObservationKeptShorterPeerExceedsK covers the exceeds-k
-// no-switch case: the oracle keeps a shorter incumbent (final_tip)
-// because the longest peer leads it by more than k, so adopting it would
-// exceed the stability window. Accepted only when that lead exceeds k.
-func TestAssertObservationKeptShorterPeerExceedsK(t *testing.T) {
-	a := tipPeer(40, 7, 0xAA)     // incumbent (kept)
-	bFar := tipPeer(90, 15, 0xBB) // longest, leads A by 8
-	peers := []format.PeerInput{a, bFar}
-	tipA := *a.Served[0].Tip
+// loadForkFixture loads a frozen real-header fork fixture and returns its
+// peers plus a helper yielding a given peer's last roll_forward tip (usable as
+// final_tip). These fixtures carry genuine Conway headers with a real shared
+// prefix, so the rollback-depth guard has an ancestor to compute — unlike the
+// tip-only fixtures, which can only exercise the discredited tip-lead model.
+func loadForkFixture(
+	t *testing.T, name string,
+) ([]format.PeerInput, func(peerID uint64) format.Tip) {
+	t.Helper()
+	v, err := LoadVector(filepath.Join("testdata", "fixtures", name))
+	if err != nil {
+		t.Fatalf("load fixture %s: %v", name, err)
+	}
+	peers := v.Capture.Peers
+	tipOf := func(peerID uint64) format.Tip {
+		for _, p := range peers {
+			if p.PeerID == peerID {
+				return lastRollForwardTip(p.Served)
+			}
+		}
+		t.Fatalf("fixture %s has no peer_id=%d", name, peerID)
+		return format.Tip{}
+	}
+	return peers, tipOf
+}
 
-	// final_tip=A, B leads by 8 > k=6: justified no-switch, accept.
-	if err := assertObservationPickedLongestPeer(peers, tipA, 6); err != nil {
-		t.Fatalf("exceeds-k (lead 8 > k 6): want accept, got %v", err)
+// TestAssertObservationKeptShorterPeerExceedsK exercises exceeds-k no-switch
+// acceptance with REAL multi-block shared-prefix fixtures, so the guard reasons
+// about rollback DEPTH (finalBlock - commonAncestorBlock), not tip-length lead.
+// The fixtures were frozen from real captures:
+//
+//	shallow_fork_big_lead: peer0 block 7, peer1 block 15, ancestor block 5
+//	                       -> rollback 2, tip lead 8
+//	deep_fork:             peer0 block 12, peer1 block 24, ancestor block 5
+//	                       -> rollback 7, tip lead 12
+//
+// The shallow-fork case is the one the previous tip-lead guard got wrong: an
+// 8-block lead "exceeds k=6", but the fork is only 2 blocks back, so a
+// conformant node switches — keeping peer0 must be REJECTED. The deep-fork
+// case flips from accept to reject as k grows past the rollback depth, which a
+// tip-lead guard could never model.
+func TestAssertObservationKeptShorterPeerExceedsK(t *testing.T) {
+	shallow, shallowTip := loadForkFixture(t, "shallow_fork_big_lead.json")
+	deep, deepTip := loadForkFixture(t, "deep_fork.json")
+
+	cases := []struct {
+		name     string
+		peers    []format.PeerInput
+		finalTip format.Tip
+		k        uint64
+		wantErr  bool
+	}{
+		{
+			// rollback 2 <= k=6: peer1 adoptable, keeping peer0 is wrong.
+			// The old tip-lead guard wrongly accepted this (lead 8 > 6).
+			"shallow fork, rollback within k -> reject",
+			shallow, shallowTip(0), 6, true,
+		},
+		{
+			// rollback 7 > k=6: no longer chain reachable within k -> accept.
+			"deep fork, rollback beyond k -> accept",
+			deep, deepTip(0), 6, false,
+		},
+		{
+			// same deep fork, k=10: rollback 7 <= 10, peer1 adoptable -> reject.
+			// The old tip-lead guard wrongly accepted this (lead 12 > 10).
+			"deep fork, larger k makes rollback adoptable -> reject",
+			deep, deepTip(0), 10, true,
+		},
+		{
+			// final_tip on the longest peer is always accepted.
+			"final_tip on the longest peer -> accept",
+			deep, deepTip(1), 6, false,
+		},
+		{
+			// k=0 disables the exceeds-k path: a shorter final_tip is never
+			// justified.
+			"k=0, shorter final_tip -> reject",
+			deep, deepTip(0), 0, true,
+		},
 	}
-	// Same vector at k=0: nothing justifies keeping the shorter peer.
-	if err := assertObservationPickedLongestPeer(peers, tipA, 0); err == nil {
-		t.Fatal("k=0: keeping shorter peer not justified, want reject")
-	}
-	// Lead within k: the oracle should have switched, so reject.
-	bNear := tipPeer(70, 12, 0xCC) // leads A by 5 <= k=6
-	peersNear := []format.PeerInput{a, bNear}
-	if err := assertObservationPickedLongestPeer(peersNear, tipA, 6); err == nil {
-		t.Fatal("lead 5 <= k 6: keeping shorter peer not justified, reject")
-	}
-	// Three peers: one far ahead (> k) AND one longer-but-within-k. The
-	// within-k peer is adoptable, so the SUT would switch to it and final_tip
-	// = A is wrong. The far-ahead peer alone must not justify the no-switch.
-	mid := tipPeer(60, 11, 0xDD) // leads A by 4 <= k=6, adoptable
-	peersMixed := []format.PeerInput{a, mid, bFar}
-	if err := assertObservationPickedLongestPeer(peersMixed, tipA, 6); err == nil {
-		t.Fatal("intermediate within-k peer is adoptable: want reject, got nil")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := assertObservationPickedLongestPeer(tc.peers, tc.finalTip, tc.k)
+			if tc.wantErr && err == nil {
+				t.Fatalf("want reject, got accept")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("want accept, got %v", err)
+			}
+		})
 	}
 }

@@ -26,10 +26,13 @@ import (
 // ignoring every other peer and every rollback. It is the canonical
 // "bad SUT" — it never performs chain selection.
 //
-// For a multi-peer vector whose final_tip is a non-first peer (e.g.
-// fork_and_select_v1, where peer 0 ends at block 6 but final_tip is peer
-// 1's block 15), this must produce a final_tip mismatch. It is a
-// self-contained fake with no dingo dependency, so it runs in
+// For a multi-peer vector whose final_tip is a non-first peer — the switch
+// vectors, where the winner is the last-fed peer (within_k_fork_v1,
+// slot_battle_v1, fork_and_select_v1) — this must produce a final_tip
+// mismatch. (It does NOT fail the exceeds-k no-switch vector, whose final_tip
+// is the first/incumbent peer; TestHarnessFailsBadReplayer only requires that
+// the stub fail at least one vector, which the switch vectors guarantee.) It
+// is a self-contained fake with no dingo dependency, so it runs in
 // ouroboros-mock CI with no SUT checkout — the whole point of the test.
 type firstPeerStub struct {
 	have bool

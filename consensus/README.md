@@ -111,32 +111,44 @@ hand-crafted examples.
 
 ```go
 import (
-    "github.com/blinklabs-io/gouroboros/protocol/chainsync"
+    "testing"
+
     "github.com/blinklabs-io/ouroboros-mock/consensus"
+    "github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
 
-// 1. Adapt your chain-selection implementation to the harness's
-//    ChainSelector interface. peerID is the vector's peer_id (a
-//    uint64); your adapter is free to map it to whatever internal
-//    peer-routing type your selector uses.
+// 1. Adapt your chain-selection implementation to the harness's Replayer
+//    interface. peerID is the vector's peer_id (a uint64); your adapter is
+//    free to map it to whatever internal peer-routing type your selector uses.
 type myAdapter struct{ /* ... */ }
-func (a *myAdapter) UpdatePeerTip(peerID uint64, tip chainsync.Tip, vrf []byte) bool { /* ... */ }
-func (a *myAdapter) EvaluateAndSwitch() { /* ... */ }
-func (a *myAdapter) BestPeerTip() (chainsync.Tip, bool) { /* ... */ }
 
-// 2. Run the embedded corpus. The factory is called once per
-//    subtest so each vector replays against a fresh selector.
+func (a *myAdapter) RollForward(peerID uint64, era uint, headerCbor []byte, tip format.Tip) error { /* ... */ }
+func (a *myAdapter) RollBackward(peerID uint64, point format.Point, tip format.Tip) error { /* ... */ }
+func (a *myAdapter) Stabilize()                              { /* drive the selector to a quiescent decision */ }
+func (a *myAdapter) BestTip() (format.Tip, bool)             { /* ... */ }
+func (a *myAdapter) DrainSwitchEvents() []format.SwitchEvent { /* ... */ }
+
+// 2. Run the embedded corpus. The factory is called once per subtest with
+//    that vector's capture, so the adapter can configure k (security_param)
+//    and any pre-seeded local_tip before replay; each vector replays against
+//    a fresh selector.
 func TestConsensusConformance(t *testing.T) {
-    consensus.RunAllCapturedVectors(t, func() consensus.ChainSelector {
-        return &myAdapter{}
-    })
+    consensus.RunAllCapturedVectors(t,
+        func(capture *format.ConsensusCapture) consensus.Replayer {
+            return newMyAdapter(capture.SecurityParam, capture.LocalTip)
+        })
 }
 ```
 
-The harness derives each peer's last `roll_forward` tip from the
-served trace, feeds it to the adapter via `UpdatePeerTip`, calls
-`EvaluateAndSwitch`, and asserts the adapter's best tip matches
-`expected_output.final_tip` (slot + hash + block_number).
+The harness replays every peer's full served trace in order — each
+`roll_forward` / `roll_backward` delivered through the matching `Replayer`
+method — then calls `Stabilize` and asserts `BestTip` matches
+`expected_output.final_tip` (slot + hash + block_number). When the vector
+carries an `expected_rollback`, it additionally asserts the SUT emitted a
+switch onto `final_tip` off a shorter-or-equal-length peer (via
+`DrainSwitchEvents`). The rollback *point* itself is not replayed-verified, and
+`expected_output.downstream_chainsync` is recorded but not asserted during
+replay — both are checked structurally at capture/compose time only.
 
 For ad-hoc iteration outside the harness's subtest loop, use
 `consensus.CapturedVectors()` to get the embedded corpus as

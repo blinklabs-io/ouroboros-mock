@@ -14,8 +14,8 @@ The configurator drives cardano-node through three forge phases
 | Phase | Forging pool | Starting DB | Kill slot | Snapshot to |
 |---|---|---|---|---|
 | A | pool 1 | fresh | `PREFIX_KILL_SLOT` (default 10) | `shared-prefix-db/` |
-| B | pool 1 | copy of shared prefix | `+ PEER_A_EXTENSION_SLOTS` (default +15 ⇒ ~25) | `peer-a-data/` |
-| C | pool 2 | copy of shared prefix | `+ PEER_B_EXTENSION_SLOTS` (default +80 ⇒ ~90) | `peer-b-data/` |
+| B | pool 1 | copy of shared prefix | `+ PEER_A_EXTENSION_SLOTS` (default +8) | `peer-a-data/` |
+| C | pool 2 | copy of shared prefix | `+ PEER_B_EXTENSION_SLOTS` (default +55) | `peer-b-data/` |
 
 Slot counts are deliberately small so each phase's wall-clock-vs-chain
 gap stays inside cardano-node's Genesis State Machine "CaughtUp"
@@ -38,12 +38,23 @@ No key rotation, no block splicing, no hand-synthesized blocks. Just
 running cardano-node with different key mounts at different times
 against the same genesis.
 
-`PEER_B_EXTENSION_SLOTS` is sized so peer B's expected **block count**
-substantially exceeds peer A's. Praos longest-chain selection is by
-block count, not slot number, so picking similar slot counts for the
-two extensions can let leadership-lottery variance flip which peer
-wins on a given run. With the defaults (15 vs 80) peer B's expected
-block lead is ~14 blocks — robustly outside reasonable variance.
+The two extension windows are sized for the **switch constraints** (see the
+comment block in `configurator.sh`), both measured from the shared-prefix
+fork point:
+
+- **Peer A stays shallow** so the rollback to switch off it onto peer B is
+  `<= k=6`. Peer A's extension block count *is* that rollback depth.
+- **Peer B leads peer A by more than k but no more than 2k.** The 2k ceiling
+  is a replay-fidelity bound, not a Praos one: in the recorded trace each peer
+  announces its FINAL tip on its first header, so peer B's tip jumps ahead of
+  peer A at once. The SUT's implausibility guard rejects a tip more than k
+  ahead of its reference unless the captured `local_tip` arms the catch-up
+  relaxation, which only reaches `local_tip + 2k`. A lead in `(k, 2k]` is the
+  window where that relaxation is both *needed* (lead > k, so `local_tip` is
+  emitted and exercised — this vector's distinct job vs `within_k_fork_v1`'s
+  lead `<= k`) and *sufficient* (lead `<= 2k`, so the SUT can still reach
+  peer B). The capture loop gates on real SUT conformance and re-rolls when
+  leadership variance lands the lead outside the window.
 
 ## Stack contents
 

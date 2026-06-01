@@ -212,9 +212,21 @@ func runConsensusVector(
 }
 
 // assertSwitchedToWinner verifies the SUT emitted a fork switch onto the
-// winning chain (final_tip) from a different, shorter peer — i.e. it
-// adopted a competing chain first and then switched. Returns an error
-// when no such switch is present among the drained events.
+// winning chain (final_tip) from a different, shorter-or-equal-length peer —
+// i.e. it adopted a competing chain first and then switched up to (a strictly
+// longer fork) or across to (an equal-length VRF-tie winner) final_tip.
+// Returns an error when no such switch is present among the drained events.
+//
+// The PreviousTip must belong to a non-winning peer whose block_number is <=
+// final_tip's: a "switch" from a longer chain down to a shorter winner is
+// nonsensical under longest-chain selection and is not accepted as evidence.
+//
+// Feed-order contract: the harness replays peers in slice order, so the winner
+// must be fed AFTER the chain it displaces for a switch to be observable — a
+// SUT fed the winner first adopts it outright and never switches. The capture
+// pipeline assigns the winner the last peer slot for exactly this reason; a
+// vector that expects a switch but lists the winner first would fail here
+// despite a correct selector.
 func assertSwitchedToWinner(
 	switches []format.SwitchEvent,
 	peers []format.PeerInput,
@@ -224,19 +236,20 @@ func assertSwitchedToWinner(
 		if !tipsEqual(sw.NewTip, finalTip) {
 			continue
 		}
-		// The chain we switched away from must be a real, non-winning
-		// peer (the incumbent shorter chain).
+		// The chain we switched away from must be a real, non-winning peer
+		// (the incumbent), and no longer than the winner.
 		for _, p := range peers {
 			pt := lastRollForwardTip(p.Served)
-			if tipsEqual(pt, sw.PreviousTip) && !tipsEqual(pt, finalTip) {
+			if tipsEqual(pt, sw.PreviousTip) && !tipsEqual(pt, finalTip) &&
+				pt.BlockNumber <= finalTip.BlockNumber {
 				return nil
 			}
 		}
 	}
 	return errors.New(
-		"SUT never switched onto the winning chain off a shorter peer " +
-			"(no ChainSwitchEvent with new_tip==final_tip from a " +
-			"non-winning peer)",
+		"SUT never switched onto the winning chain off a shorter or " +
+			"equal-length peer (no ChainSwitchEvent with new_tip==final_tip " +
+			"from a non-winning peer of block_number <= final_tip)",
 	)
 }
 
@@ -309,13 +322,19 @@ type CapturedVector struct {
 	Vector format.TestVector
 }
 
-// RunAllCapturedVectors iterates the embedded captured corpus and
-// replays each vector as its own subtest. newReplayer is called once per
-// subtest to produce a fresh Replayer — vectors must run in isolation;
-// sharing one across subtests would leak the previous vector's SUT state
+// RunAllCapturedVectors iterates the embedded captured corpus and replays
+// each vector as its own subtest. newReplayer is called once per subtest with
+// that vector's capture, so the SUT-side adapter can configure itself from the
+// per-vector security_param and local_tip before replay — different scenarios
+// are forged under different k and pre-seeded local chains, and a single fixed
+// Replayer could not honour them. A fresh Replayer per subtest also keeps
+// vectors isolated; sharing one would leak the previous vector's SUT state
 // into the next replay. Empty corpus is a soft skip; a vacuous pass would
 // silently hide a regression that removes the corpus.
-func RunAllCapturedVectors(t *testing.T, newReplayer func() Replayer) {
+func RunAllCapturedVectors(
+	t *testing.T,
+	newReplayer func(capture *format.ConsensusCapture) Replayer,
+) {
 	t.Helper()
 	vectors, err := CapturedVectors()
 	if err != nil {
@@ -326,7 +345,7 @@ func RunAllCapturedVectors(t *testing.T, newReplayer func() Replayer) {
 	}
 	for _, cv := range vectors {
 		t.Run(cv.Name, func(t *testing.T) {
-			r := newReplayer()
+			r := newReplayer(cv.Vector.Capture)
 			if err := RunConsensusVector(t, cv.Vector, r); err != nil {
 				t.Fatalf("%s: %v", cv.Vector.Title, err)
 			}

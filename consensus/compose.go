@@ -278,6 +278,36 @@ func headerPoint(era uint, cbor []byte) (format.Point, error) {
 	}, nil
 }
 
+// commonAncestorBlockNumber decodes the headers of two served traces and
+// returns the block number of the deepest block they share (the fork point),
+// and true; or 0,false when they share no block or a header cannot be decoded.
+//
+// The traces produced by the capture pipeline are origin-anchored and
+// index-aligned (block i sits at index i in every peer that has it), so an
+// index-wise CBOR comparison locates the fork. This is the same prefix scan
+// deriveExpectedRollback uses; it is factored out here so the chain-selection
+// guard can reason about rollback DEPTH (finalTip.BlockNumber - ancestor)
+// rather than tip-length lead.
+func commonAncestorBlockNumber(a, b []format.ServedMessage) (uint64, bool) {
+	ha := rollForwardHeaders(a)
+	hb := rollForwardHeaders(b)
+	last := -1
+	for i := 0; i < len(ha) && i < len(hb); i++ {
+		if !bytes.Equal(ha[i].cbor, hb[i].cbor) {
+			break
+		}
+		last = i
+	}
+	if last < 0 {
+		return 0, false
+	}
+	h, err := gledger.NewBlockHeaderFromCbor(ha[last].era, ha[last].cbor)
+	if err != nil {
+		return 0, false
+	}
+	return h.BlockNumber(), true
+}
+
 // loadCaptureVector reads a JSON vector file, decodes it via
 // format.DecodeTestVector, and confirms it's a consensus-category
 // vector with a non-nil Capture.
