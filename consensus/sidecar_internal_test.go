@@ -87,4 +87,12 @@ func TestAssertObservationKeptShorterPeerExceedsK(t *testing.T) {
 	if err := assertObservationPickedLongestPeer(peersNear, tipA, 6); err == nil {
 		t.Fatal("lead 5 <= k 6: keeping shorter peer not justified, reject")
 	}
+	// Three peers: one far ahead (> k) AND one longer-but-within-k. The
+	// within-k peer is adoptable, so the SUT would switch to it and final_tip
+	// = A is wrong. The far-ahead peer alone must not justify the no-switch.
+	mid := tipPeer(60, 11, 0xDD) // leads A by 4 <= k=6, adoptable
+	peersMixed := []format.PeerInput{a, mid, bFar}
+	if err := assertObservationPickedLongestPeer(peersMixed, tipA, 6); err == nil {
+		t.Fatal("intermediate within-k peer is adoptable: want reject, got nil")
+	}
 }

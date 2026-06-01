@@ -61,6 +61,10 @@ PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-4}"
 # Each phase's deadline. Phase C's kill slot is the biggest
 # (PREFIX + B_EXT), so this must accommodate that wait.
 PHASE_TIMEOUT_SECS="${PHASE_TIMEOUT_SECS:-180}"
+if ! [[ "${PHASE_TIMEOUT_SECS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "configurator: PHASE_TIMEOUT_SECS must be a positive integer (got '${PHASE_TIMEOUT_SECS}')" >&2
+    exit 1
+fi
 NETWORK_MAGIC="${NETWORK_MAGIC:-42}"
 
 # Paths inside the configurator container.
@@ -220,19 +224,26 @@ run_forge_phase() {
     done
 
     kill -TERM "${node_pid}"
-    # Backstop: if cardano-node doesn't exit cleanly within 30s,
-    # SIGKILL it. The wait following the timeout will return with
-    # whichever exit status the kernel attributes to the process.
+    # Backstop: if cardano-node doesn't exit cleanly within 30s, SIGKILL it.
+    # A forced kill can leave a torn ChainDB (a half-written immutable chunk
+    # or volatile block), so a phase that needed SIGKILL fails here rather
+    # than snapshotting / forging-in-place on a possibly-corrupt DB.
     local wait_deadline=$(( $(date +%s) + 30 ))
+    local clean_exit=1
     while kill -0 "${node_pid}" 2>/dev/null; do
         if (( $(date +%s) > wait_deadline )); then
             log "phase ${label}: clean shutdown timeout; SIGKILL"
             kill -KILL "${node_pid}" 2>/dev/null || true
+            clean_exit=0
             break
         fi
         sleep 1
     done
     wait "${node_pid}" 2>/dev/null || true
+    if (( clean_exit == 0 )); then
+        log "phase ${label}: node did not shut down cleanly (SIGKILL); failing phase to avoid a torn ChainDB"
+        return 1
+    fi
     # Force the kernel to flush dirty pages from cardano-node's
     # write-after-close. Without this, copying volatile/blocks-*.dat
     # right after exit can capture a truncated file the runtime

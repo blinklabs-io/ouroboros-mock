@@ -292,16 +292,19 @@ func assertObservationPickedLongestPeer(
 	}
 	// final_tip is not a longest peer. The one consistent reason is an
 	// exceeds-k no-switch: the oracle kept a shorter incumbent because
-	// adopting the longest peer would have required rolling back more than
-	// the stability window k. That holds only when final_tip matches a
-	// captured peer AND the longest peer leads it by more than k — exactly
-	// when the replay SUT's implausibility guard (with no local_tip) also
-	// rejects the longer peer and stays on the incumbent.
+	// adopting a longer peer would have required rolling back more than the
+	// stability window k. That holds only when final_tip matches a captured
+	// peer AND *every* longer peer leads it by more than k — so the replay
+	// SUT's implausibility guard (with no local_tip) rejects all of them and
+	// stays on final_tip. It is not enough for the single longest peer to be
+	// out of reach: if any peer were longer than final_tip but within k, the
+	// SUT would switch to it and final_tip would be the wrong selection, so
+	// reject that vector here rather than bless it.
 	selected := "<unknown>"
 	if id, ok := peerIDFor(peers, finalTip); ok {
 		selected = strconv.FormatUint(id, 10)
 		if securityParam > 0 &&
-			maxBlock > finalTip.BlockNumber+securityParam {
+			everyLongerPeerExceedsK(peers, finalTip, securityParam) {
 			return nil
 		}
 	}
@@ -312,6 +315,25 @@ func assertObservationPickedLongestPeer(
 		finalTip.Slot, finalTip.BlockNumber,
 		ids, maxBlock,
 	)
+}
+
+// everyLongerPeerExceedsK reports whether every captured peer whose tip is
+// longer than finalTip leads it by more than securityParam blocks. When true,
+// the SUT's implausibility guard (with no local_tip) rejects all of those
+// peers, so keeping finalTip is the correct no-switch outcome. A peer that is
+// longer than finalTip but within k would be adoptable — in that case
+// finalTip is not a justified selection and this returns false.
+func everyLongerPeerExceedsK(
+	peers []format.PeerInput, finalTip format.Tip, securityParam uint64,
+) bool {
+	for _, p := range peers {
+		b := lastRollForwardTip(p.Served).BlockNumber
+		if b > finalTip.BlockNumber &&
+			b <= finalTip.BlockNumber+securityParam {
+			return false
+		}
+	}
+	return true
 }
 
 // peerIDFor returns the PeerID of the peer whose last roll_forward

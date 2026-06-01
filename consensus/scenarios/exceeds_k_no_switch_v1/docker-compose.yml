@@ -25,9 +25,11 @@
 #   - cardano-peer-b    Non-forging cardano-node serving peer B's
 #                       pre-forged longer chain.
 #   - cardano-observation
-#                       Non-forging cardano-node. Topology pins both
-#                       peers as static localRoots; Praos selects
-#                       between them.
+#                       Non-forging cardano-node. Topology pins ONLY peer
+#                       A as a static localRoot (topology/observation.json),
+#                       so the oracle settles on the shorter peer A; the
+#                       vector still records both peers so the replay SUT is
+#                       offered peer B and must reject it as > k ahead.
 #   - capture-sidecar   (capture profile) Drives the drain_to_tip
 #                       conversation against one cardano-* address per
 #                       invocation. run.sh fires three back-to-back

@@ -140,6 +140,13 @@ while [[ ${ELAPSED} -lt ${MAX_WAIT} ]]; do
     for i in "${!SERVICES[@]}"; do
         svc="${SERVICES[$i]}"
         cid="${CIDS[$i]}"
+        # Fail fast if the container is no longer running (exited/dead/gone)
+        # rather than polling its health for the full MAX_WAIT.
+        state="$(docker inspect --format='{{.State.Status}}' \
+            "${cid}" 2>/dev/null || echo missing)"
+        if [[ "${state}" != "running" ]]; then
+            die "${svc} container is not running (state=${state})"
+        fi
         status="$(docker inspect --format='{{.State.Health.Status}}' \
             "${cid}" 2>/dev/null || echo missing)"
         case "${status}" in
@@ -226,7 +233,11 @@ if [[ ${COMPOSE_EXIT} -ne 0 ]]; then
     exit ${COMPOSE_EXIT}
 fi
 
-mv "${OUT_DIR}/composed.json" "${OUT_PATH}"
+# Skip the move when -out already resolves to the composed file itself; an
+# unconditional mv of a file onto itself errors and fails the whole run.
+if [[ ! "${OUT_DIR}/composed.json" -ef "${OUT_PATH}" ]]; then
+    mv "${OUT_DIR}/composed.json" "${OUT_PATH}"
+fi
 # Drop the per-peer intermediates so the caller's output dir is clean.
 rm -f "${OUT_DIR}/peer-a.json" \
       "${OUT_DIR}/peer-b.json" \

@@ -253,7 +253,11 @@ type servedHeader struct {
 }
 
 func rollForwardHeaders(served []format.ServedMessage) []servedHeader {
-	var out []servedHeader
+	// Non-nil even when served has no roll_forwards: callers index into the
+	// result under a separately-tracked bound (e.g. deriveExpectedRollback's
+	// last >= 0 guard), and a nil return defeats nilaway's ability to prove
+	// those accesses safe.
+	out := make([]servedHeader, 0, len(served))
 	for _, m := range served {
 		if m.MsgType != format.ChainSyncMsgRollForward || m.Era == nil {
 			continue
