@@ -30,6 +30,8 @@
 package main
 
 import (
+	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -55,7 +57,7 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 		}
 		out = append(out, blk{
 			h.BlockNumber(), h.SlotNumber(),
-			fmt.Sprintf("%x", h.Hash().Bytes()),
+			hex.EncodeToString(h.Hash().Bytes()),
 		})
 	}
 	return out, nil
@@ -134,7 +136,7 @@ func checkShape(
 			return err
 		}
 		if len(ch) == 0 {
-			return fmt.Errorf("peer has no roll_forwards")
+			return errors.New("peer has no roll_forwards")
 		}
 		return nil
 	}
@@ -151,15 +153,15 @@ func checkShape(
 		return fmt.Errorf("peer1: %w", err)
 	}
 	if len(c0) == 0 || len(c1) == 0 {
-		return fmt.Errorf("a peer has no roll_forwards")
+		return errors.New("a peer has no roll_forwards")
 	}
 	t0, t1 := c0[len(c0)-1], c1[len(c1)-1]
 	anc, ok := ancestorBlock(c0, c1)
 	if !ok {
-		return fmt.Errorf("peers share no common ancestor block")
+		return errors.New("peers share no common ancestor block")
 	}
 	ft := c.ExpectedOutput.FinalTip
-	ftHash := fmt.Sprintf("%x", []byte(ft.Hash))
+	ftHash := hex.EncodeToString([]byte(ft.Hash))
 	ftPeer := -1
 	if ft.BlockNumber == t0.num && ftHash == t0.hash {
 		ftPeer = 0
@@ -208,7 +210,7 @@ func checkShape(
 				lead, minLead)
 		}
 		if !hasRB {
-			return fmt.Errorf("a switch vector must carry expected_rollback")
+			return errors.New("a switch vector must carry expected_rollback")
 		}
 		if (lead > k) != hasLocal {
 			if lead > k {
@@ -244,10 +246,10 @@ func checkShape(
 					"guard would not reject its tip", lead, k)
 		}
 		if hasRB {
-			return fmt.Errorf("a no-switch vector must not carry expected_rollback")
+			return errors.New("a no-switch vector must not carry expected_rollback")
 		}
 		if hasLocal {
-			return fmt.Errorf(
+			return errors.New(
 				"a no-switch vector must not carry local_tip (it would arm the " +
 					"catch-up and let the SUT accept the longer peer)")
 		}
@@ -265,7 +267,7 @@ func checkShape(
 				t0.num, t1.num)
 		}
 		if t0.hash == t1.hash {
-			return fmt.Errorf("tie peers have identical tips — not divergent")
+			return errors.New("tie peers have identical tips — not divergent")
 		}
 		if gap := absDiff(t0.slot, t1.slot); gap > 5 {
 			return fmt.Errorf(
@@ -276,7 +278,7 @@ func checkShape(
 			return fmt.Errorf("tie rollback %d > k=%d", rollback, k)
 		}
 		if !hasRB {
-			return fmt.Errorf(
+			return errors.New(
 				"a tie (VRF switch) vector must carry expected_rollback")
 		}
 		return nil
