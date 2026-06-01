@@ -72,13 +72,19 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 				continue
 			}
 			ph := hex.EncodeToString([]byte(m.Point.Hash))
-			cut := 0
-			if ph != "" {
-				for i, b := range out {
-					if b.hash == ph {
-						cut = i + 1
-					}
+			cut, found := 0, ph == "" // empty point == origin
+			for i, b := range out {
+				if b.hash == ph {
+					cut, found = i+1, true
 				}
+			}
+			if !found {
+				// A non-empty point that names no reconstructed block is a
+				// malformed trace, not an origin rollback — surface it rather
+				// than silently truncating to origin and mis-judging the shape.
+				return nil, fmt.Errorf(
+					"roll_backward to point %s is not in the reconstructed chain",
+					ph)
 			}
 			out = out[:cut]
 		}
@@ -179,10 +185,7 @@ func checkShape(
 		return errors.New("a peer has no roll_forwards")
 	}
 	t0, t1 := c0[len(c0)-1], c1[len(c1)-1]
-	anc, ok := ancestorBlock(c0, c1)
-	if !ok {
-		return errors.New("peers share no common ancestor block")
-	}
+	anc, hasAnc := ancestorBlock(c0, c1)
 	ft := c.ExpectedOutput.FinalTip
 	ftHash := hex.EncodeToString([]byte(ft.Hash))
 	ftPeer := -1
@@ -198,8 +201,13 @@ func checkShape(
 	hasRB := c.ExpectedOutput.ExpectedRollback != nil
 	hasLocal := c.LocalTip != nil
 	// peer0 is always the chain fed first (incumbent / loser); the rollback to
-	// switch from it to peer1 is its depth past the shared fork.
-	rollback := t0.num - anc
+	// switch from it to peer1 is its depth past the shared fork. When the two
+	// chains share no decoded block they fork at origin (a valid case, not a
+	// corrupt vector), so the rollback is the whole incumbent chain (N+1).
+	rollback := t0.num + 1
+	if hasAnc {
+		rollback = t0.num - anc
+	}
 	lead := absDiff(t1.num, t0.num)
 
 	switch shape {

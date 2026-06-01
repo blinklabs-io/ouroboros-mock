@@ -83,10 +83,14 @@ while true; do
     if (( RETRIES > 1 )); then
         echo "capture-scenario: ${SCENARIO} attempt ${attempt}/${RETRIES}" >&2
     fi
+    # Capture run.sh's exit code in the else branch: `rc=$?` after the `if`
+    # compound would read the if-statement's status (0 when the condition
+    # fails), so exhausted retries could exit 0 and falsely report success.
     if "${SCENARIO_DIR}/run.sh" "$@"; then
         exit 0
+    else
+        rc=$?
     fi
-    rc=$?
     if (( attempt >= RETRIES )); then
         if (( RETRIES > 1 )); then
             echo "capture-scenario: ${SCENARIO} did not produce a valid vector in ${RETRIES} attempt(s)" >&2

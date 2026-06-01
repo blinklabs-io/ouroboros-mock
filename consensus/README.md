@@ -74,10 +74,13 @@ attempt is a fresh forge; `run.sh` tears down with `down -v` on exit).
 See each scenario's `README.md` for what it captures and how to run it
 directly. Existing scenarios:
 
-| Scenario | Peers | What it tests |
-|---|---|---|
-| `intersect_origin_one_rollforward` | 1 | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
-| `fork_and_select_v1` | 2 | Praos chain selection + rollback to non-genesis intersect across two divergent chains with a shared prefix |
+| Scenario | Peers | Shape | What it tests |
+|---|---|---|---|
+| `intersect_origin_one_rollforward` | 1 | single | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
+| `within_k_fork_v1` | 2 | switch | Switch to a longer peer whose fork is shallow (rollback ≤ k) and lead ≤ k — the no-`local_tip` switch path |
+| `fork_and_select_v1` | 2 | switch | Switch to a much-longer peer (lead in (k, 2k]) requiring the `local_tip` catch-up; rollback to the non-genesis intersect still ≤ k |
+| `slot_battle_v1` | 2 | tie | Equal-length VRF tiebreak — two same-height blocks within 5 slots; the SUT must resolve the tie the same way the oracle did |
+| `exceeds_k_no_switch_v1` | 2 | no-switch | k-bound refusal: the incumbent is forged > k blocks past the fork, so adopting the longer peer is a > k rollback a conformant node declines |
 
 Multi-peer scenarios use the `cmd/compose-consensus-vector` binary to
 merge per-peer captures into the multi-peer vector and diff against
