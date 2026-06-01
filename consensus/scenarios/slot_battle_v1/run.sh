@@ -220,7 +220,7 @@ docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \
     -title slot_battle_v1 \
     -out /capture-output/composed.json \
     -security-param 6 \
-    "${GOLDEN_ARGS[@]}"
+    ${GOLDEN_ARGS[@]+"${GOLDEN_ARGS[@]}"}
 COMPOSE_EXIT=$?
 set -e
 

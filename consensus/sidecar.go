@@ -346,10 +346,11 @@ func everyLongerPeerNeedsDeepRollback(
 		}
 		anc, ok := commonAncestorBlockNumber(finalServed, p.Served)
 		if !ok {
-			// No shared block at all: adopting the peer would roll back the
-			// entire incumbent chain (depth finalTip.BlockNumber + 1), which
-			// is within k only for a near-origin incumbent.
-			if finalTip.BlockNumber <= securityParam {
+			// No shared block at all: adopting the peer rolls back the entire
+			// incumbent chain (blocks 0..N, depth finalTip.BlockNumber + 1).
+			// That is within k — so the peer is reachable and final_tip is not
+			// a justified no-switch — exactly when N+1 <= k, i.e. N < k.
+			if finalTip.BlockNumber < securityParam {
 				return false
 			}
 			continue

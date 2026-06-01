@@ -103,11 +103,16 @@ func TestHarnessFailsBadReplayer(t *testing.T) {
 	}
 }
 
-// maxTipNoSwitchStub reaches the correct final_tip (it reports the
-// highest-block tip it was fed) but never reports a switch — modelling a
-// SUT that "adopts" the longest chain from the start without ever
-// switching off a competing chain. It must fail the switch-decision
-// assertion on any vector that carries expected_rollback.
+// maxTipNoSwitchStub reaches the correct final_tip but never reports a switch
+// — modelling a SUT that "adopts" the longest chain from the start without ever
+// switching off a competing chain. It must fail the switch-decision assertion
+// on any vector that carries expected_rollback.
+//
+// It is SEEDED with the vector's final_tip (have/tip set at construction) so it
+// lands on exactly that tip and the test fails only for the missing switch.
+// Picking the highest block_number it was fed would be ambiguous for a VRF tie
+// (both peers at the top height): the stub could settle on the loser and fail
+// the final_tip check first, never exercising the switch assertion.
 type maxTipNoSwitchStub struct {
 	have bool
 	tip  format.Tip
@@ -154,8 +159,12 @@ func TestHarnessRequiresSwitchDecision(t *testing.T) {
 			continue
 		}
 		checked++
+		stub := &maxTipNoSwitchStub{
+			have: true,
+			tip:  cv.Vector.Capture.ExpectedOutput.FinalTip,
+		}
 		if err := consensus.RunConsensusVector(
-			t, cv.Vector, &maxTipNoSwitchStub{},
+			t, cv.Vector, stub,
 		); err == nil {
 			t.Fatalf(
 				"%s: a Replayer that reaches final_tip but never switches "+

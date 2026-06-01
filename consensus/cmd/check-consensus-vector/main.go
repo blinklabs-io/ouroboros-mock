@@ -48,17 +48,40 @@ type blk struct {
 func chainOf(served []format.ServedMessage) ([]blk, error) {
 	var out []blk
 	for _, m := range served {
-		if m.MsgType != format.ChainSyncMsgRollForward || m.Era == nil {
-			continue
+		switch m.MsgType {
+		case format.ChainSyncMsgRollForward:
+			if m.Era == nil {
+				continue
+			}
+			h, err := gledger.NewBlockHeaderFromCbor(*m.Era, m.HeaderCbor)
+			if err != nil {
+				return nil, fmt.Errorf("decode header (era %d): %w", *m.Era, err)
+			}
+			out = append(out, blk{
+				h.BlockNumber(), h.SlotNumber(),
+				hex.EncodeToString(h.Hash().Bytes()),
+			})
+		case format.ChainSyncMsgRollBackward:
+			// A roll_backward rewinds the chain to its point: drop every block
+			// after the one whose hash matches, and truncate to nothing for an
+			// origin/empty point. A static-chain capture only carries a leading
+			// roll_backward to origin (a no-op against an empty chain), but
+			// honouring it keeps the reconstructed tip and rollback depth
+			// correct if a trace ever contains a real mid-chain reorg.
+			if m.Point == nil {
+				continue
+			}
+			ph := hex.EncodeToString([]byte(m.Point.Hash))
+			cut := 0
+			if ph != "" {
+				for i, b := range out {
+					if b.hash == ph {
+						cut = i + 1
+					}
+				}
+			}
+			out = out[:cut]
 		}
-		h, err := gledger.NewBlockHeaderFromCbor(*m.Era, m.HeaderCbor)
-		if err != nil {
-			return nil, fmt.Errorf("decode header (era %d): %w", *m.Era, err)
-		}
-		out = append(out, blk{
-			h.BlockNumber(), h.SlotNumber(),
-			hex.EncodeToString(h.Hash().Bytes()),
-		})
 	}
 	return out, nil
 }
@@ -235,15 +258,25 @@ func checkShape(
 				"the competing peer (peer1 block %d) must be strictly longer "+
 					"than the incumbent (peer0 block %d)", t1.num, t0.num)
 		}
+		// rollback > k is the Praos no-switch invariant: a conformant node
+		// refuses to roll back more than k to adopt the longer peer.
 		if rollback <= k {
 			return fmt.Errorf(
 				"rollback to the longer peer is %d <= k=%d — a conformant node "+
 					"would switch; this is not an exceeds-k no-switch", rollback, k)
 		}
+		// lead > k is a SEPARATE, SUT-reachability requirement, not a Praos
+		// rule: the SUT (dingo) refuses the longer peer via its tip-
+		// implausibility guard, which only fires when the peer's tip is more
+		// than k AHEAD. With rollback > k but lead <= k the vector is still
+		// Praos-conformant, yet the SUT would accept the peer's tip and switch
+		// — failing replay. Because run.sh cannot run the SUT, this offline
+		// gate encodes that reachability condition so a committed no-switch
+		// vector is one the SUT actually reproduces.
 		if lead <= k {
 			return fmt.Errorf(
 				"longer peer leads by %d <= k=%d — the SUT's implausibility "+
-					"guard would not reject its tip", lead, k)
+					"guard would not reject its tip, so it would switch", lead, k)
 		}
 		if hasRB {
 			return errors.New("a no-switch vector must not carry expected_rollback")

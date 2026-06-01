@@ -99,12 +99,15 @@ func TestCorpusFinalTipIsRollbackConformant(t *testing.T) {
 			if ft.BlockNumber == maxBlock {
 				return
 			}
-			// final_tip is a shorter chain: locate it and require every
+			// final_tip is a shorter chain: locate it (by block AND hash, so
+			// peers tied at the same height aren't confused) and require every
 			// longer peer to be beyond a k-deep rollback.
+			ftHash := fmt.Sprintf("%x", []byte(ft.Hash))
 			var ftChain []blkInfo
 			for _, p := range capt.Peers {
 				ch := chains[p.PeerID]
-				if ch[len(ch)-1].num == ft.BlockNumber {
+				if tip := ch[len(ch)-1]; tip.num == ft.BlockNumber &&
+					tip.hash == ftHash {
 					ftChain = ch
 				}
 			}
@@ -117,20 +120,24 @@ func TestCorpusFinalTipIsRollbackConformant(t *testing.T) {
 				if tip.num <= ft.BlockNumber {
 					continue // not longer than the incumbent
 				}
+				// Rollback depth to switch off final_tip onto this longer peer.
+				// When the two chains share no decoded block they still share
+				// the implicit origin, so the rollback is the whole incumbent
+				// chain (blocks 0..N => N+1) — NOT automatically > k; a
+				// near-origin incumbent can still be within a k-deep rollback.
 				anc, ok := commonAncestorBlock(ftChain, ch)
-				if !ok {
-					continue // disjoint from origin — full rollback, > k
+				rollback := ft.BlockNumber + 1
+				if ok {
+					rollback = ft.BlockNumber - anc
 				}
-				rollback := ft.BlockNumber - anc
 				if rollback <= k {
 					t.Errorf(
 						"NON-CONFORMANT: final_tip ends on the shorter chain "+
-							"(block %d), but a longer peer reaches block %d "+
-							"sharing ancestor block %d — switching is only a "+
-							"%d-block rollback, within k=%d. A conformant Praos "+
-							"node adopts the longer chain; this vector demands "+
-							"it stay on the shorter one.",
-						ft.BlockNumber, tip.num, anc, rollback, k,
+							"(block %d), but a longer peer reaches block %d — "+
+							"switching is only a %d-block rollback, within k=%d. "+
+							"A conformant Praos node adopts the longer chain; "+
+							"this vector demands it stay on the shorter one.",
+						ft.BlockNumber, tip.num, rollback, k,
 					)
 				}
 			}
