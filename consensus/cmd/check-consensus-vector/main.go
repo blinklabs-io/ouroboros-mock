@@ -46,7 +46,9 @@ type blk struct {
 }
 
 func chainOf(served []format.ServedMessage) ([]blk, error) {
-	var out []blk
+	// Non-nil so the roll_backward `out[:cut]` truncation below is provably
+	// safe (nilaway rejects slicing a possibly-nil slice).
+	out := make([]blk, 0, len(served))
 	for _, m := range served {
 		switch m.MsgType {
 		case format.ChainSyncMsgRollForward:
