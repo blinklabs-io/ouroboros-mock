@@ -23,3 +23,7 @@ go.work
 # Program binaries
 /ouroboros-mock
 /gen-rollback-vector
+# consensus/cmd/* binaries, when built to the repo root by a bare `go build`
+/capture-sidecar
+/compose-consensus-vector
+/check-consensus-vector
