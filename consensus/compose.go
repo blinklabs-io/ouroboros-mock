@@ -108,6 +108,17 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 	}
 	finalTip := lastRollForwardTip(downstream)
 
+	// Order the peers for a deterministic, replayable feed sequence. The
+	// harness replays peers in slice order, and the right order depends on
+	// what the SUT must do: when final_tip is (one of) the longest chain — a
+	// switch or a VRF tie — the SUT must adopt a competing peer first and then
+	// switch UP onto final_tip, so final_tip's peer is fed LAST; when final_tip
+	// is a shorter incumbent — an exceeds-k no-switch — the SUT must establish
+	// the incumbent first and then reject the longer peer, so final_tip's peer
+	// is fed FIRST. This makes the winner/incumbent ordering independent of the
+	// (nondeterministic) order the VRF lottery happened to assign the pools.
+	peers = orderPeersForReplay(peers, finalTip)
+
 	// Strict invariant: the observation must have selected the
 	// longest peer. Any committed vector that violates this would
 	// silently bless a wrong-selector outcome at replay time, so
@@ -276,6 +287,45 @@ func headerPoint(era uint, cbor []byte) (format.Point, error) {
 		Slot: h.SlotNumber(),
 		Hash: format.HexBytes(h.Hash().Bytes()),
 	}, nil
+}
+
+// orderPeersForReplay returns peers reordered so final_tip's peer is fed last
+// when it is (tied for) the longest chain and first when it is a shorter
+// incumbent, then reassigns peer_id by position. Only the two-peer case is
+// reordered; other arities are returned unchanged. See the call site for why
+// the feed order matters to the harness's switch assertion.
+func orderPeersForReplay(
+	peers []format.PeerInput, finalTip format.Tip,
+) []format.PeerInput {
+	if len(peers) != 2 {
+		return peers
+	}
+	maxBlock := uint64(0)
+	ftIdx := -1
+	for i, p := range peers {
+		t := lastRollForwardTip(p.Served)
+		if t.BlockNumber > maxBlock {
+			maxBlock = t.BlockNumber
+		}
+		if t.Slot == finalTip.Slot && bytes.Equal(t.Hash, finalTip.Hash) &&
+			t.BlockNumber == finalTip.BlockNumber {
+			ftIdx = i
+		}
+	}
+	if ftIdx < 0 {
+		return peers // final_tip matches no peer; leave order untouched
+	}
+	want := 0 // shorter incumbent → first
+	if lastRollForwardTip(peers[ftIdx].Served).BlockNumber == maxBlock {
+		want = len(peers) - 1 // longest (switch / tie winner) → last
+	}
+	if ftIdx != want {
+		peers[0], peers[1] = peers[1], peers[0]
+	}
+	for i := range peers {
+		peers[i].PeerID = uint64(i) //nolint:gosec // 0 or 1
+	}
+	return peers
 }
 
 // commonAncestorBlockNumber decodes the headers of two served traces and

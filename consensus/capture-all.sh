@@ -45,10 +45,24 @@ DISPATCHER="${SCRIPT_DIR}/capture-scenario.sh"
 
 FAIL_FAST=false
 ONLY=""
+# Each scenario's run.sh validates the composed vector against its intended
+# shape before committing, so a drifted forge fails without overwriting the
+# golden. The forge is nondeterministic — the slot-battle tie and exceeds-k
+# deep-incumbent shapes only land on a fraction of runs — so retry generously
+# by default; a deterministic scenario succeeds on attempt 1 at no extra cost.
+RETRIES="${CAPTURE_RETRIES:-30}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --fail-fast)   FAIL_FAST=true; shift;;
         --keep-going)  FAIL_FAST=false; shift;;
+        --retries)
+            if [[ $# -lt 2 || ! "${2:-}" =~ ^[1-9][0-9]*$ ]]; then
+                echo "--retries requires a positive integer" >&2
+                exit 2
+            fi
+            RETRIES="$2"
+            shift 2
+            ;;
         --only)
             if [[ $# -lt 2 || "${2:-}" == --* ]]; then
                 echo "--only requires a scenario name" >&2
@@ -59,13 +73,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             cat <<USAGE
-usage: $0 [--fail-fast | --keep-going] [--only <scenario>]
+usage: $0 [--fail-fast | --keep-going] [--retries N] [--only <scenario>]
 
 Runs every scenarios/<name>/ through capture-scenario.sh and writes
-each produced vector to testdata/captured/<name>.json.
+each produced vector to testdata/captured/<name>.json. Each run.sh
+validates the vector's shape before committing, so a drift fails
+without overwriting the golden; the forge is re-rolled up to N times.
 
   --fail-fast       Stop on the first scenario failure.
   --keep-going      Continue past failures (default).
+  --retries N       Re-roll each scenario's forge up to N times until a
+                    shape-valid vector is produced (default 30; or set
+                    CAPTURE_RETRIES).
   --only <name>     Run only the named scenario (still writes to
                     testdata/captured/<name>.json).
 USAGE
@@ -104,14 +123,14 @@ if (( ${#SCENARIOS[@]} == 0 )); then
     die "no scenarios found under ${SCENARIOS_DIR}"
 fi
 
-log "regenerating ${#SCENARIOS[@]} scenario(s) into ${CAPTURED_DIR}"
+log "regenerating ${#SCENARIOS[@]} scenario(s) into ${CAPTURED_DIR} (up to ${RETRIES} forge attempt(s) each)"
 
 PASSED=()
 FAILED=()
 for scenario in "${SCENARIOS[@]}"; do
     out_path="${CAPTURED_DIR}/${scenario}.json"
     log "--- ${scenario} -> ${out_path} ---"
-    if "${DISPATCHER}" "${scenario}" -out "${out_path}" --skip-golden; then
+    if CAPTURE_RETRIES="${RETRIES}" "${DISPATCHER}" "${scenario}" -out "${out_path}" --skip-golden; then
         PASSED+=("${scenario}")
         log "${scenario}: OK"
     else

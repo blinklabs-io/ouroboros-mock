@@ -166,6 +166,30 @@ docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \
     --user "$(id -u):$(id -g)" \
     capture-sidecar
 
+# Validate the captured vector actually has this scenario's intended SHAPE
+# before committing it. Runs the validator inside the sidecar image
+# (--entrypoint), so an empty or malformed capture fails here instead of
+# overwriting the golden. Trivial for a single-peer scenario, but kept uniform
+# with the multi-peer run.sh so every scenario gates its output the same way.
+VECTOR_SHAPE=(-shape single)
+log "Validating captured vector shape: ${VECTOR_SHAPE[*]}..."
+set +e
+docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \
+    --no-deps \
+    --user "$(id -u):$(id -g)" \
+    --entrypoint /usr/local/bin/check-consensus-vector \
+    capture-sidecar \
+    -vector /capture-output/vector.json \
+    -security-param 6 \
+    "${VECTOR_SHAPE[@]}"
+CHECK_EXIT=$?
+set -e
+if [[ ${CHECK_EXIT} -ne 0 ]]; then
+    log "Captured vector failed shape validation; NOT writing ${OUT_PATH}."
+    log "Re-run to re-capture; the committed golden is left untouched."
+    exit ${CHECK_EXIT}
+fi
+
 if [[ "${OUT_BASENAME}" != "vector.json" ]]; then
     mv "${OUT_DIR}/vector.json" "${OUT_PATH}"
 fi

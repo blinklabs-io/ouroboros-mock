@@ -62,11 +62,14 @@ directory. The shared base does not change.
 ./capture-scenario.sh intersect_origin_one_rollforward -out /tmp/vector.json
 ```
 
-The dispatcher resolves `scenarios/<name>/run.sh` and execs it. Each
+The dispatcher resolves `scenarios/<name>/run.sh` and runs it. Each
 scenario owns its own orchestration shape (number of cardano peers,
 configurator behavior, number of sidecar invocations, whether a
 composer + golden diff runs at the end) so the dispatcher itself
-stays trivial.
+stays thin — its one job beyond dispatch is to **re-roll the forge**:
+because captures are nondeterministic, set `CAPTURE_RETRIES=N` to retry
+`run.sh` up to N times until it produces a shape-valid vector (each
+attempt is a fresh forge; `run.sh` tears down with `down -v` on exit).
 
 See each scenario's `README.md` for what it captures and how to run it
 directly. Existing scenarios:
@@ -89,11 +92,27 @@ wrapper:
 ./capture-all.sh                                   # all scenarios
 ./capture-all.sh --only intersect_origin_one_rollforward
 ./capture-all.sh --fail-fast                       # stop on first failure
+./capture-all.sh --retries 50                      # re-roll harder
 ```
 
 The wrapper passes `--skip-golden` to every scenario so existing
 goldens don't block regeneration — that's the whole point of running
 it. Scenarios with no golden accept the flag as a no-op.
+
+Regeneration is **safe**. Before committing, each `run.sh` validates the
+captured vector against its scenario's intended SHAPE (switch / no-switch /
+VRF tie / single) with `cmd/check-consensus-vector`, which decodes the real
+block headers and checks rollback depth, tip lead, the 5-slot restricted-
+tiebreaker window, peer feed order, and `local_tip` / `expected_rollback`
+presence. A capture that drifts out of shape — a length fork forged where a
+tie was intended, a switch the SUT can't reach, an exceeds-k incumbent that
+isn't actually > k deep — **fails without overwriting the committed golden**,
+and the forge is re-rolled (up to `--retries N`, default 30). So
+`./capture-all.sh` either refreshes the corpus with shape-correct vectors or
+leaves it untouched; it cannot silently regenerate a wrong-but-green vector
+the way a bare composer run could. The composer also feeds the
+winner/incumbent peer in the order the harness's switch assertion needs, so
+ordering no longer depends on which pool the VRF lottery favored.
 
 ## Vector format
 

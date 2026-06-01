@@ -233,6 +233,32 @@ if [[ ${COMPOSE_EXIT} -ne 0 ]]; then
     exit ${COMPOSE_EXIT}
 fi
 
+# Validate the composed vector actually has this scenario's intended SHAPE
+# before committing it. The composer's self-consistency check is SUT-agnostic
+# and cannot tell a length fork from a VRF tie, or an unreachable switch from a
+# replayable one; this decode-the-headers gate can. It runs inside the composer
+# image (--entrypoint), so a capture that drifted out of shape fails here and
+# the committed golden is left untouched.
+VECTOR_SHAPE=(-shape noswitch)
+log "Validating composed vector shape: ${VECTOR_SHAPE[*]}..."
+set +e
+docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \
+    --no-deps \
+    --user "${USER_SPEC}" \
+    --entrypoint /usr/local/bin/check-consensus-vector \
+    composer \
+    -vector /capture-output/composed.json \
+    -security-param 6 \
+    "${VECTOR_SHAPE[@]}"
+CHECK_EXIT=$?
+set -e
+if [[ ${CHECK_EXIT} -ne 0 ]]; then
+    log "Composed vector failed shape validation; NOT writing ${OUT_PATH}."
+    log "The shape is nondeterministic — re-run to re-roll the forge. The"
+    log "committed golden is untouched; composed vector at ${OUT_DIR}/composed.json."
+    exit ${CHECK_EXIT}
+fi
+
 # Skip the move when -out already resolves to the composed file itself; an
 # unconditional mv of a file onto itself errors and fails the whole run.
 if [[ ! "${OUT_DIR}/composed.json" -ef "${OUT_PATH}" ]]; then
