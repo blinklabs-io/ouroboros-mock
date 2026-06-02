@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Per-scenario configurator for fork_and_select_v1.
+# Per-scenario configurator for within_k_fork_v1.
 #
 # Generates a 2-pool genesis, then drives cardano-node through three
-# forge phases to stage two divergent chains sharing a common prefix:
+# forge phases to stage two divergent chains sharing a common prefix,
+# where peer B leads peer A by only a FEW blocks — within the stability
+# window k:
 #
 #   Phase A: pool 1 forges in isolation until tip slot >= PREFIX_KILL_SLOT.
 #            Snapshot becomes the shared prefix.
@@ -11,10 +13,12 @@
 #            PREFIX_KILL_SLOT + PEER_A_EXTENSION_SLOTS.
 #            Snapshot becomes peer-a's chain DB.
 #   Phase C: pool 2 extends the shared prefix until tip slot >=
-#            PREFIX_KILL_SLOT + PEER_B_EXTENSION_SLOTS.
-#            Snapshot becomes peer-b's chain DB. PEER_B_EXTENSION_SLOTS
-#            is ~3x PEER_A_EXTENSION_SLOTS so peer B reliably wins
-#            Praos longest-chain selection at the observation node.
+#            PREFIX_KILL_SLOT + PEER_B_EXTENSION_SLOTS. Snapshot becomes
+#            peer-b's chain DB. Unlike fork_and_select_v1's large gap,
+#            PEER_B_EXTENSION_SLOTS is only modestly larger than
+#            PEER_A_EXTENSION_SLOTS, so peer B wins by <= k blocks — the
+#            "comfortable fork" the implausibility guard accepts without
+#            a local_tip rescue.
 #
 # During each forge phase cardano-node runs as a subprocess of this
 # script (not a sibling docker service) so the configurator owns the
@@ -36,35 +40,27 @@ set -euo pipefail
 # chain DB on hash mismatch.
 #
 # At activeSlotsCoeff=0.4 with two equal-stake pools each pool wins
-# ~0.225 of slots (1 - (1-0.4)^(1/2)). PEER_B_EXTENSION_SLOTS needs
-# to be enough that peer B's expected block count is robustly more
-# than peer A's — Praos longest-chain selection is BY BLOCK COUNT,
-# not slot number, so if A and B end up with similar block counts
-# the observation node may pick A on a run where pool 1's VRF wins
-# happened to cluster early. With:
-# This is a SWITCH vector with two coupled constraints, both relative to the
-# shared-prefix fork point:
-#
-#  1. ROLLBACK <= k: peer A's extension block count is the rollback depth to
-#     switch off it onto peer B. It must stay <= k=6, or a conformant node
-#     refuses the switch and the vector degenerates into an exceeds-k
-#     no-switch (which exceeds_k_no_switch_v1 stages on purpose).
-#  2. LEAD <= 2k: in the replay each peer announces its FINAL tip on its first
-#     header, so peer B's tip jumps ahead of peer A at once. The SUT's
-#     implausibility guard rejects a tip more than k ahead unless a local_tip
-#     arms the catch-up relaxation, which only reaches local_tip + 2k. So peer
-#     B's lead over peer A must be <= 2k=12 (and > k, so the local_tip path is
-#     actually exercised — that is this vector's distinct job vs within_k).
-#
-# Net: peer A a few blocks past the fork (rollback ~3-5), peer B leading by
-# roughly k+1..2k. The capture loop gates on real dingo conformance and
-# re-rolls when variance lands outside the window.
+# ~0.225 of slots (1 - (1-0.4)^(1/2)). This scenario wants peer B to
+# lead peer A by at least one but NO MORE THAN k=6 blocks, so the two
+# extensions are close. With:
+#   prefix expected blocks  ≈ 0.225 * 10 ≈ 2.3
+#   peer A extension blocks ≈ 0.225 * 15 ≈ 3.4
+#   peer B extension blocks ≈ 0.225 * 30 ≈ 6.8
+# peer B leads by ~3 blocks in expectation. Inspect each capture
+# (README "capture, inspect, commit"): the lead must be in 1..k. A lead
+# of 0 is a tie/no-fork; a lead > k turns this into fork_and_select_v1
+# (the composer would then derive a local_tip, defeating the
+# "within k, no rescue" point).
 PREFIX_KILL_SLOT="${PREFIX_KILL_SLOT:-10}"
-PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-8}"
-PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-55}"
+PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-15}"
+PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-30}"
 # Each phase's deadline. Phase C's kill slot is the biggest
 # (PREFIX + B_EXT), so this must accommodate that wait.
 PHASE_TIMEOUT_SECS="${PHASE_TIMEOUT_SECS:-180}"
+if ! [[ "${PHASE_TIMEOUT_SECS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "configurator: PHASE_TIMEOUT_SECS must be a positive integer (got '${PHASE_TIMEOUT_SECS}')" >&2
+    exit 1
+fi
 NETWORK_MAGIC="${NETWORK_MAGIC:-42}"
 
 # Paths inside the configurator container.
@@ -224,19 +220,26 @@ run_forge_phase() {
     done
 
     kill -TERM "${node_pid}"
-    # Backstop: if cardano-node doesn't exit cleanly within 30s,
-    # SIGKILL it. The wait following the timeout will return with
-    # whichever exit status the kernel attributes to the process.
+    # Backstop: if cardano-node doesn't exit cleanly within 30s, SIGKILL it.
+    # A forced kill can leave a torn ChainDB (a half-written immutable chunk
+    # or volatile block), so a phase that needed SIGKILL fails here rather
+    # than snapshotting / forging-in-place on a possibly-corrupt DB.
     local wait_deadline=$(( $(date +%s) + 30 ))
+    local clean_exit=1
     while kill -0 "${node_pid}" 2>/dev/null; do
         if (( $(date +%s) > wait_deadline )); then
             log "phase ${label}: clean shutdown timeout; SIGKILL"
             kill -KILL "${node_pid}" 2>/dev/null || true
+            clean_exit=0
             break
         fi
         sleep 1
     done
     wait "${node_pid}" 2>/dev/null || true
+    if (( clean_exit == 0 )); then
+        log "phase ${label}: node did not shut down cleanly (SIGKILL); failing phase to avoid a torn ChainDB"
+        return 1
+    fi
     # Force the kernel to flush dirty pages from cardano-node's
     # write-after-close. Without this, copying volatile/blocks-*.dat
     # right after exit can capture a truncated file the runtime

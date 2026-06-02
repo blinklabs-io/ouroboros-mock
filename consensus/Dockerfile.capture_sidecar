@@ -19,6 +19,11 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/capture-sidecar \
     ./consensus/cmd/capture-sidecar
+# check-consensus-vector validates a captured vector against its scenario's
+# declared shape; run.sh invokes it (via --entrypoint) before committing, so a
+# drifted capture fails instead of overwriting the golden.
+RUN CGO_ENABLED=0 go build -o /out/check-consensus-vector \
+    ./consensus/cmd/check-consensus-vector
 
 FROM debian:bookworm-slim AS final
 RUN apt-get update -y && \
@@ -28,5 +33,6 @@ RUN apt-get update -y && \
     useradd --system --gid sidecar --home /nonexistent \
             --shell /usr/sbin/nologin sidecar
 COPY --from=build /out/capture-sidecar /usr/local/bin/capture-sidecar
+COPY --from=build /out/check-consensus-vector /usr/local/bin/check-consensus-vector
 USER sidecar:sidecar
 ENTRYPOINT ["/usr/local/bin/capture-sidecar"]

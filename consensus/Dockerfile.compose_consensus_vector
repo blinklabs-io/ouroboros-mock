@@ -21,6 +21,11 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/compose-consensus-vector \
     ./consensus/cmd/compose-consensus-vector
+# check-consensus-vector validates a composed vector against its scenario's
+# declared shape; run.sh invokes it (via --entrypoint) before committing, so a
+# drifted capture fails instead of overwriting the golden.
+RUN CGO_ENABLED=0 go build -o /out/check-consensus-vector \
+    ./consensus/cmd/check-consensus-vector
 
 FROM debian:bookworm-slim AS final
 RUN apt-get update -y && \
@@ -30,5 +35,6 @@ RUN apt-get update -y && \
     useradd --system --gid composer --home /nonexistent \
             --shell /usr/sbin/nologin composer
 COPY --from=build /out/compose-consensus-vector /usr/local/bin/compose-consensus-vector
+COPY --from=build /out/check-consensus-vector /usr/local/bin/check-consensus-vector
 USER composer:composer
 ENTRYPOINT ["/usr/local/bin/compose-consensus-vector"]

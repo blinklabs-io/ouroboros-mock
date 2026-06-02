@@ -62,19 +62,25 @@ directory. The shared base does not change.
 ./capture-scenario.sh intersect_origin_one_rollforward -out /tmp/vector.json
 ```
 
-The dispatcher resolves `scenarios/<name>/run.sh` and execs it. Each
+The dispatcher resolves `scenarios/<name>/run.sh` and runs it. Each
 scenario owns its own orchestration shape (number of cardano peers,
 configurator behavior, number of sidecar invocations, whether a
 composer + golden diff runs at the end) so the dispatcher itself
-stays trivial.
+stays thin — its one job beyond dispatch is to **re-roll the forge**:
+because captures are nondeterministic, set `CAPTURE_RETRIES=N` to retry
+`run.sh` up to N times until it produces a shape-valid vector (each
+attempt is a fresh forge; `run.sh` tears down with `down -v` on exit).
 
 See each scenario's `README.md` for what it captures and how to run it
 directly. Existing scenarios:
 
-| Scenario | Peers | What it tests |
-|---|---|---|
-| `intersect_origin_one_rollforward` | 1 | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
-| `fork_and_select_v1` | 2 | Praos chain selection + rollback to non-genesis intersect across two divergent chains with a shared prefix |
+| Scenario | Peers | Shape | What it tests |
+|---|---|---|---|
+| `intersect_origin_one_rollforward` | 1 | single | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
+| `within_k_fork_v1` | 2 | switch | Switch to a longer peer whose fork is shallow (rollback ≤ k) and lead ≤ k — the no-`local_tip` switch path |
+| `fork_and_select_v1` | 2 | switch | Switch to a much-longer peer (lead in (k, 2k]) requiring the `local_tip` catch-up; rollback to the non-genesis intersect still ≤ k |
+| `slot_battle_v1` | 2 | tie | Equal-length VRF tiebreak — two same-height blocks within 5 slots; the SUT must resolve the tie the same way the oracle did |
+| `exceeds_k_no_switch_v1` | 2 | no-switch | k-bound refusal: the incumbent is forged > k blocks past the fork, so adopting the longer peer is a > k rollback a conformant node declines |
 
 Multi-peer scenarios use the `cmd/compose-consensus-vector` binary to
 merge per-peer captures into the multi-peer vector and diff against
@@ -89,11 +95,27 @@ wrapper:
 ./capture-all.sh                                   # all scenarios
 ./capture-all.sh --only intersect_origin_one_rollforward
 ./capture-all.sh --fail-fast                       # stop on first failure
+./capture-all.sh --retries 50                      # re-roll harder
 ```
 
 The wrapper passes `--skip-golden` to every scenario so existing
 goldens don't block regeneration — that's the whole point of running
 it. Scenarios with no golden accept the flag as a no-op.
+
+Regeneration is **safe**. Before committing, each `run.sh` validates the
+captured vector against its scenario's intended SHAPE (switch / no-switch /
+VRF tie / single) with `cmd/check-consensus-vector`, which decodes the real
+block headers and checks rollback depth, tip lead, the 5-slot restricted-
+tiebreaker window, peer feed order, and `local_tip` / `expected_rollback`
+presence. A capture that drifts out of shape — a length fork forged where a
+tie was intended, a switch the SUT can't reach, an exceeds-k incumbent that
+isn't actually > k deep — **fails without overwriting the committed golden**,
+and the forge is re-rolled (up to `--retries N`, default 30). So
+`./capture-all.sh` either refreshes the corpus with shape-correct vectors or
+leaves it untouched; it cannot silently regenerate a wrong-but-green vector
+the way a bare composer run could. The composer also feeds the
+winner/incumbent peer in the order the harness's switch assertion needs, so
+ordering no longer depends on which pool the VRF lottery favored.
 
 ## Vector format
 
@@ -111,32 +133,44 @@ hand-crafted examples.
 
 ```go
 import (
-    "github.com/blinklabs-io/gouroboros/protocol/chainsync"
+    "testing"
+
     "github.com/blinklabs-io/ouroboros-mock/consensus"
+    "github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
 
-// 1. Adapt your chain-selection implementation to the harness's
-//    ChainSelector interface. peerID is the vector's peer_id (a
-//    uint64); your adapter is free to map it to whatever internal
-//    peer-routing type your selector uses.
+// 1. Adapt your chain-selection implementation to the harness's Replayer
+//    interface. peerID is the vector's peer_id (a uint64); your adapter is
+//    free to map it to whatever internal peer-routing type your selector uses.
 type myAdapter struct{ /* ... */ }
-func (a *myAdapter) UpdatePeerTip(peerID uint64, tip chainsync.Tip, vrf []byte) bool { /* ... */ }
-func (a *myAdapter) EvaluateAndSwitch() { /* ... */ }
-func (a *myAdapter) BestPeerTip() (chainsync.Tip, bool) { /* ... */ }
 
-// 2. Run the embedded corpus. The factory is called once per
-//    subtest so each vector replays against a fresh selector.
+func (a *myAdapter) RollForward(peerID uint64, era uint, headerCbor []byte, tip format.Tip) error { /* ... */ }
+func (a *myAdapter) RollBackward(peerID uint64, point format.Point, tip format.Tip) error { /* ... */ }
+func (a *myAdapter) Stabilize()                              { /* drive the selector to a quiescent decision */ }
+func (a *myAdapter) BestTip() (format.Tip, bool)             { /* ... */ }
+func (a *myAdapter) DrainSwitchEvents() []format.SwitchEvent { /* ... */ }
+
+// 2. Run the embedded corpus. The factory is called once per subtest with
+//    that vector's capture, so the adapter can configure k (security_param)
+//    and any pre-seeded local_tip before replay; each vector replays against
+//    a fresh selector.
 func TestConsensusConformance(t *testing.T) {
-    consensus.RunAllCapturedVectors(t, func() consensus.ChainSelector {
-        return &myAdapter{}
-    })
+    consensus.RunAllCapturedVectors(t,
+        func(capture *format.ConsensusCapture) consensus.Replayer {
+            return newMyAdapter(capture.SecurityParam, capture.LocalTip)
+        })
 }
 ```
 
-The harness derives each peer's last `roll_forward` tip from the
-served trace, feeds it to the adapter via `UpdatePeerTip`, calls
-`EvaluateAndSwitch`, and asserts the adapter's best tip matches
-`expected_output.final_tip` (slot + hash + block_number).
+The harness replays every peer's full served trace in order — each
+`roll_forward` / `roll_backward` delivered through the matching `Replayer`
+method — then calls `Stabilize` and asserts `BestTip` matches
+`expected_output.final_tip` (slot + hash + block_number). When the vector
+carries an `expected_rollback`, it additionally asserts the SUT emitted a
+switch onto `final_tip` off a shorter-or-equal-length peer (via
+`DrainSwitchEvents`). The rollback *point* itself is not replayed-verified, and
+`expected_output.downstream_chainsync` is recorded but not asserted during
+replay — both are checked structurally at capture/compose time only.
 
 For ad-hoc iteration outside the harness's subtest loop, use
 `consensus.CapturedVectors()` to get the embedded corpus as

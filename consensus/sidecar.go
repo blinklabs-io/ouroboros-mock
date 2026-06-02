@@ -225,18 +225,33 @@ func lastRollForwardTip(served []format.ServedMessage) format.Tip {
 }
 
 // assertObservationPickedLongestPeer confirms that finalTip (the
-// observation's last roll_forward tip) matches the per-peer tip with
-// the highest block_number — i.e. the observation node really did
-// select the longest chain. A multi-way tie at the top is rejected
-// because Praos breaks ties by VRF, which the format does not
-// currently carry; an apparent tie therefore means the configurator
-// did not produce sufficient chain-length asymmetry and the vector
-// would be ambiguous.
+// observation's last roll_forward tip) matches one of the per-peer tips
+// with the highest block_number — i.e. the observation node really did
+// settle on a longest chain.
+//
+// A multi-way tie at the top block_number is accepted, not rejected:
+// Praos breaks such ties by VRF, and while this format does not encode
+// the VRF, the oracle (cardano-node) already resolved the tie when it
+// produced finalTip. We trust that resolution and only require that
+// finalTip matches one of the tied longest peers. The replay then checks
+// that the SUT independently reaches the same finalTip (BestTip ==
+// final_tip), which is the conformance assertion that actually bites.
+//
+// A finalTip that is a SHORTER, non-longest peer is also accepted, but
+// only as an exceeds-k no-switch: securityParam must be > 0 and switching
+// to every longer competing peer must require rolling back MORE than
+// securityParam blocks from finalTip — i.e. finalTip.BlockNumber minus the
+// block number of the common ancestor with that peer exceeds k. The bound
+// is rollback DEPTH, not tip-length lead: a chain that is much longer but
+// forks only a block or two back is reachable within k and a conformant
+// node adopts it, while a chain only slightly longer that forks beyond k is
+// refused. A non-longest finalTip that a longer peer could be reached from
+// within a k-deep rollback is rejected as a wrong-selector vector.
 //
 // Single-peer vectors trivially satisfy the invariant (the lone
 // peer's tip is both the max and what observation served).
 func assertObservationPickedLongestPeer(
-	peers []format.PeerInput, finalTip format.Tip,
+	peers []format.PeerInput, finalTip format.Tip, securityParam uint64,
 ) error {
 	if len(peers) == 0 {
 		return errors.New("no peers in vector")
@@ -264,35 +279,103 @@ func assertObservationPickedLongestPeer(
 			winnerTips = append(winnerTips, tip)
 		}
 	}
-	if len(winners) > 1 {
-		var ids []uint64
-		for _, i := range winners {
-			ids = append(ids, peers[i].PeerID)
+	// Accept iff final_tip matches one of the longest peers. A single
+	// winner is the common case; multiple winners means a VRF tie the
+	// oracle already resolved (see the doc comment).
+	for _, want := range winnerTips {
+		if finalTip.Slot == want.Slot &&
+			bytes.Equal(finalTip.Hash, want.Hash) &&
+			finalTip.BlockNumber == want.BlockNumber {
+			return nil
 		}
-		return fmt.Errorf(
-			"ambiguous longest chain: peers %v all reach block_number=%d "+
-				"— Praos tie-break by VRF is not encoded in the vector",
-			ids, maxBlock,
-		)
 	}
-	want := winnerTips[0]
-	if finalTip.Slot != want.Slot ||
-		!bytes.Equal(finalTip.Hash, want.Hash) ||
-		finalTip.BlockNumber != want.BlockNumber {
-		selected := "<unknown>"
-		if id, ok := peerIDFor(peers, finalTip); ok {
-			selected = strconv.FormatUint(id, 10)
+	var ids []uint64
+	for _, i := range winners {
+		ids = append(ids, peers[i].PeerID)
+	}
+	// final_tip is not a longest peer. The one consistent reason is an
+	// exceeds-k no-switch: the oracle kept a shorter incumbent because
+	// adopting a longer peer would have required rolling back more than the
+	// stability window k. That holds only when final_tip matches a captured
+	// peer AND *every* longer peer leads it by more than k — so the replay
+	// SUT's implausibility guard (with no local_tip) rejects all of them and
+	// stays on final_tip. It is not enough for the single longest peer to be
+	// out of reach: if any peer were longer than final_tip but within k, the
+	// SUT would switch to it and final_tip would be the wrong selection, so
+	// reject that vector here rather than bless it.
+	selected := "<unknown>"
+	if id, ok := peerIDFor(peers, finalTip); ok {
+		selected = strconv.FormatUint(id, 10)
+		if securityParam > 0 &&
+			everyLongerPeerNeedsDeepRollback(peers, finalTip, securityParam) {
+			return nil
 		}
-		return fmt.Errorf(
-			"observation selected peer_id=%s (slot=%d block=%d), "+
-				"but the longest peer is peer_id=%d (slot=%d block=%d)",
-			selected,
-			finalTip.Slot, finalTip.BlockNumber,
-			peers[winners[0]].PeerID,
-			want.Slot, want.BlockNumber,
-		)
 	}
-	return nil
+	return fmt.Errorf(
+		"observation selected peer_id=%s (slot=%d block=%d), but the "+
+			"longest peer(s) %v reach block_number=%d",
+		selected,
+		finalTip.Slot, finalTip.BlockNumber,
+		ids, maxBlock,
+	)
+}
+
+// everyLongerPeerNeedsDeepRollback reports whether switching from finalTip's
+// chain to any longer competing peer would require rolling back more than
+// securityParam blocks — so no longer chain is reachable within the k-deep
+// rollback bound and keeping finalTip is the correct no-switch outcome.
+//
+// The rollback depth to adopt a competing peer is finalTip.BlockNumber minus
+// the block number of the deepest block the two chains share (their fork
+// point), NOT the tip-length lead peerBlock - finalBlock. The two diverge
+// exactly when the incumbent chain is short and the fork is shallow: a peer
+// that is many blocks longer but branches only a block or two back is
+// adoptable within k, so finalTip would be the wrong selection and this
+// returns false.
+func everyLongerPeerNeedsDeepRollback(
+	peers []format.PeerInput, finalTip format.Tip, securityParam uint64,
+) bool {
+	finalServed, ok := servedForTip(peers, finalTip)
+	if !ok {
+		return false
+	}
+	for _, p := range peers {
+		tip := lastRollForwardTip(p.Served)
+		if tip.BlockNumber <= finalTip.BlockNumber {
+			continue // not longer than the incumbent
+		}
+		anc, ok := commonAncestorBlockNumber(finalServed, p.Served)
+		if !ok {
+			// No shared block at all: adopting the peer rolls back the entire
+			// incumbent chain (blocks 0..N, depth finalTip.BlockNumber + 1).
+			// That is within k — so the peer is reachable and final_tip is not
+			// a justified no-switch — exactly when N+1 <= k, i.e. N < k.
+			if finalTip.BlockNumber < securityParam {
+				return false
+			}
+			continue
+		}
+		if finalTip.BlockNumber-anc <= securityParam {
+			return false // longer peer reachable within k — should switch
+		}
+	}
+	return true
+}
+
+// servedForTip returns the served trace of the peer whose last roll_forward
+// tip matches t, and true; or nil,false when no peer matches.
+func servedForTip(
+	peers []format.PeerInput, t format.Tip,
+) ([]format.ServedMessage, bool) {
+	for _, p := range peers {
+		pt := lastRollForwardTip(p.Served)
+		if pt.Slot == t.Slot &&
+			bytes.Equal(pt.Hash, t.Hash) &&
+			pt.BlockNumber == t.BlockNumber {
+			return p.Served, true
+		}
+	}
+	return nil, false
 }
 
 // peerIDFor returns the PeerID of the peer whose last roll_forward

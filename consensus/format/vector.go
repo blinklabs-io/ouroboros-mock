@@ -82,6 +82,19 @@ type TestVector struct {
 type ConsensusCapture struct {
 	Peers          []PeerInput    `json:"peers"`
 	ExpectedOutput ExpectedOutput `json:"expected_output"`
+
+	// SecurityParam (k) is the stability window the scenario was forged
+	// with. Zero — the default for vectors that predate this field —
+	// leaves the SUT's k-bounded rollback logic disabled at replay.
+	SecurityParam uint64 `json:"security_param,omitempty"`
+
+	// LocalTip is the chain tip the observation node had already adopted
+	// (on the incumbent chain) before the captured peers were evaluated.
+	// Set it when a peer's announced tip is more than k blocks ahead of
+	// the others: without it the SUT's implausibility guard rejects that
+	// peer as a spoof, even though the real node — already at LocalTip —
+	// would accept it. Nil when k is zero or no peer leads by more than k.
+	LocalTip *Tip `json:"local_tip,omitempty"`
 }
 
 // PeerInput is the trace cardano-node served on one upstream
@@ -167,6 +180,26 @@ type Point struct {
 type ExpectedOutput struct {
 	DownstreamChainSync []ServedMessage `json:"downstream_chainsync"`
 	FinalTip            Tip             `json:"final_tip"`
+
+	// ExpectedRollback, when set, records the fork switch the SUT is
+	// expected to perform. Present on multi-peer fork scenarios; nil for
+	// single-peer or no-switch captures.
+	ExpectedRollback *ExpectedRollback `json:"expected_rollback,omitempty"`
+}
+
+// ExpectedRollback describes the fork switch the SUT should make: roll
+// back to Point — the shared-prefix common ancestor of the competing
+// chains — and adopt the chain ending at Tip (which equals
+// expected_output.final_tip).
+//
+// The replay harness uses Tip to assert the SUT's switch *decision* (it
+// must emit a switch onto Tip off a shorter chain). Point is recorded for
+// body-based verification: header-only replay cannot check that the SUT
+// rolls back to exactly Point, because the canonical rollback is applied
+// to block bodies the header-only trace does not carry.
+type ExpectedRollback struct {
+	Point Point `json:"point"`
+	Tip   Tip   `json:"tip"`
 }
 
 // Tip is a structured chain tip suitable for fast equality checks. Hash
@@ -180,4 +213,16 @@ type Tip struct {
 	Slot        uint64   `json:"slot"`
 	Hash        HexBytes `json:"hash"`
 	BlockNumber uint64   `json:"block_number"`
+}
+
+// SwitchEvent is a SUT fork-choice decision the replay harness reads back
+// from the Replayer: PreviousTip is the chain the SUT was following, NewTip
+// the chain it switched to. It is a runtime projection of the node-internal
+// switch event — NOT a serialized vector field — so it carries only the
+// switch endpoints. The rollback point is deliberately absent (the SUT's
+// switch event does not carry it; the expected rollback point is derived
+// from the vector instead).
+type SwitchEvent struct {
+	PreviousTip Tip
+	NewTip      Tip
 }

@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 #
-# Per-scenario configurator for fork_and_select_v1.
+# Per-scenario configurator for slot_battle_v1.
 #
 # Generates a 2-pool genesis, then drives cardano-node through three
-# forge phases to stage two divergent chains sharing a common prefix:
+# forge phases to stage a Praos "slot battle" — two chains that share a
+# common prefix and each add ONE block at the same height a few slots
+# apart, forged by different pools (hence different VRF):
 #
 #   Phase A: pool 1 forges in isolation until tip slot >= PREFIX_KILL_SLOT.
 #            Snapshot becomes the shared prefix.
-#   Phase B: pool 1 extends the shared prefix until tip slot >=
-#            PREFIX_KILL_SLOT + PEER_A_EXTENSION_SLOTS.
-#            Snapshot becomes peer-a's chain DB.
-#   Phase C: pool 2 extends the shared prefix until tip slot >=
-#            PREFIX_KILL_SLOT + PEER_B_EXTENSION_SLOTS.
-#            Snapshot becomes peer-b's chain DB. PEER_B_EXTENSION_SLOTS
-#            is ~3x PEER_A_EXTENSION_SLOTS so peer B reliably wins
-#            Praos longest-chain selection at the observation node.
+#   Phase B: pool 1 extends the shared prefix by ~one block (tip slot >=
+#            PREFIX_KILL_SLOT + PEER_A_EXTENSION_SLOTS). Becomes peer A.
+#   Phase C: pool 2 extends the SAME shared prefix by ~one block (tip
+#            slot >= PREFIX_KILL_SLOT + PEER_B_EXTENSION_SLOTS). Becomes
+#            peer B. Both phases use the same small window so the two
+#            blocks land at the same height within a few slots.
+#
+# The observation node adopts one block then resolves the tie by VRF; the
+# replay asserts dingo reaches the SAME final_tip. The Conway VRF
+# tiebreaker only fires for tips within 5 slots, so a usable capture needs
+# both blocks inside that window — see the README's capture-inspect-commit
+# note; not every run yields a clean 1-vs-1 tie.
 #
 # During each forge phase cardano-node runs as a subprocess of this
 # script (not a sibling docker service) so the configurator owns the
@@ -35,36 +41,30 @@ set -euo pipefail
 # (Byron) genesis hash, and cardano-node rejects the inherited
 # chain DB on hash mismatch.
 #
-# At activeSlotsCoeff=0.4 with two equal-stake pools each pool wins
-# ~0.225 of slots (1 - (1-0.4)^(1/2)). PEER_B_EXTENSION_SLOTS needs
-# to be enough that peer B's expected block count is robustly more
-# than peer A's — Praos longest-chain selection is BY BLOCK COUNT,
-# not slot number, so if A and B end up with similar block counts
-# the observation node may pick A on a run where pool 1's VRF wins
-# happened to cluster early. With:
-# This is a SWITCH vector with two coupled constraints, both relative to the
-# shared-prefix fork point:
-#
-#  1. ROLLBACK <= k: peer A's extension block count is the rollback depth to
-#     switch off it onto peer B. It must stay <= k=6, or a conformant node
-#     refuses the switch and the vector degenerates into an exceeds-k
-#     no-switch (which exceeds_k_no_switch_v1 stages on purpose).
-#  2. LEAD <= 2k: in the replay each peer announces its FINAL tip on its first
-#     header, so peer B's tip jumps ahead of peer A at once. The SUT's
-#     implausibility guard rejects a tip more than k ahead unless a local_tip
-#     arms the catch-up relaxation, which only reaches local_tip + 2k. So peer
-#     B's lead over peer A must be <= 2k=12 (and > k, so the local_tip path is
-#     actually exercised — that is this vector's distinct job vs within_k).
-#
-# Net: peer A a few blocks past the fork (rollback ~3-5), peer B leading by
-# roughly k+1..2k. The capture loop gates on real dingo conformance and
-# re-rolls when variance lands outside the window.
+# Unlike fork_and_select_v1 (which forges an unequal length gap), this
+# scenario wants the two extensions to land at the SAME height a few slots
+# apart. Both windows are therefore small and EQUAL. At activeSlotsCoeff
+# =0.4 with two equal-stake pools each wins ~0.225 of slots
+# (1 - (1-0.4)^(1/2)), so a 4-slot window yields ~0.9 expected blocks per
+# pool — most often exactly one. Two failure modes the capture must be
+# inspected for (README "capture, inspect, commit"):
+#   - a pool wins 0 slots in the window  -> that peer has no divergent
+#     block (re-run, or widen the window);
+#   - a pool wins 2 slots                -> unequal lengths, not a tie
+#     (re-run, or narrow the window).
+# The two winning slots must also be within 5 of each other for the Conway
+# restricted VRF tiebreaker to fire; a 4-slot window keeps them close but
+# does not guarantee it.
 PREFIX_KILL_SLOT="${PREFIX_KILL_SLOT:-10}"
-PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-8}"
-PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-55}"
+PEER_A_EXTENSION_SLOTS="${PEER_A_EXTENSION_SLOTS:-4}"
+PEER_B_EXTENSION_SLOTS="${PEER_B_EXTENSION_SLOTS:-4}"
 # Each phase's deadline. Phase C's kill slot is the biggest
 # (PREFIX + B_EXT), so this must accommodate that wait.
 PHASE_TIMEOUT_SECS="${PHASE_TIMEOUT_SECS:-180}"
+if ! [[ "${PHASE_TIMEOUT_SECS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "configurator: PHASE_TIMEOUT_SECS must be a positive integer (got '${PHASE_TIMEOUT_SECS}')" >&2
+    exit 1
+fi
 NETWORK_MAGIC="${NETWORK_MAGIC:-42}"
 
 # Paths inside the configurator container.
@@ -224,19 +224,26 @@ run_forge_phase() {
     done
 
     kill -TERM "${node_pid}"
-    # Backstop: if cardano-node doesn't exit cleanly within 30s,
-    # SIGKILL it. The wait following the timeout will return with
-    # whichever exit status the kernel attributes to the process.
+    # Backstop: if cardano-node doesn't exit cleanly within 30s, SIGKILL it.
+    # A forced kill can leave a torn ChainDB (a half-written immutable chunk
+    # or volatile block), so a phase that needed SIGKILL fails here rather
+    # than snapshotting / forging-in-place on a possibly-corrupt DB.
     local wait_deadline=$(( $(date +%s) + 30 ))
+    local clean_exit=1
     while kill -0 "${node_pid}" 2>/dev/null; do
         if (( $(date +%s) > wait_deadline )); then
             log "phase ${label}: clean shutdown timeout; SIGKILL"
             kill -KILL "${node_pid}" 2>/dev/null || true
+            clean_exit=0
             break
         fi
         sleep 1
     done
     wait "${node_pid}" 2>/dev/null || true
+    if (( clean_exit == 0 )); then
+        log "phase ${label}: node did not shut down cleanly (SIGKILL); failing phase to avoid a torn ChainDB"
+        return 1
+    fi
     # Force the kernel to flush dirty pages from cardano-node's
     # write-after-close. Without this, copying volatile/blocks-*.dat
     # right after exit can capture a truncated file the runtime

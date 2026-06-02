@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Orchestration for the fork_and_select_v1 capture scenario.
+# Orchestration for the slot_battle_v1 capture scenario.
 #
 # Lifecycle:
 #   1. Build images (configurator + capture-sidecar + compose).
@@ -36,14 +36,14 @@
 #      scenario's default).
 #   8. Tear down.
 #
-# Invoked by ../../capture-scenario.sh fork_and_select_v1.
+# Invoked by ../../capture-scenario.sh slot_battle_v1.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-GOLDEN_PATH="${REPO_ROOT}/consensus/testdata/captured/fork_and_select_v1.json"
+GOLDEN_PATH="${REPO_ROOT}/consensus/testdata/captured/slot_battle_v1.json"
 
 OUT_PATH=""
 KEEP_UP=false
@@ -195,9 +195,9 @@ run_sidecar() {
         -timeout 360s
 }
 
-run_sidecar cardano-peer-a:3001       peer-a.json      fork_and_select_v1.peer_a
-run_sidecar cardano-peer-b:3001       peer-b.json      fork_and_select_v1.peer_b
-run_sidecar cardano-observation:3001  observation.json fork_and_select_v1.observation
+run_sidecar cardano-peer-a:3001       peer-a.json      slot_battle_v1.peer_a
+run_sidecar cardano-peer-b:3001       peer-b.json      slot_battle_v1.peer_b
+run_sidecar cardano-observation:3001  observation.json slot_battle_v1.observation
 
 log "Composing multi-peer vector..."
 GOLDEN_ARGS=()
@@ -217,7 +217,7 @@ docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \
     -peer /capture-output/peer-a.json \
     -peer /capture-output/peer-b.json \
     -observation /capture-output/observation.json \
-    -title fork_and_select_v1 \
+    -title slot_battle_v1 \
     -out /capture-output/composed.json \
     -security-param 6 \
     ${GOLDEN_ARGS[@]+"${GOLDEN_ARGS[@]}"}
@@ -239,7 +239,7 @@ fi
 # replayable one; this decode-the-headers gate can. It runs inside the composer
 # image (--entrypoint), so a capture that drifted out of shape fails here and
 # the committed golden is left untouched.
-VECTOR_SHAPE=(-shape switch -min-lead 7)
+VECTOR_SHAPE=(-shape tie)
 log "Validating composed vector shape: ${VECTOR_SHAPE[*]}..."
 set +e
 docker compose -f "${COMPOSE_FILE}" --profile capture run --rm \

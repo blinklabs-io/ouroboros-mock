@@ -15,10 +15,12 @@
 package consensus
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
 
@@ -34,6 +36,13 @@ type ComposeArgs struct {
 	// Title is the composed vector's top-level title. Defaults to
 	// "multi-peer-<N>" when empty.
 	Title string
+	// SecurityParam (k) is the stability window the scenario was forged
+	// with — the configurator knows it (e.g. k=6 in the fork_and_select
+	// genesis). Zero leaves capture.security_param unset. When non-zero
+	// and the winning peer leads the next-longest peer by more than k,
+	// Compose also derives capture.local_tip so the replay SUT does not
+	// reject the winner as implausible (see deriveLocalTip).
+	SecurityParam uint64
 }
 
 // Compose merges N single-peer captures and one observation capture
@@ -99,6 +108,17 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 	}
 	finalTip := lastRollForwardTip(downstream)
 
+	// Order the peers for a deterministic, replayable feed sequence. The
+	// harness replays peers in slice order, and the right order depends on
+	// what the SUT must do: when final_tip is (one of) the longest chain — a
+	// switch or a VRF tie — the SUT must adopt a competing peer first and then
+	// switch UP onto final_tip, so final_tip's peer is fed LAST; when final_tip
+	// is a shorter incumbent — an exceeds-k no-switch — the SUT must establish
+	// the incumbent first and then reject the longer peer, so final_tip's peer
+	// is fed FIRST. This makes the winner/incumbent ordering independent of the
+	// (nondeterministic) order the VRF lottery happened to assign the pools.
+	peers = orderPeersForReplay(peers, finalTip)
+
 	// Strict invariant: the observation must have selected the
 	// longest peer. Any committed vector that violates this would
 	// silently bless a wrong-selector outcome at replay time, so
@@ -106,7 +126,7 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 	// flake (observation didn't settle on the longer chain in time)
 	// rather than letting it land in the corpus.
 	if err := assertObservationPickedLongestPeer(
-		peers, finalTip,
+		peers, finalTip, args.SecurityParam,
 	); err != nil {
 		return format.TestVector{}, fmt.Errorf(
 			"observation %s: %w",
@@ -119,6 +139,11 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 		title = fmt.Sprintf("multi-peer-%d", len(peers))
 	}
 
+	expectedRollback, err := deriveExpectedRollback(peers, finalTip)
+	if err != nil {
+		return format.TestVector{}, fmt.Errorf("compose: %w", err)
+	}
+
 	vec := format.TestVector{
 		SchemaVersion: format.CurrentSchemaVersion,
 		Title:         title,
@@ -128,7 +153,10 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 			ExpectedOutput: format.ExpectedOutput{
 				DownstreamChainSync: downstream,
 				FinalTip:            finalTip,
+				ExpectedRollback:    expectedRollback,
 			},
+			SecurityParam: args.SecurityParam,
+			LocalTip:      deriveLocalTip(peers, finalTip, args.SecurityParam),
 		},
 	}
 	// Round-trip through the encoder so format-level invariants
@@ -138,6 +166,196 @@ func Compose(args ComposeArgs) (format.TestVector, error) {
 		return format.TestVector{}, fmt.Errorf("compose: %w", err)
 	}
 	return vec, nil
+}
+
+// deriveLocalTip returns the chain tip the observation node would have
+// been following before it switched to the winner, or nil when no
+// local_tip is needed. It is the highest-block tip among the non-winning
+// peers, returned only when the winner (final_tip) leads it by more than
+// k — exactly the case where the replay SUT's implausibility guard would
+// otherwise reject the winner as a spoof. Returns nil when k is zero,
+// there is no second peer, or the lead is within k.
+func deriveLocalTip(
+	peers []format.PeerInput, finalTip format.Tip, k uint64,
+) *format.Tip {
+	if k == 0 {
+		return nil
+	}
+	var incumbent *format.Tip
+	for i := range peers {
+		tip := lastRollForwardTip(peers[i].Served)
+		if tipsEqual(tip, finalTip) {
+			continue // the winner
+		}
+		if incumbent == nil || tip.BlockNumber > incumbent.BlockNumber {
+			t := tip
+			incumbent = &t
+		}
+	}
+	if incumbent == nil {
+		return nil
+	}
+	if finalTip.BlockNumber <= incumbent.BlockNumber+k {
+		return nil
+	}
+	return incumbent
+}
+
+func tipsEqual(a, b format.Tip) bool {
+	return a.Slot == b.Slot &&
+		a.BlockNumber == b.BlockNumber &&
+		bytes.Equal(a.Hash, b.Hash)
+}
+
+// deriveExpectedRollback computes the fork switch the SUT should perform:
+// roll back to the shared-prefix common ancestor of the winning chain
+// (final_tip) and the incumbent (the highest-block non-winning peer), then
+// adopt final_tip. The intersect point is the last header byte-identical
+// between the two peers' roll_forward sequences. Returns nil when there is
+// no incumbent (single peer) or no shared prefix (the rollback target
+// would be origin, which the fork scenarios are designed to avoid).
+func deriveExpectedRollback(
+	peers []format.PeerInput, finalTip format.Tip,
+) (*format.ExpectedRollback, error) {
+	winnerIdx, incumbentIdx := -1, -1
+	var incumbentBlock uint64
+	for i := range peers {
+		tip := lastRollForwardTip(peers[i].Served)
+		if tipsEqual(tip, finalTip) {
+			winnerIdx = i
+			continue
+		}
+		if incumbentIdx == -1 || tip.BlockNumber > incumbentBlock {
+			incumbentIdx = i
+			incumbentBlock = tip.BlockNumber
+		}
+	}
+	if winnerIdx < 0 || incumbentIdx < 0 {
+		return nil, nil
+	}
+	// No-switch case (exceeds-k): final_tip is a SHORTER peer than the
+	// incumbent — the oracle kept the shorter chain because adopting the
+	// longer one would exceed k. There is no switch to record.
+	if finalTip.BlockNumber < incumbentBlock {
+		return nil, nil
+	}
+	w := rollForwardHeaders(peers[winnerIdx].Served)
+	in := rollForwardHeaders(peers[incumbentIdx].Served)
+	last := -1
+	for k := 0; k < len(w) && k < len(in); k++ {
+		if !bytes.Equal(w[k].cbor, in[k].cbor) {
+			break
+		}
+		last = k
+	}
+	if last < 0 {
+		return nil, nil
+	}
+	pt, err := headerPoint(w[last].era, w[last].cbor)
+	if err != nil {
+		return nil, fmt.Errorf("expected_rollback intersect: %w", err)
+	}
+	return &format.ExpectedRollback{Point: pt, Tip: finalTip}, nil
+}
+
+type servedHeader struct {
+	era  uint
+	cbor []byte
+}
+
+func rollForwardHeaders(served []format.ServedMessage) []servedHeader {
+	// Non-nil even when served has no roll_forwards: callers index into the
+	// result under a separately-tracked bound (e.g. deriveExpectedRollback's
+	// last >= 0 guard), and a nil return defeats nilaway's ability to prove
+	// those accesses safe.
+	out := make([]servedHeader, 0, len(served))
+	for _, m := range served {
+		if m.MsgType != format.ChainSyncMsgRollForward || m.Era == nil {
+			continue
+		}
+		out = append(out, servedHeader{era: *m.Era, cbor: m.HeaderCbor})
+	}
+	return out
+}
+
+func headerPoint(era uint, cbor []byte) (format.Point, error) {
+	h, err := gledger.NewBlockHeaderFromCbor(era, cbor)
+	if err != nil {
+		return format.Point{}, err
+	}
+	return format.Point{
+		Slot: h.SlotNumber(),
+		Hash: format.HexBytes(h.Hash().Bytes()),
+	}, nil
+}
+
+// orderPeersForReplay returns peers reordered so final_tip's peer is fed last
+// when it is (tied for) the longest chain and first when it is a shorter
+// incumbent, then reassigns peer_id by position. Only the two-peer case is
+// reordered; other arities are returned unchanged. See the call site for why
+// the feed order matters to the harness's switch assertion.
+func orderPeersForReplay(
+	peers []format.PeerInput, finalTip format.Tip,
+) []format.PeerInput {
+	if len(peers) != 2 {
+		return peers
+	}
+	maxBlock := uint64(0)
+	ftIdx := -1
+	for i, p := range peers {
+		t := lastRollForwardTip(p.Served)
+		if t.BlockNumber > maxBlock {
+			maxBlock = t.BlockNumber
+		}
+		if t.Slot == finalTip.Slot && bytes.Equal(t.Hash, finalTip.Hash) &&
+			t.BlockNumber == finalTip.BlockNumber {
+			ftIdx = i
+		}
+	}
+	if ftIdx < 0 {
+		return peers // final_tip matches no peer; leave order untouched
+	}
+	want := 0 // shorter incumbent → first
+	if lastRollForwardTip(peers[ftIdx].Served).BlockNumber == maxBlock {
+		want = len(peers) - 1 // longest (switch / tie winner) → last
+	}
+	if ftIdx != want {
+		peers[0], peers[1] = peers[1], peers[0]
+	}
+	for i := range peers {
+		peers[i].PeerID = uint64(i) //nolint:gosec // 0 or 1
+	}
+	return peers
+}
+
+// commonAncestorBlockNumber decodes the headers of two served traces and
+// returns the block number of the deepest block they share (the fork point),
+// and true; or 0,false when they share no block or a header cannot be decoded.
+//
+// The traces produced by the capture pipeline are origin-anchored and
+// index-aligned (block i sits at index i in every peer that has it), so an
+// index-wise CBOR comparison locates the fork. This is the same prefix scan
+// deriveExpectedRollback uses; it is factored out here so the chain-selection
+// guard can reason about rollback DEPTH (finalTip.BlockNumber - ancestor)
+// rather than tip-length lead.
+func commonAncestorBlockNumber(a, b []format.ServedMessage) (uint64, bool) {
+	ha := rollForwardHeaders(a)
+	hb := rollForwardHeaders(b)
+	last := -1
+	for i := 0; i < len(ha) && i < len(hb); i++ {
+		if !bytes.Equal(ha[i].cbor, hb[i].cbor) {
+			break
+		}
+		last = i
+	}
+	if last < 0 {
+		return 0, false
+	}
+	h, err := gledger.NewBlockHeaderFromCbor(ha[last].era, ha[last].cbor)
+	if err != nil {
+		return 0, false
+	}
+	return h.BlockNumber(), true
 }
 
 // loadCaptureVector reads a JSON vector file, decodes it via

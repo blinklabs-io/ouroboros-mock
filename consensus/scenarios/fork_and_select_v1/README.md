@@ -14,8 +14,8 @@ The configurator drives cardano-node through three forge phases
 | Phase | Forging pool | Starting DB | Kill slot | Snapshot to |
 |---|---|---|---|---|
 | A | pool 1 | fresh | `PREFIX_KILL_SLOT` (default 10) | `shared-prefix-db/` |
-| B | pool 1 | copy of shared prefix | `+ PEER_A_EXTENSION_SLOTS` (default +15 ⇒ ~25) | `peer-a-data/` |
-| C | pool 2 | copy of shared prefix | `+ PEER_B_EXTENSION_SLOTS` (default +80 ⇒ ~90) | `peer-b-data/` |
+| B | pool 1 | copy of shared prefix | `+ PEER_A_EXTENSION_SLOTS` (default +8) | `peer-a-data/` |
+| C | pool 2 | copy of shared prefix | `+ PEER_B_EXTENSION_SLOTS` (default +55) | `peer-b-data/` |
 
 Slot counts are deliberately small so each phase's wall-clock-vs-chain
 gap stays inside cardano-node's Genesis State Machine "CaughtUp"
@@ -38,12 +38,23 @@ No key rotation, no block splicing, no hand-synthesized blocks. Just
 running cardano-node with different key mounts at different times
 against the same genesis.
 
-`PEER_B_EXTENSION_SLOTS` is sized so peer B's expected **block count**
-substantially exceeds peer A's. Praos longest-chain selection is by
-block count, not slot number, so picking similar slot counts for the
-two extensions can let leadership-lottery variance flip which peer
-wins on a given run. With the defaults (15 vs 80) peer B's expected
-block lead is ~14 blocks — robustly outside reasonable variance.
+The two extension windows are sized for the **switch constraints** (see the
+comment block in `configurator.sh`), both measured from the shared-prefix
+fork point:
+
+- **Peer A stays shallow** so the rollback to switch off it onto peer B is
+  `<= k=6`. Peer A's extension block count *is* that rollback depth.
+- **Peer B leads peer A by more than k but no more than 2k.** The 2k ceiling
+  is a replay-fidelity bound, not a Praos one: in the recorded trace each peer
+  announces its FINAL tip on its first header, so peer B's tip jumps ahead of
+  peer A at once. The SUT's implausibility guard rejects a tip more than k
+  ahead of its reference unless the captured `local_tip` arms the catch-up
+  relaxation, which only reaches `local_tip + 2k`. A lead in `(k, 2k]` is the
+  window where that relaxation is both *needed* (lead > k, so `local_tip` is
+  emitted and exercised — this vector's distinct job vs `within_k_fork_v1`'s
+  lead `<= k`) and *sufficient* (lead `<= 2k`, so the SUT can still reach
+  peer B). The capture loop gates on real SUT conformance and re-rolls when
+  leadership variance lands the lead outside the window.
 
 ## Stack contents
 
@@ -90,14 +101,23 @@ The vector exercises three things at replay time:
 
 1. **Praos longest-chain selection** with two upstream peers serving
    divergent chains.
-2. **Rollback to a non-genesis intersect point.** The observation node,
-   having adopted some of peer A's tail, must roll back to the shared
-   prefix tip and re-apply peer B's tail. The "find common ancestor at
-   slot K > 0" path is the one real consensus failures hit; the
-   forge-in-isolation alternative (no shared prefix) would short-
-   circuit to slot 0 and not exercise it.
+2. **Switch off a shorter chain onto the longer one.** The observation
+   node adopts some of peer A's tail, then switches to peer B. The replay
+   asserts this *decision* (a chain switch whose new tip is `final_tip`,
+   off a shorter peer) via the SUT's emitted switch events — catching a
+   SUT that merely lands on the longest tip without ever switching.
 3. **Stabilized chain agreement.** The replay SUT must reach the same
    `final_tip` (peer B's tip) given the same per-peer inputs.
+
+The vector also records `expected_output.expected_rollback`: the
+shared-prefix intersect point (the common ancestor at slot K > 0 —
+`PREFIX_KILL_SLOT`, here slot 10) plus the resulting tip. **Header-only
+replay asserts the switch decision and that the resulting tip is
+`final_tip`, but does not verify the SUT rolls back to exactly the
+intersect point** — the canonical rollback is applied to block bodies,
+which the chainsync-only capture does not carry. Verifying the rollback
+*target* would require capturing blockfetch bodies and replaying them; the
+`expected_rollback.point` is recorded for that future check.
 
 ## Determinism caveats
 

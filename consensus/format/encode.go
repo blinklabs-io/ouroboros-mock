@@ -15,6 +15,7 @@
 package format
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +65,9 @@ func (v TestVector) validate() error {
 }
 
 func (c *ConsensusCapture) validate() error {
+	if c.LocalTip != nil && len(c.LocalTip.Hash) == 0 {
+		return errors.New("local_tip: hash is required when local_tip is set")
+	}
 	for i, p := range c.Peers {
 		for j, m := range p.Served {
 			if err := validateServedMessage(m); err != nil {
@@ -87,6 +91,24 @@ func (c *ConsensusCapture) validate() error {
 		if err := validateServedMessage(m); err != nil {
 			return fmt.Errorf(
 				"expected_output.downstream_chainsync[%d]: %w", i, err,
+			)
+		}
+	}
+	if er := c.ExpectedOutput.ExpectedRollback; er != nil {
+		if len(er.Point.Hash) == 0 {
+			return errors.New(
+				"expected_rollback.point: hash is required",
+			)
+		}
+		if len(er.Tip.Hash) == 0 {
+			return errors.New("expected_rollback.tip: hash is required")
+		}
+		ft := c.ExpectedOutput.FinalTip
+		if er.Tip.Slot != ft.Slot ||
+			!bytes.Equal(er.Tip.Hash, ft.Hash) ||
+			er.Tip.BlockNumber != ft.BlockNumber {
+			return errors.New(
+				"expected_rollback.tip must equal final_tip",
 			)
 		}
 	}
