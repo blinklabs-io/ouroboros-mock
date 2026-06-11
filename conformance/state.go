@@ -19,19 +19,14 @@ import (
 	"maps"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
-// StateProvider combines all gouroboros state interfaces needed for validation.
-// Implementations provide read-only access to ledger state.
-type StateProvider interface {
-	common.LedgerState
-	common.UtxoState
-	common.CertState
-	common.SlotState
-	common.PoolState
-	common.RewardState
-	common.GovState
-}
+// StateProvider is the read-only ledger state surface required for transaction
+// validation. It is defined in the ledger package and aliased here so that
+// existing code that references conformance.StateProvider continues to compile
+// unchanged. Implementors should refer to ledger.StateProvider directly.
+type StateProvider = ledger.StateProvider
 
 // StateManager handles state mutations during test execution.
 // Implementations manage the full lifecycle of ledger state for a test vector.
