@@ -28,4 +28,7 @@ var (
 	_ lcommon.PoolState   = (*MockLedgerState)(nil)
 	_ lcommon.RewardState = (*MockLedgerState)(nil)
 	_ lcommon.GovState    = (*MockLedgerState)(nil)
+
+	// Verify MockLedgerState satisfies the unified StateProvider interface.
+	_ StateProvider = (*MockLedgerState)(nil)
 )
