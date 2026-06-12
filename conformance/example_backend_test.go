@@ -56,51 +56,66 @@ import (
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
-// stubBackend is a trivial ledger.StateProvider that returns empty/zero values
-// for every method.  Replace this with your real database implementation.
-type stubBackend struct{}
+// stubBackend is a ledger.StateProvider that delegates all reads to an inner
+// provider supplied at construction time.  This lets GetStateProvider() return
+// the custom backend while the conformance vectors still pass.
+//
+// A real Dingo integration replaces each delegating call with an actual
+// database read:
+//
+//	func (s *stubBackend) UtxoById(id common.TransactionInput) (common.Utxo, error) {
+//	    return s.db.GetUtxo(id)   // ← your real database call
+//	}
+type stubBackend struct {
+	// getInner returns the current in-memory state.  Calling it on every
+	// method ensures the backend sees state that was written by ApplyTransaction.
+	// Replace the delegation with your own database reads to exercise real persistence.
+	getInner func() ledger.StateProvider
+}
 
 // Verify the stub satisfies the interface at compile time.
 var _ ledger.StateProvider = (*stubBackend)(nil)
 
-func (s *stubBackend) NetworkId() uint { return 0 }
+func (s *stubBackend) NetworkId() uint { return s.getInner().NetworkId() }
 
 func (s *stubBackend) UtxoById(
-	_ common.TransactionInput,
+	id common.TransactionInput,
 ) (common.Utxo, error) {
-	return common.Utxo{}, ledger.ErrNotFound
+	return s.getInner().UtxoById(id)
 }
 
 func (s *stubBackend) StakeRegistration(
-	_ []byte,
+	hash []byte,
 ) ([]common.StakeRegistrationCertificate, error) {
-	return nil, nil
+	return s.getInner().StakeRegistration(hash)
 }
 
-func (s *stubBackend) IsStakeCredentialRegistered(_ common.Credential) bool {
-	return false
+func (s *stubBackend) IsStakeCredentialRegistered(c common.Credential) bool {
+	return s.getInner().IsStakeCredentialRegistered(c)
 }
 
-func (s *stubBackend) SlotToTime(_ uint64) (time.Time, error) {
-	return time.Time{}, nil
+func (s *stubBackend) SlotToTime(slot uint64) (time.Time, error) {
+	return s.getInner().SlotToTime(slot)
 }
 
-func (s *stubBackend) TimeToSlot(_ time.Time) (uint64, error) {
-	return 0, nil
+func (s *stubBackend) TimeToSlot(t time.Time) (uint64, error) {
+	return s.getInner().TimeToSlot(t)
 }
 
 func (s *stubBackend) PoolCurrentState(
-	_ common.PoolKeyHash,
+	id common.PoolKeyHash,
 ) (*common.PoolRegistrationCertificate, *uint64, error) {
-	return nil, nil, nil
+	return s.getInner().PoolCurrentState(id)
 }
 
-func (s *stubBackend) IsPoolRegistered(_ common.PoolKeyHash) bool { return false }
+func (s *stubBackend) IsPoolRegistered(id common.PoolKeyHash) bool {
+	return s.getInner().IsPoolRegistered(id)
+}
 
 func (s *stubBackend) IsVrfKeyInUse(
-	_ common.Blake2b256,
+	vrf common.Blake2b256,
 ) (bool, common.PoolKeyHash, error) {
-	return false, common.PoolKeyHash{}, nil
+	return s.getInner().IsVrfKeyInUse(vrf)
 }
 
 func (s *stubBackend) CalculateRewards(
@@ -108,61 +123,67 @@ func (s *stubBackend) CalculateRewards(
 	snapshot common.RewardSnapshot,
 	params common.RewardParameters,
 ) (*common.RewardCalculationResult, error) {
-	return common.CalculateRewards(pots, snapshot, params)
+	return s.getInner().CalculateRewards(pots, snapshot, params)
 }
 
-func (s *stubBackend) GetAdaPots() common.AdaPots { return common.AdaPots{} }
+func (s *stubBackend) GetAdaPots() common.AdaPots { return s.getInner().GetAdaPots() }
 
-func (s *stubBackend) UpdateAdaPots(_ common.AdaPots) error { return nil }
-
-func (s *stubBackend) GetRewardSnapshot(_ uint64) (common.RewardSnapshot, error) {
-	return common.RewardSnapshot{}, nil
+func (s *stubBackend) UpdateAdaPots(p common.AdaPots) error {
+	return s.getInner().UpdateAdaPots(p)
 }
 
-func (s *stubBackend) IsRewardAccountRegistered(_ common.Credential) bool {
-	return false
+func (s *stubBackend) GetRewardSnapshot(epoch uint64) (common.RewardSnapshot, error) {
+	return s.getInner().GetRewardSnapshot(epoch)
+}
+
+func (s *stubBackend) IsRewardAccountRegistered(c common.Credential) bool {
+	return s.getInner().IsRewardAccountRegistered(c)
 }
 
 func (s *stubBackend) RewardAccountBalance(
-	_ common.Credential,
+	c common.Credential,
 ) (*uint64, error) {
-	return nil, nil
+	return s.getInner().RewardAccountBalance(c)
 }
 
 func (s *stubBackend) CommitteeMember(
-	_ common.Blake2b224,
+	hash common.Blake2b224,
 ) (*common.CommitteeMember, error) {
-	return nil, nil
+	return s.getInner().CommitteeMember(hash)
 }
 
 func (s *stubBackend) CommitteeMembers() ([]common.CommitteeMember, error) {
-	return nil, nil
+	return s.getInner().CommitteeMembers()
 }
 
 func (s *stubBackend) DRepRegistration(
-	_ common.Blake2b224,
+	hash common.Blake2b224,
 ) (*common.DRepRegistration, error) {
-	return nil, nil
+	return s.getInner().DRepRegistration(hash)
 }
 
 func (s *stubBackend) DRepRegistrations() ([]common.DRepRegistration, error) {
-	return nil, nil
+	return s.getInner().DRepRegistrations()
 }
 
-func (s *stubBackend) Constitution() (*common.Constitution, error) { return nil, nil }
+func (s *stubBackend) Constitution() (*common.Constitution, error) {
+	return s.getInner().Constitution()
+}
 
-func (s *stubBackend) TreasuryValue() (uint64, error) { return 0, nil }
+func (s *stubBackend) TreasuryValue() (uint64, error) { return s.getInner().TreasuryValue() }
 
 func (s *stubBackend) GovActionById(
-	_ common.GovActionId,
+	id common.GovActionId,
 ) (*common.GovActionState, error) {
-	return nil, nil
+	return s.getInner().GovActionById(id)
 }
 
-func (s *stubBackend) GovActionExists(_ common.GovActionId) bool { return false }
+func (s *stubBackend) GovActionExists(id common.GovActionId) bool {
+	return s.getInner().GovActionExists(id)
+}
 
 func (s *stubBackend) CostModels() map[common.PlutusLanguage]common.CostModel {
-	return nil
+	return s.getInner().CostModels()
 }
 
 // customStateManager is a conformance.StateManager that delegates state reads
@@ -179,11 +200,15 @@ type customStateManager struct {
 
 var _ conformance.StateManager = (*customStateManager)(nil)
 
-func newCustomStateManager(backend ledger.StateProvider) *customStateManager {
-	return &customStateManager{
-		inner:   conformance.NewMockStateManager(),
-		backend: backend,
+func newCustomStateManager() *customStateManager {
+	m := &customStateManager{
+		inner: conformance.NewMockStateManager(),
 	}
+	// The stub delegates every read to the inner mock's current state so that
+	// conformance vectors pass.  Swap the delegation for real database calls to
+	// exercise actual persistence instead.
+	m.backend = &stubBackend{getInner: m.inner.GetStateProvider}
+	return m
 }
 
 func (m *customStateManager) LoadInitialState(
@@ -209,11 +234,10 @@ func (m *customStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 }
 
 // GetStateProvider returns the backend that the harness uses for read-only
-// validation queries.  Swap stubBackend with your real database here.
+// validation queries.  Replace stubBackend with your real database to exercise
+// actual persistence instead of the in-memory mock.
 func (m *customStateManager) GetStateProvider() conformance.StateProvider {
-	// To exercise real Dingo persistence, return your real backend instead:
-	//   return m.backend
-	return m.inner.GetStateProvider()
+	return m.backend
 }
 
 func (m *customStateManager) GetGovernanceState() *conformance.GovernanceState {
@@ -234,14 +258,12 @@ func (m *customStateManager) Reset() error {
 	return m.inner.Reset()
 }
 
-// TestConformanceWithCustomBackend shows how to wire a custom StateManager
-// (backed by a real database) into the conformance harness.  All existing
-// vectors pass because customStateManager still delegates to MockStateManager;
-// switching GetStateProvider() to return m.backend makes tests exercise real
-// Dingo persistence instead.
+// TestConformanceWithCustomBackend shows how to wire a custom StateManager into
+// the conformance harness.  All reads go through the injected backend
+// (stubBackend here); a real Dingo integration replaces the delegation inside
+// stubBackend with actual database calls.
 func TestConformanceWithCustomBackend(t *testing.T) {
-	backend := &stubBackend{}
-	sm := newCustomStateManager(backend)
+	sm := newCustomStateManager()
 
 	h := conformance.NewHarness(sm, conformance.HarnessConfig{
 		TestdataRoot: "testdata",
