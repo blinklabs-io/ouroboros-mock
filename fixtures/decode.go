@@ -151,7 +151,7 @@ func ledgerBlockTypeForEra(era string) (uint, error) {
 	case "conway":
 		return ledger.BlockTypeConway, nil
 	case "dijkstra":
-		return ledger.BlockTypeLeiosRanking, nil
+		return ledger.BlockTypeDijkstra, nil
 	default:
 		return 0, fmt.Errorf("unknown block era %q", era)
 	}
@@ -188,7 +188,7 @@ func ledgerTransactionTypeForEra(era string) (uint, error) {
 	case "conway":
 		return ledger.TxTypeConway, nil
 	case "dijkstra":
-		return ledger.TxTypeLeios, nil
+		return ledger.TxTypeDijkstra, nil
 	default:
 		return 0, fmt.Errorf("unknown transaction era %q", era)
 	}
@@ -216,7 +216,7 @@ func consensusHeaderTypeForEra(era string) (uint, error) {
 	case "conway":
 		return ledger.BlockHeaderTypeConway, nil
 	case "dijkstra":
-		return ledger.BlockHeaderTypeLeios, nil
+		return ledger.BlockHeaderTypeDijkstra, nil
 	default:
 		return 0, fmt.Errorf("unknown header era %q", era)
 	}
