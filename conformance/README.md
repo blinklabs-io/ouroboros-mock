@@ -2,6 +2,11 @@
 
 This package provides a conformance test harness for Cardano ledger rule validation using Amaru test vectors. It can be used by any implementation that provides the required state interfaces.
 
+## For implementors
+
+- **[IMPLEMENTING_STATE_MANAGER.md](IMPLEMENTING_STATE_MANAGER.md)** — step-by-step guide for wrapping your own ledger or database behind the `StateManager` / `StateProvider` interfaces so the harness exercises your real code.
+- **[VECTOR_FORMAT.md](VECTOR_FORMAT.md)** — CBOR layout of test vectors, all event types, initial-state extraction paths, `pparams-by-hash/` lookup, and "No cost model" handling.
+
 ## Test Status
 
 | Metric | Count |
