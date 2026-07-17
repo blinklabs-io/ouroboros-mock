@@ -258,7 +258,14 @@ func (h *Harness) RequestNext() error {
 }
 
 // SendDone sends a chain-sync Done message, asking the server to stop the
-// protocol. The server restarts its protocol instance in response.
+// protocol. It is the deterministic "protocol stop" control: a graceful stop
+// leaves the server-under-test with no protocol error on [Harness.ServerErrors].
+//
+// Done is terminal for the current drive. The gouroboros server handles it by
+// stopping and asynchronously re-initializing a fresh protocol instance, so a
+// request sent immediately after SendDone races that restart and may be
+// dropped. To continue driving after a Done, start a new [Harness] rather than
+// reusing this one.
 func (h *Harness) SendDone() error {
 	return h.sendChainSync(gchainsync.NewMsgDone())
 }
@@ -285,11 +292,30 @@ func (h *Harness) sendSegment(
 			return fmt.Errorf("encode message: %w", err)
 		}
 	}
-	seg := muxer.NewSegment(protocolId, data, isResponse)
-	if err := h.muxer.Send(seg); err != nil {
-		return fmt.Errorf("send segment: %w", err)
+	// A muxer segment payload cannot exceed SegmentMaxPayloadLength, so split
+	// oversized messages into sequential fragments. muxer.Send is serialized,
+	// and the peer reassembles segments per protocol before decoding, so
+	// ordering is preserved. This mirrors the reassembly done in readLoop.
+	for {
+		chunk := data
+		if len(chunk) > muxer.SegmentMaxPayloadLength {
+			chunk = chunk[:muxer.SegmentMaxPayloadLength]
+		}
+		seg := muxer.NewSegment(protocolId, chunk, isResponse)
+		if seg == nil {
+			return fmt.Errorf(
+				"failed to build muxer segment for %d-byte fragment",
+				len(chunk),
+			)
+		}
+		if err := h.muxer.Send(seg); err != nil {
+			return fmt.Errorf("send segment: %w", err)
+		}
+		data = data[len(chunk):]
+		if len(data) == 0 {
+			return nil
+		}
 	}
-	return nil
 }
 
 // Observe returns the next server message, blocking until one arrives, the

@@ -16,6 +16,7 @@ package chainsync_test
 
 import (
 	"context"
+	"encoding/binary"
 	"sync"
 	"testing"
 	"time"
@@ -118,9 +119,14 @@ func TestFindIntersectFound(t *testing.T) {
 			wantPoint := chain.Points[1]
 			wantTip := chain.Tip()
 
+			// The callback runs on the server goroutine, where require's
+			// FailNow (runtime.Goexit) would only unwind the callback and
+			// hang the test. Capture the received points and assert them on
+			// the test goroutine instead.
+			gotPoints := make(chan []pcommon.Point, 1)
 			r := &responder{
 				findIntersect: func(points []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
-					require.NotEmpty(t, points)
+					gotPoints <- points
 					return wantPoint, wantTip, nil
 				},
 			}
@@ -139,6 +145,9 @@ func TestFindIntersectFound(t *testing.T) {
 			gotTip, ok := msg.Tip()
 			require.True(t, ok)
 			require.Equal(t, wantTip, gotTip)
+
+			// The server received exactly the points we drove it with.
+			require.Equal(t, chain.Points, <-gotPoints)
 		})
 	}
 }
@@ -179,6 +188,38 @@ func TestFindIntersectNotFound(t *testing.T) {
 			require.Equal(t, wantTip, gotTip)
 		})
 	}
+}
+
+// A FindIntersect whose encoded form exceeds a single muxer segment
+// (SegmentMaxPayloadLength) must be split across segments by the driver and
+// reassembled by the server, delivering every point to the callback.
+func TestFindIntersectOversizedPayload(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	// ~40 bytes/point encoded; 3000 points is well over the 65535-byte limit.
+	const numPoints = 3000
+	points := make([]pcommon.Point, numPoints)
+	for i := range points {
+		hash := make([]byte, 32)
+		binary.BigEndian.PutUint64(hash, uint64(i))
+		points[i] = pcommon.NewPoint(uint64(i), hash)
+	}
+
+	gotCount := make(chan int, 1)
+	r := &responder{
+		findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
+			gotCount <- len(p)
+			return csmock.OriginPoint(), chainsync.Tip{}, nil
+		},
+	}
+	h := newHarness(t, csmock.ModeNtC, r)
+	defer h.Close()
+
+	require.NoError(t, h.FindIntersect(points))
+
+	msg := observe(t, h)
+	require.True(t, msg.IsIntersectFound(), "expected IntersectFound")
+	require.Equal(t, numPoints, <-gotCount)
 }
 
 // Drive RequestNext and distinguish the roll-forward path. In NtC the full
