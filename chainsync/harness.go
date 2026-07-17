@@ -109,6 +109,10 @@ type Harness struct {
 	doneChan  chan struct{}
 	wg        sync.WaitGroup
 	closeOnce sync.Once
+
+	// sendMu serializes whole messages onto the wire so that a multi-segment
+	// message is written contiguously even across concurrent driver calls.
+	sendMu sync.Mutex
 }
 
 // New creates and starts a Harness. It stands up the chain-sync server under
@@ -293,9 +297,13 @@ func (h *Harness) sendSegment(
 		}
 	}
 	// A muxer segment payload cannot exceed SegmentMaxPayloadLength, so split
-	// oversized messages into sequential fragments. muxer.Send is serialized,
-	// and the peer reassembles segments per protocol before decoding, so
-	// ordering is preserved. This mirrors the reassembly done in readLoop.
+	// oversized messages into sequential fragments. The peer reassembles
+	// segments per protocol before decoding. muxer.Send only serializes a
+	// single segment, so hold sendMu across the whole loop; otherwise a
+	// concurrent driver call could interleave its fragments and corrupt the
+	// peer's reassembled stream. This mirrors the reassembly done in readLoop.
+	h.sendMu.Lock()
+	defer h.sendMu.Unlock()
 	for {
 		chunk := data
 		if len(chunk) > muxer.SegmentMaxPayloadLength {
