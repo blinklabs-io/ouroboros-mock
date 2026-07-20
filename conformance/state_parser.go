@@ -62,6 +62,9 @@ type ParsedInitialState struct {
 	// DRepRegistrations contains registered DReps (credential hash).
 	DRepRegistrations []common.Blake2b224
 
+	// DRepDelegations maps stake credentials to their delegated DRep.
+	DRepDelegations map[common.Blake2b224]common.DRepDelegation
+
 	// HotKeyAuthorizations maps cold keys to hot keys for committee members.
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
 
@@ -141,6 +144,7 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		RewardAccounts:       make(map[common.Blake2b224]uint64),
 		PoolRegistrations:    make(map[common.Blake2b224]bool),
 		CommitteeMembers:     make(map[common.Blake2b224]uint64),
+		DRepDelegations:      make(map[common.Blake2b224]common.DRepDelegation),
 		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
 		Proposals:            make(map[string]GovActionInfo),
 		CostModels:           make(map[uint][]int64),
@@ -589,11 +593,32 @@ func parseDelegationState(
 						}
 					}
 				}
+				if len(vArr) >= 3 {
+					if drep := extractDRepDelegation(vArr[2]); drep != nil {
+						state.DRepDelegations[cred.Credential] = *drep
+					}
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func extractDRepDelegation(raw any) *common.DRepDelegation {
+	if credential := extractCredentialHash(raw); credential != nil {
+		return &common.DRepDelegation{DRep: credential.Credential}
+	}
+	items, ok := raw.([]any)
+	if !ok || len(items) != 1 {
+		return nil
+	}
+	drepType, ok := items[0].(uint64)
+	if !ok || (drepType != common.DrepTypeAbstain &&
+		drepType != common.DrepTypeNoConfidence) {
+		return nil
+	}
+	return &common.DRepDelegation{}
 }
 
 // parseUtxoState extracts UTxOs, governance state, and cost models.

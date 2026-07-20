@@ -75,6 +75,9 @@ type CommitteeMemberFunc func(lcommon.Blake2b224) (*lcommon.CommitteeMember, err
 // DRepRegistrationFunc is a callback for DRep registration lookups
 type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
 
+// DRepDelegationFunc is a callback for DRep delegation lookups.
+type DRepDelegationFunc func(lcommon.Credential) (*lcommon.DRepDelegation, error)
+
 // ConstitutionFunc is a callback for constitution lookups
 type ConstitutionFunc func() (*lcommon.Constitution, error)
 
@@ -115,6 +118,7 @@ type MockLedgerState struct {
 	// GovState callbacks and state
 	CommitteeMemberCallback  CommitteeMemberFunc
 	DRepRegistrationCallback DRepRegistrationFunc
+	DRepDelegationCallback   DRepDelegationFunc
 	ConstitutionCallback     ConstitutionFunc
 	TreasuryValueCallback    TreasuryValueFunc
 	GovActionByIdCallback    GovActionByIdFunc
@@ -340,6 +344,16 @@ func (ls *MockLedgerState) DRepRegistration(
 // DRepRegistrations returns all DRep registrations
 func (ls *MockLedgerState) DRepRegistrations() ([]lcommon.DRepRegistration, error) {
 	return ls.drepRegistrations, nil
+}
+
+// DRepDelegation looks up the vote delegation for a stake credential.
+func (ls *MockLedgerState) DRepDelegation(
+	credential lcommon.Credential,
+) (*lcommon.DRepDelegation, error) {
+	if ls.DRepDelegationCallback != nil {
+		return ls.DRepDelegationCallback(credential)
+	}
+	return nil, nil
 }
 
 // Constitution returns the current constitution
@@ -593,6 +607,14 @@ func (b *LedgerStateBuilder) WithDRepRegistration(
 	fn DRepRegistrationFunc,
 ) *LedgerStateBuilder {
 	b.state.DRepRegistrationCallback = fn
+	return b
+}
+
+// WithDRepDelegation sets the DRep delegation lookup callback.
+func (b *LedgerStateBuilder) WithDRepDelegation(
+	fn DRepDelegationFunc,
+) *LedgerStateBuilder {
+	b.state.DRepDelegationCallback = fn
 	return b
 }
 

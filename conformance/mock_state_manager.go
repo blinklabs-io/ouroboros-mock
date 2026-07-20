@@ -106,7 +106,6 @@ func (m *MockStateManager) LoadInitialState(
 	for _, hash := range state.DRepRegistrations {
 		m.drepRegistrations[hash] = true
 	}
-
 	// Load committee members
 	maps.Copy(m.committeeMembers, state.CommitteeMembers)
 
@@ -353,6 +352,8 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential.Credential
 			m.stakeRegistrations[credential] = 0
 			m.govState.RegisterStake(credential)
+			m.govState.DRepDelegations[credential] =
+				drepDelegation(regCert.Drep)
 		}
 
 	case common.CertificateTypeStakeVoteRegistrationDelegation:
@@ -361,6 +362,8 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential.Credential
 			m.stakeRegistrations[credential] = 0
 			m.govState.RegisterStake(credential)
+			m.govState.DRepDelegations[credential] =
+				drepDelegation(regCert.Drep)
 		}
 
 	case common.CertificateTypeStakeDelegation:
@@ -369,18 +372,24 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// No state change needed - delegation is tracked elsewhere in full implementation
 
 	case common.CertificateTypeVoteDelegation:
-		// Standalone vote delegation (without registration)
-		// Used for changing DRep delegation
-		// No state change needed - delegation is tracked elsewhere in full implementation
+		if voteCert, ok := cert.(*common.VoteDelegationCertificate); ok {
+			credential := voteCert.StakeCredential.Credential
+			m.govState.DRepDelegations[credential] =
+				drepDelegation(voteCert.Drep)
+		}
 
 	case common.CertificateTypeStakeVoteDelegation:
-		// Combined stake + vote delegation (without registration)
-		// No state change needed - delegation is tracked elsewhere in full implementation
+		if voteCert, ok := cert.(*common.StakeVoteDelegationCertificate); ok {
+			credential := voteCert.StakeCredential.Credential
+			m.govState.DRepDelegations[credential] =
+				drepDelegation(voteCert.Drep)
+		}
 
 	case common.CertificateTypeStakeDeregistration:
 		if deregCert, ok := cert.(*common.StakeDeregistrationCertificate); ok {
 			credential := deregCert.StakeCredential.Credential
 			delete(m.stakeRegistrations, credential)
+			delete(m.govState.DRepDelegations, credential)
 			m.govState.DeregisterStake(credential)
 		}
 
@@ -388,6 +397,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		if deregCert, ok := cert.(*common.DeregistrationCertificate); ok {
 			credential := deregCert.StakeCredential.Credential
 			delete(m.stakeRegistrations, credential)
+			delete(m.govState.DRepDelegations, credential)
 			m.govState.DeregisterStake(credential)
 		}
 
@@ -436,6 +446,15 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 
 	default:
 		// Other certificate types not relevant for state tracking
+	}
+}
+
+func drepDelegation(drep common.Drep) common.DRepDelegation {
+	if len(drep.Credential) != common.AddressHashSize {
+		return common.DRepDelegation{}
+	}
+	return common.DRepDelegation{
+		DRep: common.NewBlake2b224(drep.Credential),
 	}
 }
 
@@ -770,6 +789,16 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 				}, nil
 			}
 			return nil, nil
+		},
+	)
+	drepDelegations := m.govState.DRepDelegations
+	builder.WithDRepDelegation(
+		func(cred common.Credential) (*common.DRepDelegation, error) {
+			delegation, ok := drepDelegations[cred.Credential]
+			if !ok {
+				return nil, nil
+			}
+			return &delegation, nil
 		},
 	)
 
