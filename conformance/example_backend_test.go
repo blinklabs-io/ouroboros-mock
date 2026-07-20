@@ -132,7 +132,9 @@ func (s *stubBackend) UpdateAdaPots(p common.AdaPots) error {
 	return s.getInner().UpdateAdaPots(p)
 }
 
-func (s *stubBackend) GetRewardSnapshot(epoch uint64) (common.RewardSnapshot, error) {
+func (s *stubBackend) GetRewardSnapshot(
+	epoch uint64,
+) (common.RewardSnapshot, error) {
 	return s.getInner().GetRewardSnapshot(epoch)
 }
 

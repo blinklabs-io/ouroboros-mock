@@ -215,6 +215,26 @@ func TestNewLedgerStateBuilder(t *testing.T) {
 	}
 }
 
+func TestLedgerStateBuilder_DRepDelegationPreservesVariant(t *testing.T) {
+	credential := lcommon.Credential{
+		Credential: lcommon.NewBlake2b224(bytes.Repeat([]byte{0xab}, 28)),
+	}
+	want := lcommon.Drep{Type: lcommon.DrepTypeNoConfidence}
+	state := ledger.NewLedgerStateBuilder().
+		WithDRepDelegation(
+			func(lcommon.Credential) (*lcommon.Drep, error) {
+				return &want, nil
+			},
+		).
+		Build()
+
+	got, err := state.DRepDelegation(credential)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, lcommon.DrepTypeNoConfidence, got.Type)
+	assert.Empty(t, got.Credential)
+}
+
 func TestLedgerStateBuilder_WithNetworkId(t *testing.T) {
 	networkId := uint(1) // mainnet
 	state := ledger.NewLedgerStateBuilder().

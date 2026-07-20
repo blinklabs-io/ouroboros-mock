@@ -57,7 +57,11 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 			}
 			h, err := gledger.NewBlockHeaderFromCbor(*m.Era, m.HeaderCbor)
 			if err != nil {
-				return nil, fmt.Errorf("decode header (era %d): %w", *m.Era, err)
+				return nil, fmt.Errorf(
+					"decode header (era %d): %w",
+					*m.Era,
+					err,
+				)
 			}
 			out = append(out, blk{
 				h.BlockNumber(), h.SlotNumber(),
@@ -86,7 +90,8 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 				// than silently truncating to origin and mis-judging the shape.
 				return nil, fmt.Errorf(
 					"roll_backward to point %s is not in the reconstructed chain",
-					ph)
+					ph,
+				)
 			}
 			out = out[:cut]
 		}
@@ -198,7 +203,10 @@ func checkShape(
 		ftPeer = 1
 	}
 	if ftPeer < 0 {
-		return fmt.Errorf("final_tip (block %d) matches no peer tip", ft.BlockNumber)
+		return fmt.Errorf(
+			"final_tip (block %d) matches no peer tip",
+			ft.BlockNumber,
+		)
 	}
 	hasRB := c.ExpectedOutput.ExpectedRollback != nil
 	hasLocal := c.LocalTip != nil
@@ -236,7 +244,10 @@ func checkShape(
 		if lead > ml {
 			return fmt.Errorf(
 				"winner leads by %d > %d — beyond the SUT's local_tip catch-up "+
-					"(2k); not replayable as a switch", lead, ml)
+					"(2k); not replayable as a switch",
+				lead,
+				ml,
+			)
 		}
 		if minLead > 0 && lead < minLead {
 			return fmt.Errorf("winner leads by %d, below required min %d",
@@ -261,7 +272,8 @@ func checkShape(
 		if ftPeer != 0 {
 			return fmt.Errorf(
 				"final_tip must be peer_id 0 (incumbent fed first); it is peer %d",
-				ftPeer)
+				ftPeer,
+			)
 		}
 		if t1.num <= t0.num {
 			return fmt.Errorf(
@@ -273,7 +285,10 @@ func checkShape(
 		if rollback <= k {
 			return fmt.Errorf(
 				"rollback to the longer peer is %d <= k=%d — a conformant node "+
-					"would switch; this is not an exceeds-k no-switch", rollback, k)
+					"would switch; this is not an exceeds-k no-switch",
+				rollback,
+				k,
+			)
 		}
 		// lead > k is a SEPARATE, SUT-reachability requirement, not a Praos
 		// rule: the SUT (dingo) refuses the longer peer via its tip-
@@ -289,12 +304,15 @@ func checkShape(
 					"guard would not reject its tip, so it would switch", lead, k)
 		}
 		if hasRB {
-			return errors.New("a no-switch vector must not carry expected_rollback")
+			return errors.New(
+				"a no-switch vector must not carry expected_rollback",
+			)
 		}
 		if hasLocal {
 			return errors.New(
 				"a no-switch vector must not carry local_tip (it would arm the " +
-					"catch-up and let the SUT accept the longer peer)")
+					"catch-up and let the SUT accept the longer peer)",
+			)
 		}
 		return nil
 
@@ -302,7 +320,8 @@ func checkShape(
 		if ftPeer != 1 {
 			return fmt.Errorf(
 				"final_tip must be peer_id 1 (VRF winner fed last); it is peer %d",
-				ftPeer)
+				ftPeer,
+			)
 		}
 		if t0.num != t1.num {
 			return fmt.Errorf(

@@ -34,11 +34,14 @@ func TestHarnessIntegration(t *testing.T) {
 	expectedFixtures := expectedFixturesFromManifest(t, harness)
 	expectedFixtureCount := len(expectedFixtures)
 	expectedCounts := repoCounts(expectedFixtures)
-	expectedConsensusBlockCount := countMatchingFixtures(expectedFixtures, fixtures.Filter{
-		Repo:   fixtures.RepoOuroborosConsensus,
-		Kind:   fixtures.KindBlock,
-		Format: fixtures.FormatCBOR,
-	})
+	expectedConsensusBlockCount := countMatchingFixtures(
+		expectedFixtures,
+		fixtures.Filter{
+			Repo:   fixtures.RepoOuroborosConsensus,
+			Kind:   fixtures.KindBlock,
+			Format: fixtures.FormatCBOR,
+		},
+	)
 
 	t.Run("CollectFixtures", func(t *testing.T) {
 		collected, err := harness.Collect()
@@ -365,7 +368,11 @@ func expectedFixturesFromManifest(
 			filepath.Join(root, filepath.FromSlash(relPath)),
 		)
 		if err != nil {
-			t.Fatalf("NewFixture failed for manifest entry %q: %v", relPath, err)
+			t.Fatalf(
+				"NewFixture failed for manifest entry %q: %v",
+				relPath,
+				err,
+			)
 		}
 		expected = append(expected, fixture)
 	}
@@ -422,7 +429,10 @@ func walkFixtureFiles(root string) ([]string, error) {
 	return paths, nil
 }
 
-func firstSliceDifference(expected []string, actual []string) (int, string, string) {
+func firstSliceDifference(
+	expected []string,
+	actual []string,
+) (int, string, string) {
 	maxIndex := len(expected)
 	if len(actual) < maxIndex {
 		maxIndex = len(actual)

@@ -18,8 +18,38 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
+
+func TestExtractDRepDelegationPreservesType(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      any
+		expected int
+	}{
+		{
+			name:     "always abstain",
+			raw:      []any{uint64(common.DrepTypeAbstain)},
+			expected: common.DrepTypeAbstain,
+		},
+		{
+			name:     "always no confidence",
+			raw:      []any{uint64(common.DrepTypeNoConfidence)},
+			expected: common.DrepTypeNoConfidence,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			delegation := extractDRepDelegation(test.raw)
+			require.NotNil(t, delegation)
+			require.Equal(t, test.expected, delegation.Type)
+			require.Empty(t, delegation.Credential)
+		})
+	}
+}
 
 func TestParseInitialState(t *testing.T) {
 	defer goleak.VerifyNone(t)

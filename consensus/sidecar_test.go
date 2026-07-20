@@ -204,7 +204,11 @@ func TestScenarioConversationsParse(t *testing.T) {
 		if !e.IsDir() {
 			continue
 		}
-		path := filepath.Join("scenarios", e.Name(), "capture-conversation.json")
+		path := filepath.Join(
+			"scenarios",
+			e.Name(),
+			"capture-conversation.json",
+		)
 		t.Run(e.Name(), func(t *testing.T) {
 			if _, err := os.Stat(path); err != nil {
 				t.Skipf("no capture-conversation.json at %s", path)

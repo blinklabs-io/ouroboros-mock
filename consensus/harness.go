@@ -43,7 +43,12 @@ type Replayer interface {
 	// peerID, in trace order: era is the captured block era (== the
 	// SUT handler's blockType), headerCbor the raw header bytes, tip
 	// the peer's announced chain tip. A non-nil error fails the vector.
-	RollForward(peerID uint64, era uint, headerCbor []byte, tip format.Tip) error
+	RollForward(
+		peerID uint64,
+		era uint,
+		headerCbor []byte,
+		tip format.Tip,
+	) error
 
 	// RollBackward delivers one captured chainsync roll_backward for
 	// peerID: point is the rollback target, tip the peer's announced

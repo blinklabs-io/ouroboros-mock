@@ -76,6 +76,10 @@ type GovernanceState struct {
 	// DRepRegistrations tracks registered DReps.
 	DRepRegistrations map[common.Blake2b224]bool
 
+	// DRepDelegations maps stake credentials to their delegated DRep, including
+	// the special always-abstain and always-no-confidence DReps.
+	DRepDelegations map[common.Blake2b224]common.Drep
+
 	// HotKeyAuthorizations maps cold keys to hot keys for committee members.
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
 
@@ -125,6 +129,7 @@ func NewGovernanceState() *GovernanceState {
 	return &GovernanceState{
 		CommitteeMembers:     make(map[common.Blake2b224]*CommitteeMemberInfo),
 		DRepRegistrations:    make(map[common.Blake2b224]bool),
+		DRepDelegations:      make(map[common.Blake2b224]common.Drep),
 		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
 		StakeRegistrations:   make(map[common.Blake2b224]bool),
 		PoolRegistrations:    make(map[common.Blake2b224]bool),
@@ -143,6 +148,7 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.CommitteeMembers = make(map[common.Blake2b224]*CommitteeMemberInfo)
 	g.HotKeyAuthorizations = make(map[common.Blake2b224]common.Blake2b224)
 	g.DRepRegistrations = make(map[common.Blake2b224]bool)
+	g.DRepDelegations = make(map[common.Blake2b224]common.Drep)
 	g.StakeRegistrations = make(map[common.Blake2b224]bool)
 	g.PoolRegistrations = make(map[common.Blake2b224]bool)
 	g.PoolRetirements = make(map[common.Blake2b224]uint64)
@@ -173,6 +179,7 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	for _, drepHash := range state.DRepRegistrations {
 		g.DRepRegistrations[drepHash] = true
 	}
+	maps.Copy(g.DRepDelegations, state.DRepDelegations)
 
 	// Load stake registrations
 	maps.Copy(g.StakeRegistrations, state.StakeRegistrations)
