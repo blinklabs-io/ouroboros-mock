@@ -784,14 +784,13 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	)
 	drepDelegations := m.govState.DRepDelegations
 	builder.WithDRepDelegation(
-		func(cred common.Credential) (*common.DRepDelegation, error) {
+		func(cred common.Credential) (*common.Drep, error) {
 			delegation, ok := drepDelegations[cred.Credential]
 			if !ok {
 				return nil, nil
 			}
-			return &common.DRepDelegation{
-				DRep: common.NewBlake2b224(delegation.Credential),
-			}, nil
+			delegation.Credential = append([]byte(nil), delegation.Credential...)
+			return &delegation, nil
 		},
 	)
 

@@ -75,8 +75,10 @@ type CommitteeMemberFunc func(lcommon.Blake2b224) (*lcommon.CommitteeMember, err
 // DRepRegistrationFunc is a callback for DRep registration lookups
 type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
 
-// DRepDelegationFunc is a callback for DRep delegation lookups.
-type DRepDelegationFunc func(lcommon.Credential) (*lcommon.DRepDelegation, error)
+// DRepDelegationFunc is a callback for DRep delegation lookups. It returns the
+// full DRep sum type so predefined DReps remain distinguishable from credential
+// based DReps.
+type DRepDelegationFunc func(lcommon.Credential) (*lcommon.Drep, error)
 
 // ConstitutionFunc is a callback for constitution lookups
 type ConstitutionFunc func() (*lcommon.Constitution, error)
@@ -349,7 +351,7 @@ func (ls *MockLedgerState) DRepRegistrations() ([]lcommon.DRepRegistration, erro
 // DRepDelegation looks up the vote delegation for a stake credential.
 func (ls *MockLedgerState) DRepDelegation(
 	credential lcommon.Credential,
-) (*lcommon.DRepDelegation, error) {
+) (*lcommon.Drep, error) {
 	if ls.DRepDelegationCallback != nil {
 		return ls.DRepDelegationCallback(credential)
 	}
