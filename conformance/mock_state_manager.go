@@ -352,8 +352,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential.Credential
 			m.stakeRegistrations[credential] = 0
 			m.govState.RegisterStake(credential)
-			m.govState.DRepDelegations[credential] =
-				drepDelegation(regCert.Drep)
+			m.govState.DRepDelegations[credential] = drepDelegation(regCert.Drep)
 		}
 
 	case common.CertificateTypeStakeVoteRegistrationDelegation:
@@ -362,8 +361,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential.Credential
 			m.stakeRegistrations[credential] = 0
 			m.govState.RegisterStake(credential)
-			m.govState.DRepDelegations[credential] =
-				drepDelegation(regCert.Drep)
+			m.govState.DRepDelegations[credential] = drepDelegation(regCert.Drep)
 		}
 
 	case common.CertificateTypeStakeDelegation:
@@ -374,15 +372,13 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeVoteDelegation:
 		if voteCert, ok := cert.(*common.VoteDelegationCertificate); ok {
 			credential := voteCert.StakeCredential.Credential
-			m.govState.DRepDelegations[credential] =
-				drepDelegation(voteCert.Drep)
+			m.govState.DRepDelegations[credential] = drepDelegation(voteCert.Drep)
 		}
 
 	case common.CertificateTypeStakeVoteDelegation:
 		if voteCert, ok := cert.(*common.StakeVoteDelegationCertificate); ok {
 			credential := voteCert.StakeCredential.Credential
-			m.govState.DRepDelegations[credential] =
-				drepDelegation(voteCert.Drep)
+			m.govState.DRepDelegations[credential] = drepDelegation(voteCert.Drep)
 		}
 
 	case common.CertificateTypeStakeDeregistration:
@@ -449,13 +445,8 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	}
 }
 
-func drepDelegation(drep common.Drep) common.DRepDelegation {
-	if len(drep.Credential) != common.AddressHashSize {
-		return common.DRepDelegation{}
-	}
-	return common.DRepDelegation{
-		DRep: common.NewBlake2b224(drep.Credential),
-	}
+func drepDelegation(drep common.Drep) common.Drep {
+	return drep
 }
 
 // ProcessEpochBoundary implements StateManager.ProcessEpochBoundary.
@@ -798,7 +789,9 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 			if !ok {
 				return nil, nil
 			}
-			return &delegation, nil
+			return &common.DRepDelegation{
+				DRep: common.NewBlake2b224(delegation.Credential),
+			}, nil
 		},
 	)
 

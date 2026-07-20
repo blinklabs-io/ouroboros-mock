@@ -112,7 +112,10 @@ func TestCorpusFinalTipIsRollbackConformant(t *testing.T) {
 				}
 			}
 			if ftChain == nil {
-				t.Fatalf("final_tip block %d matches no peer chain", ft.BlockNumber)
+				t.Fatalf(
+					"final_tip block %d matches no peer chain",
+					ft.BlockNumber,
+				)
 			}
 			for _, p := range capt.Peers {
 				ch := chains[p.PeerID]

@@ -280,8 +280,12 @@ func TestValidateReferenceValidatesOptionalReferenceHash(t *testing.T) {
 				HashDigest: strings.Repeat("00", 32),
 			},
 		}, false)
-		if err == nil || !strings.Contains(err.Error(), "referenceHash.hashAlgorithm") {
-			t.Fatalf("expected optional reference hash to require algorithm, got %v", err)
+		if err == nil ||
+			!strings.Contains(err.Error(), "referenceHash.hashAlgorithm") {
+			t.Fatalf(
+				"expected optional reference hash to require algorithm, got %v",
+				err,
+			)
 		}
 	})
 
@@ -295,8 +299,12 @@ func TestValidateReferenceValidatesOptionalReferenceHash(t *testing.T) {
 				HashDigest:    "zz",
 			},
 		}, false)
-		if err == nil || !strings.Contains(err.Error(), "referenceHash.hashDigest") {
-			t.Fatalf("expected optional reference hash digest validation, got %v", err)
+		if err == nil ||
+			!strings.Contains(err.Error(), "referenceHash.hashDigest") {
+			t.Fatalf(
+				"expected optional reference hash digest validation, got %v",
+				err,
+			)
 		}
 	})
 }

@@ -34,14 +34,46 @@ import (
 
 func main() {
 	var (
-		address          = flag.String("address", "", "cardano-node NtN TCP endpoint (host:port)")
-		networkMagic     = flag.Uint64("network-magic", 0, "Cardano network magic (uint32)")
-		conversationPath = flag.String("conversation", "", "path to capture-conversation.json")
-		outPath          = flag.String("out", "", "destination path for the produced JSON vector")
-		peerID           = flag.Uint64("peer-id", 0, "peer id stamped on the resulting PeerInput")
-		title            = flag.String("title", "", "vector title (defaults to the conversation's name)")
-		runTimeout       = flag.Duration("timeout", 90*time.Second, "overall capture deadline")
-		dialTimeout      = flag.Duration("dial-timeout", 10*time.Second, "TCP dial timeout")
+		address = flag.String(
+			"address",
+			"",
+			"cardano-node NtN TCP endpoint (host:port)",
+		)
+		networkMagic = flag.Uint64(
+			"network-magic",
+			0,
+			"Cardano network magic (uint32)",
+		)
+		conversationPath = flag.String(
+			"conversation",
+			"",
+			"path to capture-conversation.json",
+		)
+		outPath = flag.String(
+			"out",
+			"",
+			"destination path for the produced JSON vector",
+		)
+		peerID = flag.Uint64(
+			"peer-id",
+			0,
+			"peer id stamped on the resulting PeerInput",
+		)
+		title = flag.String(
+			"title",
+			"",
+			"vector title (defaults to the conversation's name)",
+		)
+		runTimeout = flag.Duration(
+			"timeout",
+			90*time.Second,
+			"overall capture deadline",
+		)
+		dialTimeout = flag.Duration(
+			"dial-timeout",
+			10*time.Second,
+			"TCP dial timeout",
+		)
 	)
 	flag.Parse()
 

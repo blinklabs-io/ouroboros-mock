@@ -357,7 +357,11 @@ func (f Fixture) ConsensusEnvelope() (*ConsensusEnvelope, error) {
 // consensus transaction fixture.
 func (f Fixture) ConsensusTransactionBytes() ([]byte, error) {
 	if f.Kind != KindTransaction {
-		return nil, fmt.Errorf("%w: fixture %s", ErrNotTransactionFixture, f.RelPath)
+		return nil, fmt.Errorf(
+			"%w: fixture %s",
+			ErrNotTransactionFixture,
+			f.RelPath,
+		)
 	}
 
 	envelope, err := f.ConsensusEnvelope()

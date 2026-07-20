@@ -147,7 +147,11 @@ func TestAssertObservationKeptShorterPeerExceedsK(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := assertObservationPickedLongestPeer(tc.peers, tc.finalTip, tc.k)
+			err := assertObservationPickedLongestPeer(
+				tc.peers,
+				tc.finalTip,
+				tc.k,
+			)
 			if tc.wantErr && err == nil {
 				t.Fatalf("want reject, got accept")
 			}

@@ -99,7 +99,13 @@ func TestGenerateConwayChainHonorsPrevHash(t *testing.T) {
 // A non-positive count returns an empty, non-nil slice and no error.
 func TestGenerateConwayChainEmpty(t *testing.T) {
 	for _, count := range []int{0, -1} {
-		gen, err := fixtures.GenerateConwayChain(1, common.Blake2b256{}, 0, 1, count)
+		gen, err := fixtures.GenerateConwayChain(
+			1,
+			common.Blake2b256{},
+			0,
+			1,
+			count,
+		)
 		if err != nil {
 			t.Fatalf("count %d: unexpected error %s", count, err)
 		}
