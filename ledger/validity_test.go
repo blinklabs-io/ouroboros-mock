@@ -53,12 +53,18 @@ func TestValidityIntervalFixtures(t *testing.T) {
 						tx,
 						8,
 						testCase.StartSlot,
+						func(tx lcommon.Transaction) uint64 {
+							return tx.ValidityIntervalStart()
+						},
 					)
 					requireBound(
 						t,
 						tx,
 						3,
 						testCase.EndSlot,
+						func(tx lcommon.Transaction) uint64 {
+							return tx.TTL()
+						},
 					)
 				})
 			}
@@ -71,6 +77,7 @@ func requireBound(
 	tx lcommon.Transaction,
 	key uint,
 	expected *uint64,
+	accessor func(lcommon.Transaction) uint64,
 ) {
 	t.Helper()
 	var txFields []cbor.RawMessage
@@ -89,9 +96,5 @@ func requireBound(
 	_, err = cbor.Decode(raw, &actual)
 	require.NoError(t, err)
 	require.Equal(t, *expected, actual)
-	if key == 8 {
-		require.Equal(t, *expected, tx.ValidityIntervalStart())
-	} else {
-		require.Equal(t, *expected, tx.TTL())
-	}
+	require.Equal(t, *expected, accessor(tx))
 }
