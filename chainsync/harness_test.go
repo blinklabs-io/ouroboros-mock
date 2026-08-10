@@ -17,10 +17,12 @@ package chainsync_test
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
@@ -43,11 +45,19 @@ type responder struct {
 
 	findIntersect func([]pcommon.Point) (pcommon.Point, chainsync.Tip, error)
 	actions       []serverAction
+
+	// requestNextOverride, when set, handles RequestNext instead of the
+	// action script. It receives the full callback context, so a test can
+	// exercise behaviour that depends on CallbackContext.ConnectionId.
+	requestNextOverride func(chainsync.CallbackContext) error
 }
 
 func (r *responder) requestNext(ctx chainsync.CallbackContext) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.requestNextOverride != nil {
+		return r.requestNextOverride(ctx)
+	}
 	if len(r.actions) == 0 {
 		return ctx.Server.AwaitReply()
 	}
@@ -484,4 +494,224 @@ func TestObserveAfterClose(t *testing.T) {
 
 	_, err = h.Observe(context.Background())
 	require.ErrorIs(t, err, csmock.ErrClosed)
+}
+
+// peerRegistry is a caller-owned connection registry keyed by connection ID,
+// standing in for a consumer's connection manager (e.g. Dingo's connmanager).
+type peerRegistry struct {
+	mu    sync.Mutex
+	conns map[ouroboros.ConnectionId]*ouroboros.Connection
+}
+
+func newPeerRegistry() *peerRegistry {
+	return &peerRegistry{
+		conns: make(map[ouroboros.ConnectionId]*ouroboros.Connection),
+	}
+}
+
+func (p *peerRegistry) add(conn *ouroboros.Connection) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.conns[conn.Id()] = conn
+}
+
+func (p *peerRegistry) get(
+	id ouroboros.ConnectionId,
+) *ouroboros.Connection {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.conns[id]
+}
+
+// A callback that parks the client with AwaitReply and then resolves its peer
+// through a caller-owned registry must be drivable by the harness: the
+// connection the harness exposes has to be the same one the callback is told
+// about in CallbackContext.ConnectionId, so the lookup succeeds and the
+// asynchronous RollForward that follows can be observed.
+func TestRequestNextAsyncRollForwardViaCallerRegistry(t *testing.T) {
+	for _, tc := range allModes() {
+		t.Run(tc.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+
+			chain, err := csmock.BuildChain(1, common.Blake2b256{}, 0, 20, 1)
+			require.NoError(t, err)
+			block := chain.Blocks[0]
+			tip := chain.Tips[0]
+
+			registry := newPeerRegistry()
+			blockReady := make(chan struct{})
+			resolved := make(chan ouroboros.ConnectionId, 1)
+			var wg sync.WaitGroup
+			defer wg.Wait()
+
+			// Mirror the downstream shape: AwaitReply, resolve the peer from
+			// the registry, then serve asynchronously.
+			r := &responder{}
+			r.findIntersect = func(
+				points []pcommon.Point,
+			) (pcommon.Point, chainsync.Tip, error) {
+				return points[0], tip, nil
+			}
+			r.requestNextOverride = func(
+				ctx chainsync.CallbackContext,
+			) error {
+				if err := ctx.Server.AwaitReply(); err != nil {
+					return err
+				}
+				conn := registry.get(ctx.ConnectionId)
+				if conn == nil {
+					return fmt.Errorf(
+						"connection %s not found in registry",
+						ctx.ConnectionId.String(),
+					)
+				}
+				resolved <- ctx.ConnectionId
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					select {
+					case <-blockReady:
+						_ = ctx.Server.RollForward(
+							uint(block.Type()),
+							block.Cbor(),
+							tip,
+						)
+					case <-conn.ErrorChan():
+					}
+				}()
+				return nil
+			}
+
+			h := newHarness(t, tc.mode, r)
+			defer h.Close()
+
+			// Register the server-under-test connection as a consumer would.
+			conn := h.ServerConnection()
+			require.NotNil(
+				t,
+				conn,
+				"harness must expose its server connection",
+			)
+			registry.add(conn)
+
+			require.NoError(t, h.RequestNext())
+			require.True(t, observe(t, h).IsAwaitReply(), "expected AwaitReply")
+
+			select {
+			case gotId := <-resolved:
+				require.Equal(
+					t,
+					conn.Id(),
+					gotId,
+					"callback ConnectionId must match the exposed connection",
+				)
+			case <-time.After(5 * time.Second):
+				t.Fatal("callback never resolved its peer from the registry")
+			}
+
+			close(blockReady)
+
+			fwdMsg := observe(t, h)
+			require.True(t, fwdMsg.IsRollForward(), "expected async RollForward")
+			gotTip, ok := fwdMsg.Tip()
+			require.True(t, ok)
+			require.Equal(t, tip, gotTip)
+		})
+	}
+}
+
+// A callback that watches its resolved peer's error channel while waiting to
+// serve — the shape a consumer uses to abandon a blocked read when the peer
+// goes away — must be woken by [Harness.Disconnect]. The callback takes that
+// branch instead of sending, so no send is attempted and none is asserted
+// here; send failure after a disconnect is covered by
+// TestSendFailureOnDisconnect.
+func TestRegistryResolvedPeerErrorChanWakesOnDisconnect(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	chain, err := csmock.BuildChain(1, common.Blake2b256{}, 0, 20, 1)
+	require.NoError(t, err)
+	block := chain.Blocks[0]
+	tip := chain.Tips[0]
+
+	registry := newPeerRegistry()
+	// Never signalled: the only way out of the callback's select is the peer
+	// error channel.
+	blockReady := make(chan struct{})
+	abandoned := make(chan struct{})
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	r := &responder{}
+	r.requestNextOverride = func(ctx chainsync.CallbackContext) error {
+		if err := ctx.Server.AwaitReply(); err != nil {
+			return err
+		}
+		conn := registry.get(ctx.ConnectionId)
+		if conn == nil {
+			return fmt.Errorf(
+				"connection %s not found in registry",
+				ctx.ConnectionId.String(),
+			)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-blockReady:
+				_ = ctx.Server.RollForward(
+					uint(block.Type()),
+					block.Cbor(),
+					tip,
+				)
+			case <-conn.ErrorChan():
+				close(abandoned)
+			}
+		}()
+		return nil
+	}
+
+	h := newHarness(t, csmock.ModeNtC, r)
+	defer h.Close()
+	registry.add(h.ServerConnection())
+
+	require.NoError(t, h.RequestNext())
+	require.True(t, observe(t, h).IsAwaitReply(), "expected AwaitReply")
+
+	require.NoError(t, h.Disconnect())
+
+	select {
+	case <-abandoned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resolved peer's error channel never woke the callback")
+	}
+}
+
+// A consumer's connection manager typically closes the connections it owns on
+// shutdown. Because the harness also closes the server connection, both can
+// run; neither ordering may panic, double-close, or leak.
+func TestServerConnectionCloseIsSafeFromCallerAndHarness(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	t.Run("caller closes first", func(t *testing.T) {
+		r := &responder{}
+		h := newHarness(t, csmock.ModeNtC, r)
+		defer h.Close()
+
+		conn := h.ServerConnection()
+		require.NotNil(t, conn)
+		require.NoError(t, conn.Close())
+		require.NoError(t, h.Close())
+	})
+
+	t.Run("harness closes first", func(t *testing.T) {
+		r := &responder{}
+		h := newHarness(t, csmock.ModeNtC, r)
+		defer h.Close()
+
+		conn := h.ServerConnection()
+		require.NotNil(t, conn)
+		require.NoError(t, h.Close())
+		require.NoError(t, conn.Close())
+	})
 }
