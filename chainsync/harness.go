@@ -377,11 +377,15 @@ func (h *Harness) Server() *gchainsync.Server {
 // callbacks in CallbackContext.ConnectionId, so a registry keyed on that ID
 // resolves.
 //
-// The harness retains ownership: [Harness.Close] closes this connection.
-// Callers must not close it themselves, and should register it with a
-// lifecycle that will not outlive the harness. To exercise send failures, use
-// [Harness.Disconnect], which drops the driver side and leaves teardown to the
-// harness.
+// The harness owns the connection's lifecycle: [Harness.Close] always closes
+// it, so callers need not. A consumer registry that closes the connections it
+// owns is still safe to combine with the harness — Close is idempotent, so the
+// two compose in either order — but the harness closing it is what guarantees
+// teardown, and a caller close is never required.
+//
+// To exercise send-failure paths, use [Harness.Disconnect] rather than closing
+// this connection: it drops the driver side, which fails the server's sends
+// while leaving teardown to the harness.
 func (h *Harness) ServerConnection() *ouroboros.Connection {
 	return h.sut
 }

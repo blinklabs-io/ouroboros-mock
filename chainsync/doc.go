@@ -54,8 +54,7 @@
 //	myConnManager.Add(h.ServerConnection())
 //
 // The connection's Id matches CallbackContext.ConnectionId, so a registry keyed
-// on that ID resolves. The harness keeps ownership of the connection's
-// lifecycle — see [Harness.ServerConnection] — though a consumer registry that
-// closes its connections on shutdown is safe to combine with [Harness.Close],
-// in either order.
+// on that ID resolves. The harness owns the connection's lifecycle and always
+// closes it in [Harness.Close]; a consumer registry that also closes its
+// connections composes safely in either order. See [Harness.ServerConnection].
 package chainsync

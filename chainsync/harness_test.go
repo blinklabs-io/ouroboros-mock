@@ -622,8 +622,10 @@ func TestRequestNextAsyncRollForwardViaCallerRegistry(t *testing.T) {
 
 // A callback that watches its resolved peer's error channel while waiting to
 // serve — the shape a consumer uses to abandon a blocked read when the peer
-// goes away — must be woken by [Harness.Disconnect], and the resulting send
-// failure must still surface on ServerErrors.
+// goes away — must be woken by [Harness.Disconnect]. The callback takes that
+// branch instead of sending, so no send is attempted and none is asserted
+// here; send failure after a disconnect is covered by
+// TestSendFailureOnDisconnect.
 func TestRegistryResolvedPeerErrorChanWakesOnDisconnect(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
