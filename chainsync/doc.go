@@ -38,4 +38,24 @@
 // would report. Callers who need richer, multi-era blocks can substitute the
 // block builders and continue to use [PointOf]/[TipOf] to derive the matching
 // points and tips.
+//
+// # Consumer connection registries
+//
+// Some server callbacks do more than reply through their CallbackContext: they
+// resolve the peer connection out of a registry the consumer owns — a
+// connection manager, peer-governance table, or metrics map — usually to watch
+// for peer errors while a read blocks. A callback like that cannot run at all
+// until the connection is registered, so register the harness's connection
+// with [Harness.ServerConnection] before driving it:
+//
+//	h, err := csmock.New(csmock.Config{ChainSync: cfg})
+//	if err != nil { ... }
+//	defer h.Close()
+//	myConnManager.Add(h.ServerConnection())
+//
+// The connection's Id matches CallbackContext.ConnectionId, so a registry keyed
+// on that ID resolves. The harness keeps ownership of the connection's
+// lifecycle — see [Harness.ServerConnection] — though a consumer registry that
+// closes its connections on shutdown is safe to combine with [Harness.Close],
+// in either order.
 package chainsync

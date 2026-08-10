@@ -361,6 +361,31 @@ func (h *Harness) Server() *gchainsync.Server {
 	return h.server
 }
 
+// ServerConnection returns the connection carrying the server under test.
+//
+// It exists for server callbacks that resolve their peer through a
+// caller-owned registry — a connection manager, peer-governance table, or
+// metrics map — rather than using [gchainsync.CallbackContext] alone. Such a
+// callback cannot run at all unless the connection is registered first, so
+// register it before driving the harness:
+//
+//	h, err := csmock.New(csmock.Config{ChainSync: cfg})
+//	...
+//	myConnManager.Add(h.ServerConnection())
+//
+// The connection's Id is the same [ouroboros.ConnectionId] delivered to
+// callbacks in CallbackContext.ConnectionId, so a registry keyed on that ID
+// resolves.
+//
+// The harness retains ownership: [Harness.Close] closes this connection.
+// Callers must not close it themselves, and should register it with a
+// lifecycle that will not outlive the harness. To exercise send failures, use
+// [Harness.Disconnect], which drops the driver side and leaves teardown to the
+// harness.
+func (h *Harness) ServerConnection() *ouroboros.Connection {
+	return h.sut
+}
+
 // Disconnect abruptly closes the driver side of the connection without a
 // protocol Done. An in-flight or subsequent server send fails, which the server
 // surfaces on [Harness.ServerErrors]. Use it to exercise send-failure paths
