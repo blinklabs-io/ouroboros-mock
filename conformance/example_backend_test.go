@@ -48,6 +48,7 @@ package conformance_test
 // integration would replace the stub calls with actual database operations.
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -166,6 +167,26 @@ func (s *stubBackend) DRepRegistration(
 
 func (s *stubBackend) DRepRegistrations() ([]common.DRepRegistration, error) {
 	return s.getInner().DRepRegistrations()
+}
+
+// DRepDelegation forwards gouroboros' optional DRepDelegationState capability.
+// StateProvider does not require it, because gouroboros probes for it with a
+// type assertion rather than demanding it of every ledger state. A backend that
+// omits it fails PV10 and PV11 reward withdrawals with
+// DRepDelegationStateUnavailableError before any validation runs, so a custom
+// backend that serves those eras has to implement this alongside the seven
+// StateProvider interfaces.
+func (s *stubBackend) DRepDelegation(
+	c common.Credential,
+) (*common.Drep, error) {
+	inner, ok := s.getInner().(common.DRepDelegationState)
+	if !ok {
+		return nil, fmt.Errorf(
+			"inner state provider %T does not implement DRepDelegationState",
+			s.getInner(),
+		)
+	}
+	return inner.DRepDelegation(c)
 }
 
 func (s *stubBackend) Constitution() (*common.Constitution, error) {
