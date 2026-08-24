@@ -69,7 +69,8 @@ Called once per vector, before any events are processed. Your job is to hydrate 
 |-------|------|-------------|
 | `CurrentEpoch` | `uint64` | Epoch number at vector start |
 | `Utxos` | `map[string]ParsedUtxo` | UTxO set, keyed by `"txHash#index"` |
-| `StakeRegistrations` | `map[Blake2b224]bool` | Registered stake credentials |
+| `StakeRegistrationsByCredential` | `map[ledger.RewardAccountKey]bool` | Registrations keyed by credential type and hash |
+| `StakeRegistrations` | `map[Blake2b224]bool` | Deprecated hash-only compatibility view |
 | `RewardAccountBalances` | `map[ledger.RewardAccountKey]uint64` | Reward balances keyed by credential type and hash |
 | `RewardAccounts` | `map[Blake2b224]uint64` | Deprecated hash-only compatibility view |
 | `PoolRegistrations` | `map[Blake2b224]bool` | Registered pools |

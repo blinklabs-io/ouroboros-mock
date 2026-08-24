@@ -49,7 +49,13 @@ type ParsedInitialState struct {
 	Utxos map[string]ParsedUtxo
 
 	// StakeRegistrations tracks which stake credentials are registered.
+	// Deprecated: use StakeRegistrationsByCredential when credential type
+	// matters.
 	StakeRegistrations map[common.Blake2b224]bool
+
+	// StakeRegistrationsByCredential tracks registrations by full stake
+	// credential identity.
+	StakeRegistrationsByCredential map[mockledger.RewardAccountKey]bool
 
 	// RewardAccounts maps stake credentials to their reward balances.
 	// Deprecated: use RewardAccountBalances when credential type matters.
@@ -150,8 +156,11 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	}
 
 	state := &ParsedInitialState{
-		Utxos:                 make(map[string]ParsedUtxo),
-		StakeRegistrations:    make(map[common.Blake2b224]bool),
+		Utxos:              make(map[string]ParsedUtxo),
+		StakeRegistrations: make(map[common.Blake2b224]bool),
+		StakeRegistrationsByCredential: make(
+			map[mockledger.RewardAccountKey]bool,
+		),
 		RewardAccounts:        make(map[common.Blake2b224]uint64),
 		RewardAccountBalances: make(map[mockledger.RewardAccountKey]uint64),
 		PoolRegistrations:     make(map[common.Blake2b224]bool),
@@ -603,6 +612,12 @@ func parseDelegationState(
 			}
 			state.StakeRegistrations[cred.Credential] = true
 			accountKey := mockledger.NewRewardAccountKey(*cred)
+			if state.StakeRegistrationsByCredential == nil {
+				state.StakeRegistrationsByCredential = make(
+					map[mockledger.RewardAccountKey]bool,
+				)
+			}
+			state.StakeRegistrationsByCredential[accountKey] = true
 
 			// Current AccountState values place the DRep delegation fourth.
 			// Retain the older third-position fallback for existing fixtures.

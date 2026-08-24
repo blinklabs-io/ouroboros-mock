@@ -85,6 +85,20 @@ func TestParseDelegationStatePreservesRewardCredentialIdentity(t *testing.T) {
 			Credential: hash,
 		}],
 	)
+	require.True(
+		t,
+		state.StakeRegistrationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}],
+	)
+	require.True(
+		t,
+		state.StakeRegistrationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: hash,
+		}],
+	)
 	require.Equal(t, uint64(11), state.RewardAccounts[hash])
 	require.Equal(
 		t,

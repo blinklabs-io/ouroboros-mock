@@ -43,7 +43,7 @@ type MockStateManager struct {
 	utxos map[string]common.Utxo
 
 	// stakeRegistrations tracks registered stake credentials and their balances
-	stakeRegistrations map[common.Blake2b224]uint64
+	stakeRegistrations map[ledger.RewardAccountKey]uint64
 
 	// rewardAccounts tracks balances by full credential identity.
 	rewardAccounts map[ledger.RewardAccountKey]uint64
@@ -66,7 +66,7 @@ func NewMockStateManager() *MockStateManager {
 	return &MockStateManager{
 		govState:             NewGovernanceState(),
 		utxos:                make(map[string]common.Utxo),
-		stakeRegistrations:   make(map[common.Blake2b224]uint64),
+		stakeRegistrations:   make(map[ledger.RewardAccountKey]uint64),
 		rewardAccounts:       make(map[ledger.RewardAccountKey]uint64),
 		poolRegistrations:    make(map[common.Blake2b224]bool),
 		drepRegistrations:    make(map[common.Blake2b224]bool),
@@ -85,18 +85,37 @@ func (m *MockStateManager) LoadInitialState(
 
 	// Clear existing state
 	m.utxos = make(map[string]common.Utxo)
-	m.stakeRegistrations = make(map[common.Blake2b224]uint64)
+	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
 	m.drepRegistrations = make(map[common.Blake2b224]bool)
 	m.committeeMembers = make(map[common.Blake2b224]uint64)
 	m.hotKeyAuthorizations = make(map[common.Blake2b224]common.Blake2b224)
 
-	// Load stake registrations with reward balances
-	for hash, registered := range state.StakeRegistrations {
-		if registered {
-			balance := state.RewardAccounts[hash]
-			m.stakeRegistrations[hash] = balance
+	// Load stake registrations with reward balances. Prefer full credential
+	// identity. Legacy hash-only registrations represent key credentials.
+	if len(state.StakeRegistrationsByCredential) > 0 {
+		for credential, registered := range state.StakeRegistrationsByCredential {
+			if !registered {
+				continue
+			}
+			balance, exists := state.RewardAccountBalances[credential]
+			if !exists {
+				balance = state.RewardAccounts[credential.Credential]
+			}
+			m.stakeRegistrations[credential] = balance
+		}
+	} else if len(state.RewardAccountBalances) > 0 {
+		maps.Copy(m.stakeRegistrations, state.RewardAccountBalances)
+	} else {
+		for hash, registered := range state.StakeRegistrations {
+			if !registered {
+				continue
+			}
+			m.stakeRegistrations[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: hash,
+			}] = state.RewardAccounts[hash]
 		}
 	}
 	if len(state.RewardAccountBalances) > 0 {
@@ -109,23 +128,11 @@ func (m *MockStateManager) LoadInitialState(
 			}] = balance
 		}
 	}
-	// Preserve compatibility for callers that provide only the legacy stake
-	// registration view. Parsed vector state normally supplies full account
-	// identities, so this defaults to a key credential only when no account
-	// with the registered hash is otherwise available.
-	for hash, balance := range m.stakeRegistrations {
-		accountExists := false
-		for account := range m.rewardAccounts {
-			if account.Credential == hash {
-				accountExists = true
-				break
-			}
-		}
-		if !accountExists {
-			m.rewardAccounts[ledger.RewardAccountKey{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: hash,
-			}] = balance
+	// Preserve compatibility for callers that provide only a registration
+	// view. Every registered account has a balance entry, including zero.
+	for credential, balance := range m.stakeRegistrations {
+		if _, exists := m.rewardAccounts[credential]; !exists {
+			m.rewardAccounts[credential] = balance
 		}
 	}
 
@@ -362,7 +369,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeStakeRegistration:
 		if regCert, ok := cert.(*common.StakeRegistrationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[credential.Credential] = 0
+			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -370,7 +377,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeRegistration:
 		if regCert, ok := cert.(*common.RegistrationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[credential.Credential] = 0
+			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -379,7 +386,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + delegation (Conway)
 		if regCert, ok := cert.(*common.StakeRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[credential.Credential] = 0
+			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -388,7 +395,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + vote delegation (Conway)
 		if regCert, ok := cert.(*common.VoteRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[credential.Credential] = 0
+			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -401,7 +408,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + stake + vote delegation (Conway)
 		if regCert, ok := cert.(*common.StakeVoteRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[credential.Credential] = 0
+			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -492,13 +499,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 func (m *MockStateManager) deregisterStakeCredential(
 	credential common.Credential,
 ) {
-	delete(m.rewardAccounts, ledger.NewRewardAccountKey(credential))
-	remaining := rewardBalancesByHash(m.rewardAccounts)
-	if balance, exists := remaining[credential.Credential]; exists {
-		m.stakeRegistrations[credential.Credential] = balance
-	} else {
-		delete(m.stakeRegistrations, credential.Credential)
-	}
+	credentialKey := ledger.NewRewardAccountKey(credential)
+	delete(m.rewardAccounts, credentialKey)
+	delete(m.stakeRegistrations, credentialKey)
 	m.govState.DeregisterStakeCredential(credential)
 }
 
@@ -755,7 +758,7 @@ func (m *MockStateManager) SetRewardAccountBalances(
 func (m *MockStateManager) syncRewardBalanceMirrors() {
 	legacyBalances := rewardBalancesByHash(m.rewardAccounts)
 	for cred := range m.stakeRegistrations {
-		if balance, exists := legacyBalances[cred]; exists {
+		if balance, exists := m.rewardAccounts[cred]; exists {
 			m.stakeRegistrations[cred] = balance
 		}
 	}
@@ -775,7 +778,7 @@ func (m *MockStateManager) Reset() error {
 	m.protocolParams = nil
 	m.currentEpoch = 0
 	m.utxos = make(map[string]common.Utxo)
-	m.stakeRegistrations = make(map[common.Blake2b224]uint64)
+	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
 	m.drepRegistrations = make(map[common.Blake2b224]bool)

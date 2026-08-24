@@ -126,7 +126,7 @@ type MockLedgerState struct {
 
 	// CertState callbacks and state
 	StakeRegistrationCallback StakeRegistrationFunc
-	stakeRegistrations        map[lcommon.Blake2b224]bool // credential -> registered
+	stakeRegistrations        map[RewardAccountKey]bool // credential -> registered
 
 	// SlotState callbacks
 	SlotToTimeCallback SlotToTimeFunc
@@ -200,7 +200,7 @@ func (ls *MockLedgerState) IsStakeCredentialRegistered(
 	if ls.stakeRegistrations == nil {
 		return false
 	}
-	return ls.stakeRegistrations[cred.Credential]
+	return ls.stakeRegistrations[NewRewardAccountKey(cred)]
 }
 
 // SlotToTime converts a slot number to a time
@@ -463,7 +463,7 @@ type LedgerStateBuilder struct {
 func NewLedgerStateBuilder() *LedgerStateBuilder {
 	return &LedgerStateBuilder{
 		state: &MockLedgerState{
-			stakeRegistrations:       make(map[lcommon.Blake2b224]bool),
+			stakeRegistrations:       make(map[RewardAccountKey]bool),
 			rewardAccounts:           make(map[RewardAccountKey]uint64),
 			govActions:               make(map[string]*lcommon.GovActionState),
 			proposedCommitteeMembers: make(map[lcommon.Blake2b224]uint64),
@@ -504,14 +504,12 @@ func (b *LedgerStateBuilder) WithStakeCredentialRegistered(
 	cred lcommon.Blake2b224,
 	registered bool,
 ) *LedgerStateBuilder {
-	b.state.stakeRegistrations[cred] = registered
-	b.withRewardAccountRegistration(
-		lcommon.Credential{
-			CredType:   lcommon.CredentialTypeAddrKeyHash,
-			Credential: cred,
-		},
-		registered,
-	)
+	credential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: cred,
+	}
+	b.state.stakeRegistrations[NewRewardAccountKey(credential)] = registered
+	b.withRewardAccountRegistration(credential, registered)
 	return b
 }
 
@@ -625,7 +623,7 @@ func (b *LedgerStateBuilder) WithRewardAccountCredentialBalance(
 ) *LedgerStateBuilder {
 	b.state.rewardAccounts[NewRewardAccountKey(cred)] = balance
 	// Also mark the stake credential as registered
-	b.state.stakeRegistrations[cred.Credential] = true
+	b.state.stakeRegistrations[NewRewardAccountKey(cred)] = true
 	return b
 }
 
@@ -846,7 +844,7 @@ func (b *LedgerStateBuilder) WithStakeRegistrations(
 	}
 	// Also mark credentials as registered for IsStakeCredentialRegistered
 	for _, cert := range certs {
-		b.state.stakeRegistrations[cert.StakeCredential.Credential] = true
+		b.state.stakeRegistrations[NewRewardAccountKey(cert.StakeCredential)] = true
 		b.withRewardAccountRegistration(cert.StakeCredential, true)
 	}
 	return b

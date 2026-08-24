@@ -99,7 +99,13 @@ type GovernanceState struct {
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
 
 	// StakeRegistrations tracks which stake credentials are registered.
+	// Deprecated: use StakeRegistrationsByCredential when credential type
+	// matters.
 	StakeRegistrations map[common.Blake2b224]bool
+
+	// StakeRegistrationsByCredential tracks registrations by full stake
+	// credential identity.
+	StakeRegistrationsByCredential map[ledger.RewardAccountKey]bool
 
 	// PoolRegistrations tracks which pools are registered.
 	PoolRegistrations map[common.Blake2b224]bool
@@ -152,8 +158,11 @@ func NewGovernanceState() *GovernanceState {
 		DRepDelegationsByCredential: make(
 			map[ledger.RewardAccountKey]common.Drep,
 		),
-		HotKeyAuthorizations:  make(map[common.Blake2b224]common.Blake2b224),
-		StakeRegistrations:    make(map[common.Blake2b224]bool),
+		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
+		StakeRegistrations:   make(map[common.Blake2b224]bool),
+		StakeRegistrationsByCredential: make(
+			map[ledger.RewardAccountKey]bool,
+		),
 		PoolRegistrations:     make(map[common.Blake2b224]bool),
 		PoolRetirements:       make(map[common.Blake2b224]uint64),
 		RewardAccounts:        make(map[common.Blake2b224]uint64),
@@ -176,6 +185,9 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 		map[ledger.RewardAccountKey]common.Drep,
 	)
 	g.StakeRegistrations = make(map[common.Blake2b224]bool)
+	g.StakeRegistrationsByCredential = make(
+		map[ledger.RewardAccountKey]bool,
+	)
 	g.PoolRegistrations = make(map[common.Blake2b224]bool)
 	g.PoolRetirements = make(map[common.Blake2b224]uint64)
 	g.RewardAccounts = make(map[common.Blake2b224]uint64)
@@ -225,6 +237,26 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 
 	// Load stake registrations
 	maps.Copy(g.StakeRegistrations, state.StakeRegistrations)
+	if len(state.StakeRegistrationsByCredential) > 0 {
+		maps.Copy(
+			g.StakeRegistrationsByCredential,
+			state.StakeRegistrationsByCredential,
+		)
+	} else if len(state.RewardAccountBalances) > 0 {
+		for credential := range state.RewardAccountBalances {
+			g.StakeRegistrationsByCredential[credential] = true
+		}
+	} else {
+		for hash, registered := range state.StakeRegistrations {
+			if !registered {
+				continue
+			}
+			g.StakeRegistrationsByCredential[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: hash,
+			}] = true
+		}
+	}
 
 	// Load pool registrations
 	maps.Copy(g.PoolRegistrations, state.PoolRegistrations)
@@ -251,6 +283,16 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 // IsStakeRegistered checks if a stake credential is registered.
 func (g *GovernanceState) IsStakeRegistered(hash common.Blake2b224) bool {
 	return g.StakeRegistrations[hash]
+}
+
+// IsStakeCredentialRegistered checks registration by full credential identity.
+func (g *GovernanceState) IsStakeCredentialRegistered(
+	credential common.Credential,
+) bool {
+	if len(g.StakeRegistrationsByCredential) > 0 {
+		return g.StakeRegistrationsByCredential[ledger.NewRewardAccountKey(credential)]
+	}
+	return g.IsStakeRegistered(credential.Credential)
 }
 
 // IsDRepRegistered checks if a DRep is registered.
@@ -328,6 +370,10 @@ func (g *GovernanceState) GetEnactedRoot(
 // RegisterStake registers a stake credential.
 func (g *GovernanceState) RegisterStake(hash common.Blake2b224) {
 	g.StakeRegistrations[hash] = true
+	g.StakeRegistrationsByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}] = true
 }
 
 // RegisterStakeCredential registers a full stake credential and initializes
@@ -335,7 +381,8 @@ func (g *GovernanceState) RegisterStake(hash common.Blake2b224) {
 func (g *GovernanceState) RegisterStakeCredential(
 	credential common.Credential,
 ) {
-	g.RegisterStake(credential.Credential)
+	g.StakeRegistrations[credential.Credential] = true
+	g.StakeRegistrationsByCredential[ledger.NewRewardAccountKey(credential)] = true
 	g.RewardAccountBalances[ledger.NewRewardAccountKey(credential)] = 0
 	if _, exists := g.RewardAccounts[credential.Credential]; !exists ||
 		credential.CredType == common.CredentialTypeAddrKeyHash {
@@ -363,6 +410,11 @@ func (g *GovernanceState) SetDRepDelegation(
 // DeregisterStake deregisters a stake credential.
 func (g *GovernanceState) DeregisterStake(hash common.Blake2b224) {
 	delete(g.StakeRegistrations, hash)
+	for credential := range g.StakeRegistrationsByCredential {
+		if credential.Credential == hash {
+			delete(g.StakeRegistrationsByCredential, credential)
+		}
+	}
 	delete(g.RewardAccounts, hash)
 	for credential := range g.RewardAccountBalances {
 		if credential.Credential == hash {
@@ -384,6 +436,10 @@ func (g *GovernanceState) DeregisterStake(hash common.Blake2b224) {
 func (g *GovernanceState) DeregisterStakeCredential(
 	credential common.Credential,
 ) {
+	delete(
+		g.StakeRegistrationsByCredential,
+		ledger.NewRewardAccountKey(credential),
+	)
 	delete(g.RewardAccountBalances, ledger.NewRewardAccountKey(credential))
 	delete(
 		g.DRepDelegationsByCredential,
@@ -392,10 +448,17 @@ func (g *GovernanceState) DeregisterStakeCredential(
 	g.DRepDelegations = drepDelegationsByHash(
 		g.DRepDelegationsByCredential,
 	)
-	remaining := rewardBalancesByHash(g.RewardAccountBalances)
-	if balance, exists := remaining[credential.Credential]; exists {
-		g.RewardAccounts[credential.Credential] = balance
-		return
+	for registration, registered := range g.StakeRegistrationsByCredential {
+		if registered && registration.Credential == credential.Credential {
+			g.StakeRegistrations[credential.Credential] = true
+			remainingBalances := rewardBalancesByHash(g.RewardAccountBalances)
+			if balance, exists := remainingBalances[credential.Credential]; exists {
+				g.RewardAccounts[credential.Credential] = balance
+			} else {
+				g.RewardAccounts[credential.Credential] = 0
+			}
+			return
+		}
 	}
 	delete(g.StakeRegistrations, credential.Credential)
 	delete(g.RewardAccounts, credential.Credential)

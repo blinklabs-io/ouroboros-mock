@@ -746,7 +746,7 @@ func TestMockStateManagerRewardAdjustmentPreservesRegistrationState(
 	}
 	currentKey := ledger.NewRewardAccountKey(currentCredential)
 	futureKey := ledger.NewRewardAccountKey(futureCredential)
-	sm.stakeRegistrations[currentCredential.Credential] = 0
+	sm.stakeRegistrations[currentKey] = 0
 	sm.rewardAccounts[currentKey] = 0
 	sm.govState.RegisterStakeCredential(currentCredential)
 
@@ -818,6 +818,38 @@ func TestMockStateManagerScriptRegistrationPreservesIdentity(t *testing.T) {
 	state := sm.GetStateProvider()
 	assert.True(t, state.IsRewardAccountRegistered(scriptCredential))
 	assert.False(t, state.IsRewardAccountRegistered(keyCredential))
+	assert.True(t, state.IsStakeCredentialRegistered(scriptCredential))
+	assert.False(t, state.IsStakeCredentialRegistered(keyCredential))
+}
+
+func TestValidatorStakeRegistrationPreservesCredentialIdentity(t *testing.T) {
+	hash := common.NewBlake2b224(append(make([]byte, 27), byte(6)))
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	govState := NewGovernanceState()
+	govState.RegisterStakeCredential(scriptCredential)
+	validator := NewValidator()
+
+	require.NoError(t, validator.validateCertificate(
+		&common.StakeRegistrationCertificate{
+			StakeCredential: keyCredential,
+		},
+		govState,
+		map[ledger.RewardAccountKey]bool{},
+	))
+	require.Error(t, validator.validateCertificate(
+		&common.StakeRegistrationCertificate{
+			StakeCredential: scriptCredential,
+		},
+		govState,
+		map[ledger.RewardAccountKey]bool{},
+	))
 }
 
 func TestMockStateManagerDRepDelegationPreservesCredentialIdentity(
@@ -864,6 +896,8 @@ func TestMockStateManagerDRepDelegationPreservesCredentialIdentity(
 
 	sm.deregisterStakeCredential(keyCredential)
 	state = sm.buildLedgerState()
+	assert.False(t, state.IsStakeCredentialRegistered(keyCredential))
+	assert.True(t, state.IsStakeCredentialRegistered(scriptCredential))
 	keyDelegation, err = state.DRepDelegation(keyCredential)
 	require.NoError(t, err)
 	assert.Nil(t, keyDelegation)

@@ -2117,6 +2117,27 @@ func TestLedgerStateBuilder_RewardAccountRegistrationCredentialIdentity(
 	assert.False(t, ls.IsRewardAccountRegistered(scriptCredential))
 }
 
+func TestLedgerStateBuilder_StakeRegistrationPreservesCredentialType(
+	t *testing.T,
+) {
+	hash := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x23}, 28))
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithRewardAccountCredentialBalance(scriptCredential, 100).
+		Build()
+
+	assert.True(t, ls.IsStakeCredentialRegistered(scriptCredential))
+	assert.False(t, ls.IsStakeCredentialRegistered(keyCredential))
+}
+
 func TestLedgerStateBuilder_LegacyStakeRegistrationCreatesRewardAccount(
 	t *testing.T,
 ) {
