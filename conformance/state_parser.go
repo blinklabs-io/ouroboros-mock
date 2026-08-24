@@ -23,11 +23,12 @@ import (
 	"strings"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
-	"github.com/blinklabs-io/gouroboros/ledger"
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
+	mockledger "github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
 // ParsedUtxo contains a UTxO parsed from test vectors.
@@ -51,7 +52,11 @@ type ParsedInitialState struct {
 	StakeRegistrations map[common.Blake2b224]bool
 
 	// RewardAccounts maps stake credentials to their reward balances.
+	// Deprecated: use RewardAccountBalances when credential type matters.
 	RewardAccounts map[common.Blake2b224]uint64
+
+	// RewardAccountBalances maps full credential identities to reward balances.
+	RewardAccountBalances map[mockledger.RewardAccountKey]uint64
 
 	// PoolRegistrations tracks which pools are registered (by pool key hash).
 	PoolRegistrations map[common.Blake2b224]bool
@@ -140,15 +145,16 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	}
 
 	state := &ParsedInitialState{
-		Utxos:                make(map[string]ParsedUtxo),
-		StakeRegistrations:   make(map[common.Blake2b224]bool),
-		RewardAccounts:       make(map[common.Blake2b224]uint64),
-		PoolRegistrations:    make(map[common.Blake2b224]bool),
-		CommitteeMembers:     make(map[common.Blake2b224]uint64),
-		DRepDelegations:      make(map[common.Blake2b224]common.Drep),
-		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
-		Proposals:            make(map[string]GovActionInfo),
-		CostModels:           make(map[uint][]int64),
+		Utxos:                 make(map[string]ParsedUtxo),
+		StakeRegistrations:    make(map[common.Blake2b224]bool),
+		RewardAccounts:        make(map[common.Blake2b224]uint64),
+		RewardAccountBalances: make(map[mockledger.RewardAccountKey]uint64),
+		PoolRegistrations:     make(map[common.Blake2b224]bool),
+		CommitteeMembers:      make(map[common.Blake2b224]uint64),
+		DRepDelegations:       make(map[common.Blake2b224]common.Drep),
+		HotKeyAuthorizations:  make(map[common.Blake2b224]common.Blake2b224),
+		Proposals:             make(map[string]GovActionInfo),
+		CostModels:            make(map[uint][]int64),
 	}
 
 	// Extract current epoch from stateArr[0]
@@ -415,7 +421,7 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 					}
 
 					// Extract hash and index from key
-					var hash ledger.Blake2b256
+					var hash gledger.Blake2b256
 					var index uint32
 					keyOk := false
 
@@ -570,40 +576,95 @@ func parseDelegationState(
 		return nil
 	}
 
-	// unified_map at delegationState[0] contains stake credentials
-	if unifiedMap, ok := delegationState[0].(map[any]any); ok {
+	// The vendored vectors wrap the unified credential map together with a
+	// pointer map. Some synthetic fixtures provide the credential map directly.
+	unifiedMapRaw := delegationState[0]
+	if wrapper, ok := unifiedMapRaw.([]any); ok && len(wrapper) > 0 {
+		unifiedMapRaw = wrapper[0]
+	}
+
+	if unifiedMap, ok := unifiedMapRaw.(map[any]any); ok {
 		for k, v := range unifiedMap {
-			cred := extractCredentialHash(k)
+			cred := extractCredentialHash(unwrapPointer(k))
 			if cred == nil {
+				continue
+			}
+			balance, registered := extractRewardAccountBalance(v)
+			if !registered {
 				continue
 			}
 			state.StakeRegistrations[cred.Credential] = true
 
-			// Extract reward balance if present in value
-			// Value structure: [rewards_map, deposit, drep_delegatee, pool_delegatee]
-			if vArr, ok := v.([]any); ok && len(vArr) >= 1 {
-				// rewards_map contains [[epoch, balance], ...]
-				if rewardsMap, ok := vArr[0].(map[any]any); ok {
-					for _, reward := range rewardsMap {
-						if rewardPair, ok := reward.([]any); ok &&
-							len(rewardPair) >= 2 {
-							if balance, ok := rewardPair[1].(uint64); ok {
-								state.RewardAccounts[cred.Credential] = balance
-								break
-							}
-						}
+			// Current AccountState values place the DRep delegation fourth.
+			// Retain the older third-position fallback for existing fixtures.
+			if vArr, ok := v.([]any); ok {
+				for _, idx := range []int{3, 2} {
+					if len(vArr) <= idx {
+						continue
 					}
-				}
-				if len(vArr) >= 3 {
-					if drep := extractDRepDelegation(vArr[2]); drep != nil {
+					if drep := extractDRepDelegation(vArr[idx]); drep != nil {
 						state.DRepDelegations[cred.Credential] = *drep
+						break
 					}
 				}
+			}
+
+			accountKey := mockledger.NewRewardAccountKey(*cred)
+			state.RewardAccountBalances[accountKey] = balance
+			// Keep the legacy hash-only view deterministic: prefer a key-hash
+			// credential if both credential types carry the same hash.
+			if _, exists := state.RewardAccounts[cred.Credential]; !exists ||
+				cred.CredType == common.CredentialTypeAddrKeyHash {
+				state.RewardAccounts[cred.Credential] = balance
 			}
 		}
 	}
 
 	return nil
+}
+
+// extractRewardAccountBalance reads reward balances from the account layouts
+// used by conformance vectors. Vendored UMap values wrap [reward, deposit] in
+// an optional account state, while modern Conway AccountState values expose
+// balance and deposit directly. The historical rewards-map form remains
+// supported for synthetic and downstream fixtures.
+func extractRewardAccountBalance(raw any) (uint64, bool) {
+	account, ok := raw.([]any)
+	if !ok || len(account) == 0 {
+		return 0, false
+	}
+
+	switch balanceState := account[0].(type) {
+	case uint64:
+		return balanceState, true
+	case []any:
+		if len(balanceState) == 0 {
+			return 0, false
+		}
+		legacyAccount, ok := balanceState[0].([]any)
+		if !ok || len(legacyAccount) == 0 {
+			return 0, false
+		}
+		balance, ok := legacyAccount[0].(uint64)
+		return balance, ok
+	case map[any]any:
+		if len(balanceState) == 0 {
+			return 0, true
+		}
+		for _, reward := range balanceState {
+			rewardPair, ok := reward.([]any)
+			if !ok || len(rewardPair) < 2 {
+				continue
+			}
+			balance, ok := rewardPair[1].(uint64)
+			if ok {
+				return balance, true
+			}
+		}
+		return 0, true
+	}
+
+	return 0, false
 }
 
 func extractDRepDelegation(raw any) *common.Drep {

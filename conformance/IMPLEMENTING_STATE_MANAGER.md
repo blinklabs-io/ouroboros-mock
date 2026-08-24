@@ -70,7 +70,8 @@ Called once per vector, before any events are processed. Your job is to hydrate 
 | `CurrentEpoch` | `uint64` | Epoch number at vector start |
 | `Utxos` | `map[string]ParsedUtxo` | UTxO set, keyed by `"txHash#index"` |
 | `StakeRegistrations` | `map[Blake2b224]bool` | Registered stake credentials |
-| `RewardAccounts` | `map[Blake2b224]uint64` | Reward account balances |
+| `RewardAccountBalances` | `map[ledger.RewardAccountKey]uint64` | Reward balances keyed by credential type and hash |
+| `RewardAccounts` | `map[Blake2b224]uint64` | Deprecated hash-only compatibility view |
 | `PoolRegistrations` | `map[Blake2b224]bool` | Registered pools |
 | `CommitteeMembers` | `map[Blake2b224]uint64` | Cold key → expiry epoch |
 | `HotKeyAuthorizations` | `map[Blake2b224]Blake2b224` | Cold key → hot key |
@@ -147,15 +148,34 @@ Return a pointer to your current `conformance.GovernanceState`. The harness uses
 
 The simplest approach: maintain a `*GovernanceState` alongside your database and keep it in sync inside `ApplyTransaction` and `ProcessEpochBoundary`.
 
-### `SetRewardBalances(balances map[Blake2b224]uint64)`
+### Reward balance setters
 
-The harness calls this before each transaction with adjusted reward balances for that transaction's withdrawal validation. The adjustment accounts for future withdrawals within the same vector:
+The harness calls a reward balance setter before each transaction with the
+pre-transaction balances needed for withdrawal validation. The adjustment
+accounts for the current and future withdrawals within the same vector:
 
 ```
-adjusted[cred] = finalStateBalance[cred] + sum(withdrawals[cred] from tx+1 onward)
+adjusted[cred] = finalStateBalance[cred] + sum(withdrawals[cred] from tx onward)
 ```
 
-Write these values into your `GovernanceState.RewardAccounts` map (and your database if your withdrawal validation reads from there). Do not persist them permanently; they are replaced before every transaction.
+Implement the optional `conformance.RewardAccountBalanceSetter` interface to
+receive `map[ledger.RewardAccountKey]uint64`. `RewardAccountKey` preserves the
+credential type as well as its hash, so key and script credentials with the
+same hash remain distinct. Write these values into
+`GovernanceState.RewardAccountBalances` and into the backend used by
+`RewardAccountBalance`. Treat the map as balance updates for accounts that are
+already registered: ignore credentials that are not registered yet, and keep
+currently registered accounts unchanged when they are absent from the map.
+
+Existing state managers remain compatible through
+`SetRewardBalances(map[Blake2b224]uint64)`. The harness collapses the full map
+to that legacy view and deterministically prefers the key credential when both
+credential types carry the same hash. That fallback cannot represent a
+collision, so state managers that validate script withdrawals should adopt
+`RewardAccountBalanceSetter`.
+
+Do not use an inferred balance to create or remove a registration. Certificate
+processing remains the source of truth for reward-account registration.
 
 ### `GetProtocolParameters() common.ProtocolParameters`
 
@@ -209,7 +229,13 @@ Start with `ApplyTransaction` → UTxO changes → certificates → governance. 
 
 ## Key behaviors to match
 
-**Reward balance injection** — `SetRewardBalances` is called by the harness before every transaction. The values already account for future withdrawals. Your withdrawal validation must use these values, not your database's current reward balance, or multi-withdrawal vectors will fail.
+**Reward balance injection** — the credential-aware setter is preferred before
+every transaction, with `SetRewardBalances` retained as a compatibility
+fallback. The values represent the balance before the current transaction and
+already account for its withdrawal plus later withdrawals. Withdrawal
+validation must use these values rather than a post-transaction balance. Apply
+only updates for accounts already registered in your state; do not infer
+registration from the adjustment map.
 
 **Phase-2 invalid transactions** — `ApplyTransaction` is called even when `tx.IsValid() == false`. Apply only collateral effects; do not apply outputs or certificates.
 

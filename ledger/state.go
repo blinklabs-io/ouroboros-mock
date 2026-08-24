@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"maps"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -38,6 +37,33 @@ type (
 	DRepRegistration = lcommon.DRepRegistration
 	GovActionState   = lcommon.GovActionState
 )
+
+// RewardAccountKey is the comparable identity of a reward account. The
+// credential type is part of the key: a verification-key credential and a
+// script credential may carry the same hash without identifying the same
+// account.
+type RewardAccountKey struct {
+	CredType   uint
+	Credential lcommon.Blake2b224
+}
+
+// NewRewardAccountKey converts a ledger credential to its comparable reward
+// account identity.
+func NewRewardAccountKey(credential lcommon.Credential) RewardAccountKey {
+	return RewardAccountKey{
+		CredType:   credential.CredType,
+		Credential: credential.Credential,
+	}
+}
+
+// AsCredential converts a reward account identity back to a ledger
+// credential.
+func (k RewardAccountKey) AsCredential() lcommon.Credential {
+	return lcommon.Credential{
+		CredType:   k.CredType,
+		Credential: k.Credential,
+	}
+}
 
 // Plutus language version constants
 const (
@@ -114,8 +140,8 @@ type MockLedgerState struct {
 	// RewardState callbacks and state
 	CalculateRewardsCallback  CalculateRewardsFunc
 	GetRewardSnapshotCallback GetRewardSnapshotFunc
-	rewardAccounts            map[lcommon.Blake2b224]uint64 // credential -> balance
-	rewardSnapshot            lcommon.RewardSnapshot        // static snapshot value
+	rewardAccounts            map[RewardAccountKey]uint64 // credential -> balance
+	rewardSnapshot            lcommon.RewardSnapshot      // static snapshot value
 
 	// GovState callbacks and state
 	CommitteeMemberCallback  CommitteeMemberFunc
@@ -275,8 +301,8 @@ func (ls *MockLedgerState) GetRewardSnapshot(
 func (ls *MockLedgerState) IsRewardAccountRegistered(
 	cred lcommon.Credential,
 ) bool {
-	// Reward account registration is tied to stake credential registration
-	return ls.IsStakeCredentialRegistered(cred)
+	_, exists := ls.rewardAccounts[NewRewardAccountKey(cred)]
+	return exists
 }
 
 // RewardAccountBalance returns the current reward balance for a stake credential
@@ -286,7 +312,7 @@ func (ls *MockLedgerState) RewardAccountBalance(
 	if ls.rewardAccounts == nil {
 		return nil, nil
 	}
-	balance, exists := ls.rewardAccounts[cred.Credential]
+	balance, exists := ls.rewardAccounts[NewRewardAccountKey(cred)]
 	if !exists {
 		return nil, nil
 	}
@@ -438,7 +464,7 @@ func NewLedgerStateBuilder() *LedgerStateBuilder {
 	return &LedgerStateBuilder{
 		state: &MockLedgerState{
 			stakeRegistrations:       make(map[lcommon.Blake2b224]bool),
-			rewardAccounts:           make(map[lcommon.Blake2b224]uint64),
+			rewardAccounts:           make(map[RewardAccountKey]uint64),
 			govActions:               make(map[string]*lcommon.GovActionState),
 			proposedCommitteeMembers: make(map[lcommon.Blake2b224]uint64),
 		},
@@ -479,6 +505,13 @@ func (b *LedgerStateBuilder) WithStakeCredentialRegistered(
 	registered bool,
 ) *LedgerStateBuilder {
 	b.state.stakeRegistrations[cred] = registered
+	b.withRewardAccountRegistration(
+		lcommon.Credential{
+			CredType:   lcommon.CredentialTypeAddrKeyHash,
+			Credential: cred,
+		},
+		registered,
+	)
 	return b
 }
 
@@ -486,8 +519,24 @@ func (b *LedgerStateBuilder) WithStakeCredentialRegistered(
 func (b *LedgerStateBuilder) WithStakeCredentials(
 	creds map[lcommon.Blake2b224]bool,
 ) *LedgerStateBuilder {
-	maps.Copy(b.state.stakeRegistrations, creds)
+	for cred, registered := range creds {
+		b.WithStakeCredentialRegistered(cred, registered)
+	}
 	return b
+}
+
+func (b *LedgerStateBuilder) withRewardAccountRegistration(
+	credential lcommon.Credential,
+	registered bool,
+) {
+	key := NewRewardAccountKey(credential)
+	if !registered {
+		delete(b.state.rewardAccounts, key)
+		return
+	}
+	if _, exists := b.state.rewardAccounts[key]; !exists {
+		b.state.rewardAccounts[key] = 0
+	}
 }
 
 // WithSlotToTime sets the slot to time conversion callback
@@ -559,9 +608,24 @@ func (b *LedgerStateBuilder) WithRewardAccountBalance(
 	cred lcommon.Blake2b224,
 	balance uint64,
 ) *LedgerStateBuilder {
-	b.state.rewardAccounts[cred] = balance
+	return b.WithRewardAccountCredentialBalance(
+		lcommon.Credential{
+			CredType:   lcommon.CredentialTypeAddrKeyHash,
+			Credential: cred,
+		},
+		balance,
+	)
+}
+
+// WithRewardAccountCredentialBalance sets the balance for a reward account
+// while preserving the credential type.
+func (b *LedgerStateBuilder) WithRewardAccountCredentialBalance(
+	cred lcommon.Credential,
+	balance uint64,
+) *LedgerStateBuilder {
+	b.state.rewardAccounts[NewRewardAccountKey(cred)] = balance
 	// Also mark the stake credential as registered
-	b.state.stakeRegistrations[cred] = true
+	b.state.stakeRegistrations[cred.Credential] = true
 	return b
 }
 
@@ -570,8 +634,18 @@ func (b *LedgerStateBuilder) WithRewardAccounts(
 	accounts map[lcommon.Blake2b224]uint64,
 ) *LedgerStateBuilder {
 	for cred, balance := range accounts {
-		b.state.rewardAccounts[cred] = balance
-		b.state.stakeRegistrations[cred] = true
+		b.WithRewardAccountBalance(cred, balance)
+	}
+	return b
+}
+
+// WithRewardAccountCredentialBalances sets reward account balances while
+// preserving each credential's type.
+func (b *LedgerStateBuilder) WithRewardAccountCredentialBalances(
+	accounts map[RewardAccountKey]uint64,
+) *LedgerStateBuilder {
+	for cred, balance := range accounts {
+		b.WithRewardAccountCredentialBalance(cred.AsCredential(), balance)
 	}
 	return b
 }
@@ -773,6 +847,7 @@ func (b *LedgerStateBuilder) WithStakeRegistrations(
 	// Also mark credentials as registered for IsStakeCredentialRegistered
 	for _, cert := range certs {
 		b.state.stakeRegistrations[cert.StakeCredential.Credential] = true
+		b.withRewardAccountRegistration(cert.StakeCredential, true)
 	}
 	return b
 }

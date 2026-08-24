@@ -335,6 +335,14 @@ type StateManager interface {
 }
 ```
 
+Implementations that need credential-aware reward balances should also
+implement `RewardAccountBalanceSetter`. Its `SetRewardAccountBalances` method
+uses `ledger.RewardAccountKey`, which includes both the credential type and
+hash. The original `SetRewardBalances` method remains the compatibility path
+for existing state managers. Both setters update balances for accounts already
+registered by the state manager; the inferred balance map must not create or
+remove registrations.
+
 ---
 
 ## Implementation Notes

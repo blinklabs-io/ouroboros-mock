@@ -273,6 +273,12 @@ func (m *customStateManager) SetRewardBalances(
 	m.inner.SetRewardBalances(balances)
 }
 
+func (m *customStateManager) SetRewardAccountBalances(
+	balances map[ledger.RewardAccountKey]uint64,
+) {
+	m.inner.SetRewardAccountBalances(balances)
+}
+
 func (m *customStateManager) GetProtocolParameters() common.ProtocolParameters {
 	return m.inner.GetProtocolParameters()
 }

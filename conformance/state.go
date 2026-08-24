@@ -28,6 +28,16 @@ import (
 // unchanged. Implementors should refer to ledger.StateProvider directly.
 type StateProvider = ledger.StateProvider
 
+// RewardAccountBalanceSetter is an optional StateManager extension for
+// preserving the full reward-account credential identity. The harness falls
+// back to StateManager.SetRewardBalances for implementations that have not yet
+// adopted it.
+type RewardAccountBalanceSetter interface {
+	// SetRewardAccountBalances updates balances for accounts already registered
+	// by the state manager. It must not create or remove registrations.
+	SetRewardAccountBalances(balances map[ledger.RewardAccountKey]uint64)
+}
+
 // StateManager handles state mutations during test execution.
 // Implementations manage the full lifecycle of ledger state for a test vector.
 type StateManager interface {
@@ -93,7 +103,11 @@ type GovernanceState struct {
 	PoolRetirements map[common.Blake2b224]uint64
 
 	// RewardAccounts maps stake credentials to their reward balances.
+	// Deprecated: use RewardAccountBalances when credential type matters.
 	RewardAccounts map[common.Blake2b224]uint64
+
+	// RewardAccountBalances maps full credential identities to reward balances.
+	RewardAccountBalances map[ledger.RewardAccountKey]uint64
 
 	// Proposals maps GovActionId (as "txHash#index") to proposal info.
 	Proposals map[string]*ProposalState
@@ -127,16 +141,17 @@ type ProposalState struct {
 // NewGovernanceState creates a new empty governance state.
 func NewGovernanceState() *GovernanceState {
 	return &GovernanceState{
-		CommitteeMembers:     make(map[common.Blake2b224]*CommitteeMemberInfo),
-		DRepRegistrations:    make(map[common.Blake2b224]bool),
-		DRepDelegations:      make(map[common.Blake2b224]common.Drep),
-		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
-		StakeRegistrations:   make(map[common.Blake2b224]bool),
-		PoolRegistrations:    make(map[common.Blake2b224]bool),
-		PoolRetirements:      make(map[common.Blake2b224]uint64),
-		RewardAccounts:       make(map[common.Blake2b224]uint64),
-		Proposals:            make(map[string]*ProposalState),
-		EnactedProposals:     make(map[string]bool),
+		CommitteeMembers:      make(map[common.Blake2b224]*CommitteeMemberInfo),
+		DRepRegistrations:     make(map[common.Blake2b224]bool),
+		DRepDelegations:       make(map[common.Blake2b224]common.Drep),
+		HotKeyAuthorizations:  make(map[common.Blake2b224]common.Blake2b224),
+		StakeRegistrations:    make(map[common.Blake2b224]bool),
+		PoolRegistrations:     make(map[common.Blake2b224]bool),
+		PoolRetirements:       make(map[common.Blake2b224]uint64),
+		RewardAccounts:        make(map[common.Blake2b224]uint64),
+		RewardAccountBalances: make(map[ledger.RewardAccountKey]uint64),
+		Proposals:             make(map[string]*ProposalState),
+		EnactedProposals:      make(map[string]bool),
 	}
 }
 
@@ -153,6 +168,7 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.PoolRegistrations = make(map[common.Blake2b224]bool)
 	g.PoolRetirements = make(map[common.Blake2b224]uint64)
 	g.RewardAccounts = make(map[common.Blake2b224]uint64)
+	g.RewardAccountBalances = make(map[ledger.RewardAccountKey]uint64)
 	g.Proposals = make(map[string]*ProposalState)
 	g.EnactedProposals = make(map[string]bool)
 	g.Roots = ProposalRoots{}
@@ -189,6 +205,7 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 
 	// Load reward accounts
 	maps.Copy(g.RewardAccounts, state.RewardAccounts)
+	maps.Copy(g.RewardAccountBalances, state.RewardAccountBalances)
 
 	// Load proposals (preserve RatifiedEpoch from parsed state)
 	for id, info := range state.Proposals {
@@ -251,6 +268,18 @@ func (g *GovernanceState) GetRewardBalance(hash common.Blake2b224) uint64 {
 	return g.RewardAccounts[hash]
 }
 
+// GetRewardAccountBalance returns the reward balance for a full credential
+// identity. It falls back to the legacy key-hash map for state constructed by
+// older consumers.
+func (g *GovernanceState) GetRewardAccountBalance(
+	credential common.Credential,
+) uint64 {
+	if len(g.RewardAccountBalances) > 0 {
+		return g.RewardAccountBalances[ledger.NewRewardAccountKey(credential)]
+	}
+	return g.GetRewardBalance(credential.Credential)
+}
+
 // GetEnactedRoot returns the enacted root for a governance action type.
 func (g *GovernanceState) GetEnactedRoot(
 	actionType common.GovActionType,
@@ -275,10 +304,43 @@ func (g *GovernanceState) RegisterStake(hash common.Blake2b224) {
 	g.StakeRegistrations[hash] = true
 }
 
+// RegisterStakeCredential registers a full stake credential and initializes
+// its reward account without aliasing another credential type.
+func (g *GovernanceState) RegisterStakeCredential(
+	credential common.Credential,
+) {
+	g.RegisterStake(credential.Credential)
+	g.RewardAccountBalances[ledger.NewRewardAccountKey(credential)] = 0
+	if _, exists := g.RewardAccounts[credential.Credential]; !exists ||
+		credential.CredType == common.CredentialTypeAddrKeyHash {
+		g.RewardAccounts[credential.Credential] = 0
+	}
+}
+
 // DeregisterStake deregisters a stake credential.
 func (g *GovernanceState) DeregisterStake(hash common.Blake2b224) {
 	delete(g.StakeRegistrations, hash)
 	delete(g.RewardAccounts, hash)
+	for credential := range g.RewardAccountBalances {
+		if credential.Credential == hash {
+			delete(g.RewardAccountBalances, credential)
+		}
+	}
+}
+
+// DeregisterStakeCredential deregisters one full stake credential without
+// deleting a different credential type that carries the same hash.
+func (g *GovernanceState) DeregisterStakeCredential(
+	credential common.Credential,
+) {
+	delete(g.RewardAccountBalances, ledger.NewRewardAccountKey(credential))
+	remaining := rewardBalancesByHash(g.RewardAccountBalances)
+	if balance, exists := remaining[credential.Credential]; exists {
+		g.RewardAccounts[credential.Credential] = balance
+		return
+	}
+	delete(g.StakeRegistrations, credential.Credential)
+	delete(g.RewardAccounts, credential.Credential)
 }
 
 // RegisterDRep registers a DRep.

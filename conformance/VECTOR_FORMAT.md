@@ -127,7 +127,18 @@ utxo_state = [
 | Previous pparams hash | `initial_state[3][1][1][3][4]` |
 | DRep registrations | `initial_state[3][1][0][0][0]` |
 | Stake registrations | `initial_state[3][1][0][2][0]` |
-| Final reward balances | `final_state[3][1][1][3]` (reward accounts within gov state) |
+| Final reward balances | `final_state[3][1][0][2][0][0]` (reward accounts within delegation state) |
+
+---
+
+Reward-account keys are stake credentials encoded as `[type, hash]`. The type
+is part of the identity: type `0` (verification-key hash) and type `1` (script
+hash) remain distinct even when the 28-byte hashes are equal.
+
+Vendored UMap account values wrap `[reward, deposit]` in their first field, so
+the reward balance is the first value of that nested pair. Modern Conway
+AccountState values encode `[balance, deposit, poolDelegation,
+drepDelegation]`, with the balance directly in the first field.
 
 ---
 
