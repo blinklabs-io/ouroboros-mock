@@ -20,6 +20,7 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
 // Validator performs pre-validation checks on transactions.
@@ -213,9 +214,8 @@ func (v *Validator) validateWithdrawals(
 		if addr == nil {
 			continue
 		}
-		// Extract stake credential from reward address
-		stakeHash := extractStakeHashFromAddress(*addr)
-		if stakeHash == nil {
+		credential, ok := addr.StakeCredential()
+		if !ok {
 			addrBytes, _ := addr.Bytes()
 			return fmt.Errorf(
 				"invalid withdrawal address: cannot extract stake credential from %x",
@@ -224,12 +224,12 @@ func (v *Validator) validateWithdrawals(
 		}
 
 		// Check withdrawal amount matches reward balance exactly
-		balance := govState.GetRewardBalance(*stakeHash)
+		balance := govState.GetRewardAccountBalance(credential)
 		withdrawalAmount := amount.Uint64()
 		if withdrawalAmount != balance {
 			return fmt.Errorf(
 				"withdrawal amount %d does not match balance %d for %x",
-				withdrawalAmount, balance, *stakeHash,
+				withdrawalAmount, balance, credential.Credential,
 			)
 		}
 	}
@@ -248,14 +248,14 @@ func (v *Validator) validateCertificates(
 	}
 
 	// Build a set of credentials being withdrawn in this transaction
-	withdrawnCreds := make(map[common.Blake2b224]bool)
+	withdrawnCreds := make(map[ledger.RewardAccountKey]bool)
 	for addr := range tx.Withdrawals() {
 		if addr == nil {
 			continue
 		}
-		stakeHash := extractStakeHashFromAddress(*addr)
-		if stakeHash != nil {
-			withdrawnCreds[*stakeHash] = true
+		credential, ok := addr.StakeCredential()
+		if ok {
+			withdrawnCreds[ledger.NewRewardAccountKey(credential)] = true
 		}
 	}
 
@@ -273,7 +273,7 @@ func (v *Validator) validateCertificates(
 func (v *Validator) validateCertificate(
 	cert common.Certificate,
 	govState *GovernanceState,
-	withdrawnCreds map[common.Blake2b224]bool,
+	withdrawnCreds map[ledger.RewardAccountKey]bool,
 ) error {
 	certType := common.CertificateType(cert.Type())
 
@@ -281,32 +281,33 @@ func (v *Validator) validateCertificate(
 	switch certType {
 	case common.CertificateTypeStakeRegistration:
 		if regCert, ok := cert.(*common.StakeRegistrationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			if govState.IsStakeRegistered(credential) {
+			credential := regCert.StakeCredential
+			if govState.IsStakeCredentialRegistered(credential) {
 				return fmt.Errorf(
 					"stake credential %x already registered",
-					credential,
+					credential.Credential,
 				)
 			}
 		}
 
 	case common.CertificateTypeRegistration:
 		if regCert, ok := cert.(*common.RegistrationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			if govState.IsStakeRegistered(credential) {
+			credential := regCert.StakeCredential
+			if govState.IsStakeCredentialRegistered(credential) {
 				return fmt.Errorf(
 					"stake credential %x already registered",
-					credential,
+					credential.Credential,
 				)
 			}
 		}
 
 	case common.CertificateTypeStakeDeregistration:
 		if deregCert, ok := cert.(*common.StakeDeregistrationCertificate); ok {
-			credential := deregCert.StakeCredential.Credential
-			balance := govState.GetRewardBalance(credential)
+			credential := deregCert.StakeCredential
+			balance := govState.GetRewardAccountBalance(credential)
 			// Allow deregistration if balance is being withdrawn in same transaction
-			if balance > 0 && !withdrawnCreds[credential] {
+			if balance > 0 &&
+				!withdrawnCreds[ledger.NewRewardAccountKey(credential)] {
 				return fmt.Errorf(
 					"cannot deregister stake with balance %d",
 					balance,
@@ -316,10 +317,11 @@ func (v *Validator) validateCertificate(
 
 	case common.CertificateTypeDeregistration:
 		if deregCert, ok := cert.(*common.DeregistrationCertificate); ok {
-			credential := deregCert.StakeCredential.Credential
-			balance := govState.GetRewardBalance(credential)
+			credential := deregCert.StakeCredential
+			balance := govState.GetRewardAccountBalance(credential)
 			// Allow deregistration if balance is being withdrawn in same transaction
-			if balance > 0 && !withdrawnCreds[credential] {
+			if balance > 0 &&
+				!withdrawnCreds[ledger.NewRewardAccountKey(credential)] {
 				return fmt.Errorf(
 					"cannot deregister stake with balance %d",
 					balance,
@@ -403,18 +405,18 @@ func (v *Validator) validateProposal(
 ) error {
 	// Check reward account address is valid and registered
 	rewardAddr := proposal.RewardAccount()
-	stakeHash := extractStakeHashFromAddress(rewardAddr)
-	if stakeHash == nil {
+	credential, ok := rewardAddr.StakeCredential()
+	if !ok {
 		addrBytes, _ := rewardAddr.Bytes()
 		return fmt.Errorf(
 			"invalid proposal reward address: cannot extract stake credential from %x",
 			addrBytes,
 		)
 	}
-	if !govState.IsStakeRegistered(*stakeHash) {
+	if !govState.IsStakeCredentialRegistered(credential) {
 		return fmt.Errorf(
 			"proposal reward address %x not registered",
-			*stakeHash,
+			credential.Credential,
 		)
 	}
 
@@ -655,18 +657,18 @@ func (v *Validator) validateTreasuryWithdrawal(
 		if rewardAddr == nil {
 			continue
 		}
-		stakeHash := extractStakeHashFromAddress(*rewardAddr)
-		if stakeHash == nil {
+		credential, ok := rewardAddr.StakeCredential()
+		if !ok {
 			addrBytes, _ := rewardAddr.Bytes()
 			return fmt.Errorf(
 				"invalid treasury withdrawal: cannot extract stake credential from %x",
 				addrBytes,
 			)
 		}
-		if !govState.IsStakeRegistered(*stakeHash) {
+		if !govState.IsStakeCredentialRegistered(credential) {
 			return fmt.Errorf(
 				"treasury withdrawal: return address %x not registered",
-				*stakeHash,
+				credential.Credential,
 			)
 		}
 	}
@@ -787,43 +789,4 @@ func formatGovActionIdFromPtr(id *common.GovActionId) string {
 		hex.EncodeToString(id.TransactionId[:]),
 		id.GovActionIdx,
 	)
-}
-
-// extractStakeHashFromAddress extracts the stake credential hash from an address.
-// Per CIP-19, address types and lengths:
-//   - Reward addresses (types 0xE, 0xF): 29 bytes (1 header + 28 credential)
-//   - Base addresses (types 0-3): 57 bytes (1 header + 28 payment + 28 stake)
-func extractStakeHashFromAddress(addr common.Address) *common.Blake2b224 {
-	// Get address bytes
-	addrBytes, err := addr.Bytes()
-	if err != nil || len(addrBytes) == 0 {
-		return nil
-	}
-
-	header := addrBytes[0]
-	addrType := (header & 0xF0) >> 4
-
-	// Check for stake/reward address types (0xE or 0xF)
-	// Per CIP-19, reward addresses are exactly 29 bytes
-	if addrType == 0xE || addrType == 0xF {
-		if len(addrBytes) != 29 {
-			return nil
-		}
-		var hash common.Blake2b224
-		copy(hash[:], addrBytes[1:29])
-		return &hash
-	}
-
-	// For base addresses (types 0-3), extract the staking part (last 28 bytes)
-	// Per CIP-19, base addresses are exactly 57 bytes
-	if addrType <= 0x3 {
-		if len(addrBytes) != 57 {
-			return nil
-		}
-		var hash common.Blake2b224
-		copy(hash[:], addrBytes[29:57])
-		return &hash
-	}
-
-	return nil
 }

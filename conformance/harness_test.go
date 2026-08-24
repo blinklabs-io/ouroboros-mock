@@ -18,10 +18,14 @@
 package conformance
 
 import (
+	"maps"
 	"path/filepath"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/ouroboros-mock/ledger"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
 
@@ -578,7 +582,8 @@ func TestHarnessRollbackRequiresInitialState(t *testing.T) {
 // invocations so tests can assert on rollback-replay behavior.
 type recordingStateManager struct {
 	*MockStateManager
-	setRewardBalancesCalls []map[common.Blake2b224]uint64
+	setRewardBalancesCalls       []map[common.Blake2b224]uint64
+	setRewardAccountBalanceCalls []map[ledger.RewardAccountKey]uint64
 }
 
 func (r *recordingStateManager) SetRewardBalances(
@@ -590,6 +595,17 @@ func (r *recordingStateManager) SetRewardBalances(
 	}
 	r.setRewardBalancesCalls = append(r.setRewardBalancesCalls, snapshot)
 	r.MockStateManager.SetRewardBalances(b)
+}
+
+func (r *recordingStateManager) SetRewardAccountBalances(
+	balances map[ledger.RewardAccountKey]uint64,
+) {
+	snapshot := maps.Clone(balances)
+	r.setRewardAccountBalanceCalls = append(
+		r.setRewardAccountBalanceCalls,
+		snapshot,
+	)
+	r.MockStateManager.SetRewardAccountBalances(balances)
 }
 
 // TestHarnessRollbackReappliesRewardBalances guards against the
@@ -610,14 +626,17 @@ func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
 	h.initialEpoch = 0
 	h.currentEpoch = 0
 
-	cred := common.NewBlake2b224(make([]byte, 28))
-	h.finalStateBalances = map[common.Blake2b224]uint64{cred: 1000}
+	cred := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.NewBlake2b224(make([]byte, 28)),
+	}
+	h.finalStateBalances = map[ledger.RewardAccountKey]uint64{cred: 1000}
 	// futureWithdrawals[i] is the cumulative withdrawal from event i to
-	// the end (inclusive of i). adjustRewardBalances looks up index i+1.
-	// Indices 2 and 3 hold distinct values so the assertion below
+	// the end (inclusive of i). adjustRewardBalances looks up index i.
+	// Indices 1 and 2 hold distinct values so the assertion below
 	// differentiates between the journaled originalIdx (correct) and the
 	// replay-loop index (buggy) being used to look up the adjustment.
-	h.futureWithdrawals = []map[common.Blake2b224]uint64{
+	h.futureWithdrawals = []map[ledger.RewardAccountKey]uint64{
 		{cred: 900},
 		{cred: 900},
 		{cred: 500},
@@ -660,21 +679,232 @@ func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
 		t.Fatalf("rollback failed: %v", err)
 	}
 
-	if len(sm.setRewardBalancesCalls) != 1 {
+	if len(sm.setRewardAccountBalanceCalls) != 1 {
 		t.Fatalf(
-			"expected 1 SetRewardBalances call during replay, got %d",
-			len(sm.setRewardBalancesCalls),
+			"expected 1 SetRewardAccountBalances call during replay, got %d",
+			len(sm.setRewardAccountBalanceCalls),
 		)
 	}
-	got := sm.setRewardBalancesCalls[0][cred]
-	// Correct path uses originalIdx=2 → futureWithdrawals[3]={cred:0}
-	// → adjusted balance = 1000 + 0 = 1000.
+	got := sm.setRewardAccountBalanceCalls[0][cred]
+	// Correct path uses originalIdx=2 → futureWithdrawals[2]={cred:500}
+	// → adjusted balance = 1000 + 500 = 1500.
 	// A bug that uses the replay-loop index i=1 would read
-	// futureWithdrawals[2]={cred:500} → 1500, failing this assertion.
-	const want uint64 = 1000
+	// futureWithdrawals[1]={cred:900} → 1900, failing this assertion.
+	const want uint64 = 1500
 	if got != want {
 		t.Errorf("replay adjusted balance: got %d, want %d", got, want)
 	}
+}
+
+func TestHarnessAdjustRewardBalancesPreservesCredentialIdentity(t *testing.T) {
+	sm := &recordingStateManager{MockStateManager: NewMockStateManager()}
+	h := NewHarness(sm, HarnessConfig{})
+	hash := common.NewBlake2b224(make([]byte, 28))
+	keyAccount := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptAccount := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	h.finalStateBalances = map[ledger.RewardAccountKey]uint64{
+		scriptAccount: 2,
+	}
+	h.futureWithdrawals = []map[ledger.RewardAccountKey]uint64{
+		{keyAccount: 3},
+		{},
+	}
+
+	h.adjustRewardBalances(0, VectorEvent{Type: EventTypeTransaction})
+
+	require.Len(t, sm.setRewardAccountBalanceCalls, 1)
+	assert.Equal(t, uint64(3), sm.setRewardAccountBalanceCalls[0][keyAccount])
+	assert.Equal(
+		t,
+		uint64(2),
+		sm.setRewardAccountBalanceCalls[0][scriptAccount],
+	)
+	assert.Empty(t, sm.setRewardBalancesCalls)
+}
+
+func TestMockStateManagerRewardAdjustmentPreservesRegistrationState(
+	t *testing.T,
+) {
+	sm := NewMockStateManager()
+	currentCredential := common.Credential{
+		CredType: common.CredentialTypeAddrKeyHash,
+		Credential: common.NewBlake2b224(
+			append(make([]byte, 27), byte(1)),
+		),
+	}
+	futureCredential := common.Credential{
+		CredType: common.CredentialTypeAddrKeyHash,
+		Credential: common.NewBlake2b224(
+			append(make([]byte, 27), byte(2)),
+		),
+	}
+	currentKey := ledger.NewRewardAccountKey(currentCredential)
+	futureKey := ledger.NewRewardAccountKey(futureCredential)
+	sm.stakeRegistrations[currentKey] = 0
+	sm.rewardAccounts[currentKey] = 0
+	sm.govState.RegisterStakeCredential(currentCredential)
+
+	sm.SetRewardAccountBalances(map[ledger.RewardAccountKey]uint64{
+		futureKey: 9,
+	})
+
+	state := sm.GetStateProvider()
+	assert.True(t, state.IsRewardAccountRegistered(currentCredential))
+	currentBalance, err := state.RewardAccountBalance(currentCredential)
+	require.NoError(t, err)
+	require.NotNil(t, currentBalance)
+	assert.Zero(t, *currentBalance)
+	assert.False(t, state.IsRewardAccountRegistered(futureCredential))
+	futureBalance, err := state.RewardAccountBalance(futureCredential)
+	require.NoError(t, err)
+	assert.Nil(t, futureBalance)
+
+	sm.SetRewardAccountBalances(map[ledger.RewardAccountKey]uint64{
+		currentKey: 3,
+		futureKey:  9,
+	})
+
+	state = sm.GetStateProvider()
+	currentBalance, err = state.RewardAccountBalance(currentCredential)
+	require.NoError(t, err)
+	require.NotNil(t, currentBalance)
+	assert.Equal(t, uint64(3), *currentBalance)
+	assert.False(t, state.IsRewardAccountRegistered(futureCredential))
+}
+
+func TestMockStateManagerLoadsLegacyStakeRegistrationAsRewardAccount(
+	t *testing.T,
+) {
+	hash := common.NewBlake2b224(append(make([]byte, 27), byte(3)))
+	sm := NewMockStateManager()
+	require.NoError(t, sm.LoadInitialState(&ParsedInitialState{
+		StakeRegistrations: map[common.Blake2b224]bool{hash: true},
+		RewardAccounts:     map[common.Blake2b224]uint64{hash: 7},
+	}, nil))
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+
+	state := sm.GetStateProvider()
+	assert.True(t, state.IsRewardAccountRegistered(credential))
+	balance, err := state.RewardAccountBalance(credential)
+	require.NoError(t, err)
+	require.NotNil(t, balance)
+	assert.Equal(t, uint64(7), *balance)
+}
+
+func TestMockStateManagerScriptRegistrationPreservesIdentity(t *testing.T) {
+	hash := common.NewBlake2b224(append(make([]byte, 27), byte(4)))
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	sm := NewMockStateManager()
+	sm.processCertificate(&common.StakeRegistrationCertificate{
+		StakeCredential: scriptCredential,
+	})
+
+	state := sm.GetStateProvider()
+	assert.True(t, state.IsRewardAccountRegistered(scriptCredential))
+	assert.False(t, state.IsRewardAccountRegistered(keyCredential))
+	assert.True(t, state.IsStakeCredentialRegistered(scriptCredential))
+	assert.False(t, state.IsStakeCredentialRegistered(keyCredential))
+}
+
+func TestValidatorStakeRegistrationPreservesCredentialIdentity(t *testing.T) {
+	hash := common.NewBlake2b224(append(make([]byte, 27), byte(6)))
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	govState := NewGovernanceState()
+	govState.RegisterStakeCredential(scriptCredential)
+	validator := NewValidator()
+
+	require.NoError(t, validator.validateCertificate(
+		&common.StakeRegistrationCertificate{
+			StakeCredential: keyCredential,
+		},
+		govState,
+		map[ledger.RewardAccountKey]bool{},
+	))
+	require.Error(t, validator.validateCertificate(
+		&common.StakeRegistrationCertificate{
+			StakeCredential: scriptCredential,
+		},
+		govState,
+		map[ledger.RewardAccountKey]bool{},
+	))
+}
+
+func TestMockStateManagerDRepDelegationPreservesCredentialIdentity(
+	t *testing.T,
+) {
+	hash := common.NewBlake2b224(append(make([]byte, 27), byte(5)))
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	sm := NewMockStateManager()
+	for _, credential := range []common.Credential{
+		keyCredential,
+		scriptCredential,
+	} {
+		sm.processCertificate(&common.StakeRegistrationCertificate{
+			StakeCredential: credential,
+		})
+	}
+	sm.processCertificate(&common.VoteDelegationCertificate{
+		CertType:        uint(common.CertificateTypeVoteDelegation),
+		StakeCredential: keyCredential,
+		Drep:            common.Drep{Type: common.DrepTypeAbstain},
+	})
+	sm.processCertificate(&common.VoteDelegationCertificate{
+		CertType:        uint(common.CertificateTypeVoteDelegation),
+		StakeCredential: scriptCredential,
+		Drep:            common.Drep{Type: common.DrepTypeNoConfidence},
+	})
+
+	state := sm.buildLedgerState()
+	keyDelegation, err := state.DRepDelegation(keyCredential)
+	require.NoError(t, err)
+	require.NotNil(t, keyDelegation)
+	assert.Equal(t, common.DrepTypeAbstain, keyDelegation.Type)
+	scriptDelegation, err := state.DRepDelegation(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptDelegation)
+	assert.Equal(t, common.DrepTypeNoConfidence, scriptDelegation.Type)
+
+	sm.deregisterStakeCredential(keyCredential)
+	state = sm.buildLedgerState()
+	assert.False(t, state.IsStakeCredentialRegistered(keyCredential))
+	assert.True(t, state.IsStakeCredentialRegistered(scriptCredential))
+	keyDelegation, err = state.DRepDelegation(keyCredential)
+	require.NoError(t, err)
+	assert.Nil(t, keyDelegation)
+	scriptDelegation, err = state.DRepDelegation(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptDelegation)
+	assert.Equal(t, common.DrepTypeNoConfidence, scriptDelegation.Type)
 }
 
 // TestHarnessRollbackCachePopulatedByBothPaths guards against the

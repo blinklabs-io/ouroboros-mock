@@ -25,6 +25,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
 // Harness runs conformance test vectors against a StateManager implementation.
@@ -55,10 +56,10 @@ type Harness struct {
 
 	// futureWithdrawals contains cumulative withdrawals from each event to end.
 	// Used to compute accurate reward balance at each transaction.
-	futureWithdrawals []map[common.Blake2b224]uint64
+	futureWithdrawals []map[ledger.RewardAccountKey]uint64
 
 	// finalStateBalances contains reward balances from the final state.
-	finalStateBalances map[common.Blake2b224]uint64
+	finalStateBalances map[ledger.RewardAccountKey]uint64
 
 	// epochLength is the number of slots per epoch from the vector config.
 	epochLength uint64
@@ -697,37 +698,47 @@ func (h *Harness) adjustRewardBalances(eventIdx int, event VectorEvent) {
 	if event.Type != EventTypeTransaction {
 		return
 	}
-	if len(h.finalStateBalances) == 0 {
+	if eventIdx >= len(h.futureWithdrawals) {
 		return
 	}
-	if eventIdx+1 >= len(h.futureWithdrawals) {
+	future := h.futureWithdrawals[eventIdx]
+	if len(h.finalStateBalances) == 0 && len(future) == 0 {
 		return
 	}
-	future := h.futureWithdrawals[eventIdx+1]
-	adjusted := make(map[common.Blake2b224]uint64, len(h.finalStateBalances))
+	adjusted := make(
+		map[ledger.RewardAccountKey]uint64,
+		len(h.finalStateBalances)+len(future),
+	)
 	for cred, balance := range h.finalStateBalances {
-		adjusted[cred] = balance + future[cred]
+		adjusted[cred] = balance
 	}
-	h.stateManager.SetRewardBalances(adjusted)
+	for cred, balance := range future {
+		adjusted[cred] += balance
+	}
+	if setter, ok := h.stateManager.(RewardAccountBalanceSetter); ok {
+		setter.SetRewardAccountBalances(adjusted)
+		return
+	}
+	h.stateManager.SetRewardBalances(rewardBalancesByHash(adjusted))
 }
 
 // computeFutureWithdrawals computes cumulative withdrawals from each TX index to the end.
 // Returns a slice where futureWithdrawals[i] contains the sum of successful withdrawals
 // from events[i] to the end (inclusive). This allows computing balance at TX i as:
-// balance_at_i = final_state_balance + futureWithdrawals[i+1]
+// balance_at_i = final_state_balance + futureWithdrawals[i]
 func (h *Harness) computeFutureWithdrawals(
 	events []VectorEvent,
-) []map[common.Blake2b224]uint64 {
+) []map[ledger.RewardAccountKey]uint64 {
 	n := len(events)
-	result := make([]map[common.Blake2b224]uint64, n+1)
+	result := make([]map[ledger.RewardAccountKey]uint64, n+1)
 
 	// Initialize the last entry (after all events) to empty
-	result[n] = make(map[common.Blake2b224]uint64)
+	result[n] = make(map[ledger.RewardAccountKey]uint64)
 
 	// Work backwards from the end
 	for i := n - 1; i >= 0; i-- {
 		// Copy previous (next in order) cumulative
-		result[i] = make(map[common.Blake2b224]uint64)
+		result[i] = make(map[ledger.RewardAccountKey]uint64)
 		maps.Copy(result[i], result[i+1])
 
 		event := events[i]
@@ -747,15 +758,19 @@ func (h *Harness) computeFutureWithdrawals(
 		}
 
 		for addr, amount := range tx.Withdrawals() {
-			if amount == nil {
+			if addr == nil || amount == nil {
 				continue
 			}
 			withdrawAmount := amount.Uint64()
 			if withdrawAmount == 0 {
 				continue
 			}
-			credHash := addr.StakeKeyHash()
-			result[i][credHash] += withdrawAmount
+			credential, ok := addr.StakeCredential()
+			if !ok {
+				continue
+			}
+			accountKey := ledger.NewRewardAccountKey(credential)
+			result[i][accountKey] += withdrawAmount
 		}
 	}
 
@@ -767,8 +782,8 @@ func (h *Harness) computeFutureWithdrawals(
 // Structure: final_state[3][1][0][2][0][0] = stake credentials map
 func extractFinalStateBalances(
 	finalState cbor.RawMessage,
-) map[common.Blake2b224]uint64 {
-	result := make(map[common.Blake2b224]uint64)
+) map[ledger.RewardAccountKey]uint64 {
+	result := make(map[ledger.RewardAccountKey]uint64)
 
 	// Navigate: final_state[3] = begin_epoch_state
 	var stateArr []cbor.RawMessage
@@ -830,9 +845,29 @@ func extractFinalStateBalances(
 
 	for _, entry := range entries {
 		credHash := common.NewBlake2b224(entry.Hash)
-		result[credHash] = entry.Balance
+		result[ledger.RewardAccountKey{
+			CredType:   uint(entry.CredType),
+			Credential: credHash,
+		}] = entry.Balance
 	}
 
+	return result
+}
+
+// rewardBalancesByHash converts full reward-account identities for legacy
+// StateManager implementations. If both credential types carry the same hash,
+// the key-hash credential wins deterministically.
+func rewardBalancesByHash(
+	balances map[ledger.RewardAccountKey]uint64,
+) map[common.Blake2b224]uint64 {
+	result := make(map[common.Blake2b224]uint64, len(balances))
+	for credential, balance := range balances {
+		_, exists := result[credential.Credential]
+		if !exists ||
+			credential.CredType == common.CredentialTypeAddrKeyHash {
+			result[credential.Credential] = balance
+		}
+	}
 	return result
 }
 
@@ -922,64 +957,18 @@ func parseStakeCredEntry(data []byte, pos int) (*stakeCredEntry, int) {
 		return nil, pos
 	}
 
-	// Parse value (array: [rewards, deposit, drep_delegatee, pool_delegatee])
-	if pos >= len(data) {
+	// Decode the account value independently after manually parsing the
+	// non-hashable credential key. This supports both the vendored UMap layout
+	// and the modern Conway AccountState layout.
+	var accountValue cbor.Value
+	consumed, err := cbor.Decode(data[pos:], &accountValue)
+	if err != nil || consumed <= 0 {
+		return nil, skipCborItem(data, pos)
+	}
+	pos += consumed
+	balance, registered := extractRewardAccountBalance(accountValue.Value())
+	if !registered {
 		return nil, pos
-	}
-	if data[pos]&0xe0 != 0x80 {
-		pos = skipCborItem(data, pos)
-		return nil, pos
-	}
-	valArrayLen := int(data[pos] & 0x1f)
-	pos++
-	if valArrayLen < 1 {
-		return nil, pos
-	}
-
-	// First element is rewards: [[epoch, balance], ...]
-	if pos >= len(data) {
-		return nil, pos
-	}
-	if data[pos]&0xe0 != 0x80 {
-		for range valArrayLen {
-			pos = skipCborItem(data, pos)
-		}
-		return nil, pos
-	}
-	rewardsLen := int(data[pos] & 0x1f)
-	pos++
-
-	var balance uint64
-	if rewardsLen > 0 {
-		// Parse first reward entry [epoch, balance]
-		if pos >= len(data) {
-			return nil, pos
-		}
-		if data[pos]&0xe0 == 0x80 {
-			rewardEntryLen := int(data[pos] & 0x1f)
-			pos++
-			if rewardEntryLen >= 2 {
-				// Skip epoch
-				_, n := parseCborUint(data, pos)
-				pos += n
-				// Parse balance
-				balance, n = parseCborUint(data, pos)
-				pos += n
-				// Skip remaining elements
-				for k := 2; k < rewardEntryLen; k++ {
-					pos = skipCborItem(data, pos)
-				}
-			}
-		}
-		// Skip remaining reward entries
-		for j := 1; j < rewardsLen; j++ {
-			pos = skipCborItem(data, pos)
-		}
-	}
-
-	// Skip remaining value elements (deposit, drep_delegatee, pool_delegatee)
-	for j := 1; j < valArrayLen; j++ {
-		pos = skipCborItem(data, pos)
 	}
 
 	return &stakeCredEntry{

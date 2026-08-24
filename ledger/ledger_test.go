@@ -2065,6 +2065,149 @@ func TestLedgerStateBuilder_WithRewardSnapshot(t *testing.T) {
 	assert.Equal(t, uint64(1000000), result.TotalActiveStake)
 }
 
+func TestLedgerStateBuilder_RewardAccountCredentialIdentity(t *testing.T) {
+	hash := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x42}, 28))
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithRewardAccountCredentialBalances(
+			map[ledger.RewardAccountKey]uint64{
+				ledger.NewRewardAccountKey(keyCredential):    11,
+				ledger.NewRewardAccountKey(scriptCredential): 22,
+			},
+		).
+		Build()
+
+	keyBalance, err := ls.RewardAccountBalance(keyCredential)
+	require.NoError(t, err)
+	require.NotNil(t, keyBalance)
+	assert.Equal(t, uint64(11), *keyBalance)
+
+	scriptBalance, err := ls.RewardAccountBalance(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptBalance)
+	assert.Equal(t, uint64(22), *scriptBalance)
+}
+
+func TestLedgerStateBuilder_RewardAccountRegistrationCredentialIdentity(
+	t *testing.T,
+) {
+	hash := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x24}, 28))
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithRewardAccountCredentialBalance(keyCredential, 0).
+		Build()
+
+	assert.True(t, ls.IsRewardAccountRegistered(keyCredential))
+	assert.False(t, ls.IsRewardAccountRegistered(scriptCredential))
+}
+
+func TestLedgerStateBuilder_StakeRegistrationPreservesCredentialType(
+	t *testing.T,
+) {
+	hash := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x23}, 28))
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+
+	ls := ledger.NewLedgerStateBuilder().
+		WithRewardAccountCredentialBalance(scriptCredential, 100).
+		Build()
+
+	assert.True(t, ls.IsStakeCredentialRegistered(scriptCredential))
+	assert.False(t, ls.IsStakeCredentialRegistered(keyCredential))
+}
+
+func TestLedgerStateBuilder_LegacyStakeRegistrationCreatesRewardAccount(
+	t *testing.T,
+) {
+	hash := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x25}, 28))
+	credential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	tests := []struct {
+		name  string
+		build func() *ledger.MockLedgerState
+	}{
+		{
+			name: "single registration",
+			build: func() *ledger.MockLedgerState {
+				return ledger.NewLedgerStateBuilder().
+					WithStakeCredentialRegistered(hash, true).
+					Build()
+			},
+		},
+		{
+			name: "registration map",
+			build: func() *ledger.MockLedgerState {
+				return ledger.NewLedgerStateBuilder().
+					WithStakeCredentials(map[lcommon.Blake2b224]bool{
+						hash: true,
+					}).
+					Build()
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ls := test.build()
+			assert.True(t, ls.IsRewardAccountRegistered(credential))
+			balance, err := ls.RewardAccountBalance(credential)
+			require.NoError(t, err)
+			require.NotNil(t, balance)
+			assert.Zero(t, *balance)
+		})
+	}
+}
+
+func TestLedgerStateBuilder_StakeRegistrationCertificatePreservesIdentity(
+	t *testing.T,
+) {
+	hash := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x26}, 28))
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	ls := ledger.NewLedgerStateBuilder().
+		WithStakeRegistrations([]lcommon.StakeRegistrationCertificate{
+			{StakeCredential: scriptCredential},
+		}).
+		Build()
+
+	assert.True(t, ls.IsRewardAccountRegistered(scriptCredential))
+	assert.False(t, ls.IsRewardAccountRegistered(keyCredential))
+	balance, err := ls.RewardAccountBalance(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, balance)
+	assert.Zero(t, *balance)
+}
+
 // =============================================================================
 // WithConstitutionValue Tests
 // =============================================================================

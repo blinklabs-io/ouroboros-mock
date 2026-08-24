@@ -18,10 +18,154 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
+
+func TestParseDelegationStatePreservesRewardCredentialIdentity(t *testing.T) {
+	hash := common.NewBlake2b224(make([]byte, 28))
+	keyCredential := stakeCredential{
+		Type: common.CredentialTypeAddrKeyHash,
+		Hash: hash,
+	}
+	scriptCredential := stakeCredential{
+		Type: common.CredentialTypeScriptHash,
+		Hash: hash,
+	}
+	state := &ParsedInitialState{
+		StakeRegistrations: make(map[common.Blake2b224]bool),
+		RewardAccounts:     make(map[common.Blake2b224]uint64),
+		RewardAccountBalances: make(
+			map[ledger.RewardAccountKey]uint64,
+		),
+		DRepDelegations: make(map[common.Blake2b224]common.Drep),
+		DRepDelegationsByCredential: make(
+			map[ledger.RewardAccountKey]common.Drep,
+		),
+	}
+	rewardValue := func(balance uint64, drepType int) []any {
+		return []any{
+			[]any{[]any{balance, uint64(2)}},
+			[]any{},
+			[]any{},
+			[]any{[]any{uint64(drepType)}},
+		}
+	}
+	delegationState := []any{
+		map[any]any{
+			keyCredential: rewardValue(
+				11,
+				common.DrepTypeAbstain,
+			),
+			scriptCredential: rewardValue(
+				22,
+				common.DrepTypeNoConfidence,
+			),
+		},
+	}
+
+	require.NoError(t, parseDelegationState(state, delegationState))
+	require.Len(t, state.RewardAccountBalances, 2)
+	require.Equal(
+		t,
+		uint64(11),
+		state.RewardAccountBalances[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}],
+	)
+	require.Equal(
+		t,
+		uint64(22),
+		state.RewardAccountBalances[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: hash,
+		}],
+	)
+	require.True(
+		t,
+		state.StakeRegistrationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}],
+	)
+	require.True(
+		t,
+		state.StakeRegistrationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: hash,
+		}],
+	)
+	require.Equal(t, uint64(11), state.RewardAccounts[hash])
+	require.Equal(
+		t,
+		common.DrepTypeAbstain,
+		state.DRepDelegationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}].Type,
+	)
+	require.Equal(
+		t,
+		common.DrepTypeNoConfidence,
+		state.DRepDelegationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: hash,
+		}].Type,
+	)
+	require.Equal(
+		t,
+		common.DrepTypeAbstain,
+		state.DRepDelegations[hash].Type,
+	)
+}
+
+func TestParseStakeCredentialMapRewardAccountLayouts(t *testing.T) {
+	hash := common.NewBlake2b224(make([]byte, 28))
+	tests := []struct {
+		name    string
+		account []any
+	}{
+		{
+			name: "vendored legacy UMap",
+			account: []any{
+				[]any{[]any{uint64(11), uint64(2)}},
+				[]any{},
+				[]any{},
+				[]any{},
+			},
+		},
+		{
+			name: "modern Conway account state",
+			account: []any{
+				uint64(11),
+				uint64(2),
+				[]any{},
+				[]any{},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encodedAccount, err := cbor.Encode(test.account)
+			require.NoError(t, err)
+			encodedMap := []byte{0xa1, 0x82, 0x00, 0x58, 0x1c}
+			encodedMap = append(encodedMap, hash.Bytes()...)
+			encodedMap = append(encodedMap, encodedAccount...)
+
+			entries := parseStakeCredentialMap(encodedMap)
+
+			require.Len(t, entries, 1)
+			require.Equal(t, uint64(11), entries[0].Balance)
+			require.Equal(t, uint64(0), entries[0].CredType)
+			require.Equal(t, hash.Bytes(), entries[0].Hash)
+		})
+	}
+}
 
 func TestExtractDRepDelegationPreservesType(t *testing.T) {
 	tests := []struct {
@@ -38,6 +182,13 @@ func TestExtractDRepDelegationPreservesType(t *testing.T) {
 			name:     "always no confidence",
 			raw:      []any{uint64(common.DrepTypeNoConfidence)},
 			expected: common.DrepTypeNoConfidence,
+		},
+		{
+			name: "wrapped always abstain",
+			raw: []any{
+				[]any{uint64(common.DrepTypeAbstain)},
+			},
+			expected: common.DrepTypeAbstain,
 		},
 	}
 
