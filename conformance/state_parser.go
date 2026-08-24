@@ -69,7 +69,12 @@ type ParsedInitialState struct {
 
 	// DRepDelegations maps stake credentials to their delegated DRep, including
 	// the special always-abstain and always-no-confidence DReps.
+	// Deprecated: use DRepDelegationsByCredential when credential type matters.
 	DRepDelegations map[common.Blake2b224]common.Drep
+
+	// DRepDelegationsByCredential maps full stake credential identities to
+	// their delegated DRep.
+	DRepDelegationsByCredential map[mockledger.RewardAccountKey]common.Drep
 
 	// HotKeyAuthorizations maps cold keys to hot keys for committee members.
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
@@ -152,9 +157,12 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		PoolRegistrations:     make(map[common.Blake2b224]bool),
 		CommitteeMembers:      make(map[common.Blake2b224]uint64),
 		DRepDelegations:       make(map[common.Blake2b224]common.Drep),
-		HotKeyAuthorizations:  make(map[common.Blake2b224]common.Blake2b224),
-		Proposals:             make(map[string]GovActionInfo),
-		CostModels:            make(map[uint][]int64),
+		DRepDelegationsByCredential: make(
+			map[mockledger.RewardAccountKey]common.Drep,
+		),
+		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
+		Proposals:            make(map[string]GovActionInfo),
+		CostModels:           make(map[uint][]int64),
 	}
 
 	// Extract current epoch from stateArr[0]
@@ -594,6 +602,7 @@ func parseDelegationState(
 				continue
 			}
 			state.StakeRegistrations[cred.Credential] = true
+			accountKey := mockledger.NewRewardAccountKey(*cred)
 
 			// Current AccountState values place the DRep delegation fourth.
 			// Retain the older third-position fallback for existing fixtures.
@@ -603,13 +612,21 @@ func parseDelegationState(
 						continue
 					}
 					if drep := extractDRepDelegation(vArr[idx]); drep != nil {
-						state.DRepDelegations[cred.Credential] = *drep
+						if state.DRepDelegationsByCredential == nil {
+							state.DRepDelegationsByCredential = make(
+								map[mockledger.RewardAccountKey]common.Drep,
+							)
+						}
+						state.DRepDelegationsByCredential[accountKey] = *drep
+						if _, exists := state.DRepDelegations[cred.Credential]; !exists ||
+							cred.CredType == common.CredentialTypeAddrKeyHash {
+							state.DRepDelegations[cred.Credential] = *drep
+						}
 						break
 					}
 				}
 			}
 
-			accountKey := mockledger.NewRewardAccountKey(*cred)
 			state.RewardAccountBalances[accountKey] = balance
 			// Keep the legacy hash-only view deterministic: prefer a key-hash
 			// credential if both credential types carry the same hash.
@@ -676,6 +693,12 @@ func extractDRepDelegation(raw any) *common.Drep {
 	}
 	items, ok := raw.([]any)
 	if !ok || len(items) != 1 {
+		return nil
+	}
+	if wrapped, ok := items[0].([]any); ok {
+		items = wrapped
+	}
+	if len(items) != 1 {
 		return nil
 	}
 	drepType, ok := items[0].(uint64)

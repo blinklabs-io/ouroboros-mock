@@ -76,6 +76,8 @@ Called once per vector, before any events are processed. Your job is to hydrate 
 | `CommitteeMembers` | `map[Blake2b224]uint64` | Cold key → expiry epoch |
 | `HotKeyAuthorizations` | `map[Blake2b224]Blake2b224` | Cold key → hot key |
 | `DRepRegistrations` | `[]Blake2b224` | Registered DRep credential hashes |
+| `DRepDelegationsByCredential` | `map[ledger.RewardAccountKey]common.Drep` | Vote delegations keyed by full stake credential identity |
+| `DRepDelegations` | `map[Blake2b224]common.Drep` | Deprecated hash-only compatibility view |
 | `Proposals` | `map[string]GovActionInfo` | Active governance proposals |
 | `ProposalRoots` | `ProposalRoots` | Last-enacted root for each action type |
 | `Constitution` | `*ConstitutionInfo` | Current constitution (may be nil) |
@@ -154,7 +156,7 @@ The harness calls a reward balance setter before each transaction with the
 pre-transaction balances needed for withdrawal validation. The adjustment
 accounts for the current and future withdrawals within the same vector:
 
-```
+```text
 adjusted[cred] = finalStateBalance[cred] + sum(withdrawals[cred] from tx onward)
 ```
 

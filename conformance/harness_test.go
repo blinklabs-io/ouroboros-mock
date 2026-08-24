@@ -820,6 +820,59 @@ func TestMockStateManagerScriptRegistrationPreservesIdentity(t *testing.T) {
 	assert.False(t, state.IsRewardAccountRegistered(keyCredential))
 }
 
+func TestMockStateManagerDRepDelegationPreservesCredentialIdentity(
+	t *testing.T,
+) {
+	hash := common.NewBlake2b224(append(make([]byte, 27), byte(5)))
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	sm := NewMockStateManager()
+	for _, credential := range []common.Credential{
+		keyCredential,
+		scriptCredential,
+	} {
+		sm.processCertificate(&common.StakeRegistrationCertificate{
+			StakeCredential: credential,
+		})
+	}
+	sm.processCertificate(&common.VoteDelegationCertificate{
+		CertType:        uint(common.CertificateTypeVoteDelegation),
+		StakeCredential: keyCredential,
+		Drep:            common.Drep{Type: common.DrepTypeAbstain},
+	})
+	sm.processCertificate(&common.VoteDelegationCertificate{
+		CertType:        uint(common.CertificateTypeVoteDelegation),
+		StakeCredential: scriptCredential,
+		Drep:            common.Drep{Type: common.DrepTypeNoConfidence},
+	})
+
+	state := sm.buildLedgerState()
+	keyDelegation, err := state.DRepDelegation(keyCredential)
+	require.NoError(t, err)
+	require.NotNil(t, keyDelegation)
+	assert.Equal(t, common.DrepTypeAbstain, keyDelegation.Type)
+	scriptDelegation, err := state.DRepDelegation(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptDelegation)
+	assert.Equal(t, common.DrepTypeNoConfidence, scriptDelegation.Type)
+
+	sm.deregisterStakeCredential(keyCredential)
+	state = sm.buildLedgerState()
+	keyDelegation, err = state.DRepDelegation(keyCredential)
+	require.NoError(t, err)
+	assert.Nil(t, keyDelegation)
+	scriptDelegation, err = state.DRepDelegation(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptDelegation)
+	assert.Equal(t, common.DrepTypeNoConfidence, scriptDelegation.Type)
+}
+
 // TestHarnessRollbackCachePopulatedByBothPaths guards against the
 // runVector / runVectorWithResult parity bug: both vector-execution
 // entry points must populate the rollback cache (initialState and the

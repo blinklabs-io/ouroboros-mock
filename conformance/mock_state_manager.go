@@ -391,8 +391,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			m.stakeRegistrations[credential.Credential] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
-			m.govState.DRepDelegations[credential.Credential] = drepDelegation(
-				regCert.Drep,
+			m.govState.SetDRepDelegation(
+				credential,
+				drepDelegation(regCert.Drep),
 			)
 		}
 
@@ -403,8 +404,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			m.stakeRegistrations[credential.Credential] = 0
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
-			m.govState.DRepDelegations[credential.Credential] = drepDelegation(
-				regCert.Drep,
+			m.govState.SetDRepDelegation(
+				credential,
+				drepDelegation(regCert.Drep),
 			)
 		}
 
@@ -415,17 +417,17 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 
 	case common.CertificateTypeVoteDelegation:
 		if voteCert, ok := cert.(*common.VoteDelegationCertificate); ok {
-			credential := voteCert.StakeCredential.Credential
-			m.govState.DRepDelegations[credential] = drepDelegation(
-				voteCert.Drep,
+			m.govState.SetDRepDelegation(
+				voteCert.StakeCredential,
+				drepDelegation(voteCert.Drep),
 			)
 		}
 
 	case common.CertificateTypeStakeVoteDelegation:
 		if voteCert, ok := cert.(*common.StakeVoteDelegationCertificate); ok {
-			credential := voteCert.StakeCredential.Credential
-			m.govState.DRepDelegations[credential] = drepDelegation(
-				voteCert.Drep,
+			m.govState.SetDRepDelegation(
+				voteCert.StakeCredential,
+				drepDelegation(voteCert.Drep),
 			)
 		}
 
@@ -496,7 +498,6 @@ func (m *MockStateManager) deregisterStakeCredential(
 		m.stakeRegistrations[credential.Credential] = balance
 	} else {
 		delete(m.stakeRegistrations, credential.Credential)
-		delete(m.govState.DRepDelegations, credential.Credential)
 	}
 	m.govState.DeregisterStakeCredential(credential)
 }
@@ -851,10 +852,14 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 			return nil, nil
 		},
 	)
-	drepDelegations := m.govState.DRepDelegations
+	drepDelegations := m.govState.DRepDelegationsByCredential
+	legacyDRepDelegations := m.govState.DRepDelegations
 	builder.WithDRepDelegation(
 		func(cred common.Credential) (*common.Drep, error) {
-			delegation, ok := drepDelegations[cred.Credential]
+			delegation, ok := drepDelegations[ledger.NewRewardAccountKey(cred)]
+			if !ok && len(drepDelegations) == 0 {
+				delegation, ok = legacyDRepDelegations[cred.Credential]
+			}
 			if !ok {
 				return nil, nil
 			}

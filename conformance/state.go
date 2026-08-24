@@ -88,7 +88,12 @@ type GovernanceState struct {
 
 	// DRepDelegations maps stake credentials to their delegated DRep, including
 	// the special always-abstain and always-no-confidence DReps.
+	// Deprecated: use DRepDelegationsByCredential when credential type matters.
 	DRepDelegations map[common.Blake2b224]common.Drep
+
+	// DRepDelegationsByCredential maps full stake credential identities to
+	// their delegated DRep.
+	DRepDelegationsByCredential map[ledger.RewardAccountKey]common.Drep
 
 	// HotKeyAuthorizations maps cold keys to hot keys for committee members.
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
@@ -141,9 +146,12 @@ type ProposalState struct {
 // NewGovernanceState creates a new empty governance state.
 func NewGovernanceState() *GovernanceState {
 	return &GovernanceState{
-		CommitteeMembers:      make(map[common.Blake2b224]*CommitteeMemberInfo),
-		DRepRegistrations:     make(map[common.Blake2b224]bool),
-		DRepDelegations:       make(map[common.Blake2b224]common.Drep),
+		CommitteeMembers:  make(map[common.Blake2b224]*CommitteeMemberInfo),
+		DRepRegistrations: make(map[common.Blake2b224]bool),
+		DRepDelegations:   make(map[common.Blake2b224]common.Drep),
+		DRepDelegationsByCredential: make(
+			map[ledger.RewardAccountKey]common.Drep,
+		),
 		HotKeyAuthorizations:  make(map[common.Blake2b224]common.Blake2b224),
 		StakeRegistrations:    make(map[common.Blake2b224]bool),
 		PoolRegistrations:     make(map[common.Blake2b224]bool),
@@ -164,6 +172,9 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.HotKeyAuthorizations = make(map[common.Blake2b224]common.Blake2b224)
 	g.DRepRegistrations = make(map[common.Blake2b224]bool)
 	g.DRepDelegations = make(map[common.Blake2b224]common.Drep)
+	g.DRepDelegationsByCredential = make(
+		map[ledger.RewardAccountKey]common.Drep,
+	)
 	g.StakeRegistrations = make(map[common.Blake2b224]bool)
 	g.PoolRegistrations = make(map[common.Blake2b224]bool)
 	g.PoolRetirements = make(map[common.Blake2b224]uint64)
@@ -195,7 +206,22 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	for _, drepHash := range state.DRepRegistrations {
 		g.DRepRegistrations[drepHash] = true
 	}
-	maps.Copy(g.DRepDelegations, state.DRepDelegations)
+	if len(state.DRepDelegationsByCredential) > 0 {
+		maps.Copy(
+			g.DRepDelegationsByCredential,
+			state.DRepDelegationsByCredential,
+		)
+	} else {
+		for credential, delegation := range state.DRepDelegations {
+			g.DRepDelegationsByCredential[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: credential,
+			}] = delegation
+		}
+	}
+	g.DRepDelegations = drepDelegationsByHash(
+		g.DRepDelegationsByCredential,
+	)
 
 	// Load stake registrations
 	maps.Copy(g.StakeRegistrations, state.StakeRegistrations)
@@ -317,6 +343,23 @@ func (g *GovernanceState) RegisterStakeCredential(
 	}
 }
 
+// SetDRepDelegation records a vote delegation for one full stake credential.
+func (g *GovernanceState) SetDRepDelegation(
+	credential common.Credential,
+	delegation common.Drep,
+) {
+	if g.DRepDelegationsByCredential == nil {
+		g.DRepDelegationsByCredential = make(
+			map[ledger.RewardAccountKey]common.Drep,
+		)
+	}
+	credentialKey := ledger.NewRewardAccountKey(credential)
+	g.DRepDelegationsByCredential[credentialKey] = delegation
+	g.DRepDelegations = drepDelegationsByHash(
+		g.DRepDelegationsByCredential,
+	)
+}
+
 // DeregisterStake deregisters a stake credential.
 func (g *GovernanceState) DeregisterStake(hash common.Blake2b224) {
 	delete(g.StakeRegistrations, hash)
@@ -326,6 +369,14 @@ func (g *GovernanceState) DeregisterStake(hash common.Blake2b224) {
 			delete(g.RewardAccountBalances, credential)
 		}
 	}
+	for credential := range g.DRepDelegationsByCredential {
+		if credential.Credential == hash {
+			delete(g.DRepDelegationsByCredential, credential)
+		}
+	}
+	g.DRepDelegations = drepDelegationsByHash(
+		g.DRepDelegationsByCredential,
+	)
 }
 
 // DeregisterStakeCredential deregisters one full stake credential without
@@ -334,6 +385,13 @@ func (g *GovernanceState) DeregisterStakeCredential(
 	credential common.Credential,
 ) {
 	delete(g.RewardAccountBalances, ledger.NewRewardAccountKey(credential))
+	delete(
+		g.DRepDelegationsByCredential,
+		ledger.NewRewardAccountKey(credential),
+	)
+	g.DRepDelegations = drepDelegationsByHash(
+		g.DRepDelegationsByCredential,
+	)
 	remaining := rewardBalancesByHash(g.RewardAccountBalances)
 	if balance, exists := remaining[credential.Credential]; exists {
 		g.RewardAccounts[credential.Credential] = balance
@@ -341,6 +399,19 @@ func (g *GovernanceState) DeregisterStakeCredential(
 	}
 	delete(g.StakeRegistrations, credential.Credential)
 	delete(g.RewardAccounts, credential.Credential)
+}
+
+func drepDelegationsByHash(
+	delegations map[ledger.RewardAccountKey]common.Drep,
+) map[common.Blake2b224]common.Drep {
+	result := make(map[common.Blake2b224]common.Drep, len(delegations))
+	for credential, delegation := range delegations {
+		_, exists := result[credential.Credential]
+		if !exists || credential.CredType == common.CredentialTypeAddrKeyHash {
+			result[credential.Credential] = delegation
+		}
+	}
+	return result
 }
 
 // RegisterDRep registers a DRep.

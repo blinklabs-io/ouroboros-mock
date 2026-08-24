@@ -36,20 +36,34 @@ func TestParseDelegationStatePreservesRewardCredentialIdentity(t *testing.T) {
 		Hash: hash,
 	}
 	state := &ParsedInitialState{
-		StakeRegistrations:    make(map[common.Blake2b224]bool),
-		RewardAccounts:        make(map[common.Blake2b224]uint64),
-		RewardAccountBalances: make(map[ledger.RewardAccountKey]uint64),
-		DRepDelegations:       make(map[common.Blake2b224]common.Drep),
+		StakeRegistrations: make(map[common.Blake2b224]bool),
+		RewardAccounts:     make(map[common.Blake2b224]uint64),
+		RewardAccountBalances: make(
+			map[ledger.RewardAccountKey]uint64,
+		),
+		DRepDelegations: make(map[common.Blake2b224]common.Drep),
+		DRepDelegationsByCredential: make(
+			map[ledger.RewardAccountKey]common.Drep,
+		),
 	}
-	rewardValue := func(balance uint64) []any {
+	rewardValue := func(balance uint64, drepType int) []any {
 		return []any{
 			[]any{[]any{balance, uint64(2)}},
+			[]any{},
+			[]any{},
+			[]any{[]any{uint64(drepType)}},
 		}
 	}
 	delegationState := []any{
 		map[any]any{
-			keyCredential:    rewardValue(11),
-			scriptCredential: rewardValue(22),
+			keyCredential: rewardValue(
+				11,
+				common.DrepTypeAbstain,
+			),
+			scriptCredential: rewardValue(
+				22,
+				common.DrepTypeNoConfidence,
+			),
 		},
 	}
 
@@ -72,6 +86,27 @@ func TestParseDelegationStatePreservesRewardCredentialIdentity(t *testing.T) {
 		}],
 	)
 	require.Equal(t, uint64(11), state.RewardAccounts[hash])
+	require.Equal(
+		t,
+		common.DrepTypeAbstain,
+		state.DRepDelegationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}].Type,
+	)
+	require.Equal(
+		t,
+		common.DrepTypeNoConfidence,
+		state.DRepDelegationsByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: hash,
+		}].Type,
+	)
+	require.Equal(
+		t,
+		common.DrepTypeAbstain,
+		state.DRepDelegations[hash].Type,
+	)
 }
 
 func TestParseStakeCredentialMapRewardAccountLayouts(t *testing.T) {
@@ -133,6 +168,13 @@ func TestExtractDRepDelegationPreservesType(t *testing.T) {
 			name:     "always no confidence",
 			raw:      []any{uint64(common.DrepTypeNoConfidence)},
 			expected: common.DrepTypeNoConfidence,
+		},
+		{
+			name: "wrapped always abstain",
+			raw: []any{
+				[]any{uint64(common.DrepTypeAbstain)},
+			},
+			expected: common.DrepTypeAbstain,
 		},
 	}
 

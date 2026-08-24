@@ -79,7 +79,7 @@ begin_epoch_state = [
 
 ```
 ledger_state = [
-    cert_state,  ; [0] array[5] — certificates, DReps, committee
+    cert_state,  ; [0] array[3] — certificates, DReps, stake and pool state
     utxo_state,  ; [1] array[4] — UTxOs, deposits, fees, governance
 ]
 ```
@@ -88,17 +88,27 @@ ledger_state = [
 
 ```
 cert_state = [
-    voting_state,  ; [0] [drep_state, committee_state, ...]
-    _deleg_state,  ; [1]
-    _pool_state,   ; [2] — pool registrations / stake distributions
-    _reward_state, ; [3] — deposit map (stake registrations, pool deposits)
-    _stake_state,  ; [4]
+    voting_state,     ; [0] [drep_state, committee_state, ...]
+    pool_state,       ; [1] pool registrations / retirements
+    delegation_state, ; [2] unified stake-credential state
+]
+
+delegation_state = [
+    unified_map_wrapper, ; [0]
+    _future_gen_delegs,  ; [1]
+    _gen_delegs,         ; [2]
+    _instantaneous,      ; [3]
+]
+
+unified_map_wrapper = [
+    reward_accounts, ; [0] map[Credential]AccountState
+    _pointer_map,    ; [1]
 ]
 ```
 
 The harness reads DRep registrations and stake registrations from this subtree:
 - DReps: `initial_state[3][1][0][0][0]`
-- Stake registrations: `initial_state[3][1][0][2][0]`
+- Stake registrations: `initial_state[3][1][0][2][0][0]`
 
 ### utxo\_state (index 3→1→1)
 
@@ -126,7 +136,7 @@ utxo_state = [
 | Current pparams hash | `initial_state[3][1][1][3][3]` |
 | Previous pparams hash | `initial_state[3][1][1][3][4]` |
 | DRep registrations | `initial_state[3][1][0][0][0]` |
-| Stake registrations | `initial_state[3][1][0][2][0]` |
+| Stake registrations | `initial_state[3][1][0][2][0][0]` |
 | Final reward balances | `final_state[3][1][0][2][0][0]` (reward accounts within delegation state) |
 
 ---
