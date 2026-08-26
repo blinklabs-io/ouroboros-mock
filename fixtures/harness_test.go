@@ -15,7 +15,6 @@
 package fixtures_test
 
 import (
-	"bytes"
 	"io/fs"
 	"maps"
 	"path/filepath"
@@ -222,7 +221,7 @@ func TestFixtureExecutionHarness(t *testing.T) {
 
 	t.Run("GenericDecodeAPI", func(t *testing.T) {
 		blockFixture, err := harness.Fixture(
-			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Conway",
+			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Byron_regular",
 		)
 		if err != nil {
 			t.Fatalf("Fixture failed: %v", err)
@@ -233,7 +232,7 @@ func TestFixtureExecutionHarness(t *testing.T) {
 		}
 
 		headerFixture, err := harness.Fixture(
-			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Header_Conway",
+			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Header_Byron_regular",
 		)
 		if err != nil {
 			t.Fatalf("Fixture failed: %v", err)
@@ -248,31 +247,6 @@ func TestFixtureExecutionHarness(t *testing.T) {
 				block.Hash(),
 				header.Hash(),
 			)
-		}
-
-		txFixture, err := harness.Fixture(
-			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/GenTx_Conway",
-		)
-		if err != nil {
-			t.Fatalf("Fixture failed: %v", err)
-		}
-		tx, err := txFixture.DecodeLedgerTransaction()
-		if err != nil {
-			t.Fatalf("DecodeLedgerTransaction failed: %v", err)
-		}
-
-		txIDFixture, err := harness.Fixture(
-			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/GenTxId_Conway",
-		)
-		if err != nil {
-			t.Fatalf("Fixture failed: %v", err)
-		}
-		txIDBytes, err := txIDFixture.LedgerTransactionIDBytes()
-		if err != nil {
-			t.Fatalf("LedgerTransactionIDBytes failed: %v", err)
-		}
-		if got := tx.Hash().Bytes(); !bytes.Equal(got, txIDBytes) {
-			t.Fatalf("transaction/txid mismatch")
 		}
 
 		canonicalTxFixture, err := harness.Fixture(

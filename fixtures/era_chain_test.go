@@ -18,11 +18,21 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
+
+func TestGenerateAlonzoChainRoundTrip(t *testing.T) {
+	assertGeneratedChain(
+		t,
+		fixtures.GenerateAlonzoChain,
+		ledger.BlockTypeAlonzo,
+		alonzo.MinProtocolVersionAlonzo,
+	)
+}
 
 func TestGenerateBabbageChainRoundTrip(t *testing.T) {
 	assertGeneratedChain(
@@ -84,6 +94,11 @@ func TestGeneratedBlockBodySizes(t *testing.T) {
 			name:     "Shelley",
 			generate: fixtures.GenerateShelleyChain,
 			wantSize: 3,
+		},
+		{
+			name:     "Alonzo",
+			generate: fixtures.GenerateAlonzoChain,
+			wantSize: 5,
 		},
 		{
 			name:     "Babbage",
@@ -217,6 +232,8 @@ func assertGeneratedChain(
 
 func protocolMajor(block ledger.Block) uint64 {
 	switch block := block.(type) {
+	case *alonzo.AlonzoBlock:
+		return block.BlockHeader.Body.ProtoMajorVersion
 	case *babbage.BabbageBlock:
 		return block.BlockHeader.Body.ProtoVersion.Major
 	case *shelley.ShelleyBlock:

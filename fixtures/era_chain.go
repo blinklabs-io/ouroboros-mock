@@ -20,10 +20,105 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
+
+// GenerateAlonzoChain builds a connected chain of empty Alonzo blocks using
+// the first Alonzo protocol version.
+func GenerateAlonzoChain(
+	startBlockNumber uint64,
+	prevHash common.Blake2b256,
+	startSlot, slotIncrement uint64,
+	count int,
+) ([]ledger.Block, error) {
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
+	emptyTxsCbor, err := cbor.Encode([]alonzo.AlonzoTransactionBody{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Alonzo tx bodies: %w", err)
+	}
+	emptyWitsCbor, err := cbor.Encode([]alonzo.AlonzoTransactionWitnessSet{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Alonzo witnesses: %w", err)
+	}
+	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Alonzo metadata set: %w", err)
+	}
+	emptyInvalidCbor, err := cbor.Encode(cbor.IndefLengthList{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Alonzo invalid txs: %w", err)
+	}
+	bodyHash := ComputeBlockBodyHash(
+		emptyTxsCbor,
+		emptyWitsCbor,
+		emptyAuxCbor,
+		emptyInvalidCbor,
+	)
+	bodySize := computeBlockBodySize(
+		emptyTxsCbor,
+		emptyWitsCbor,
+		emptyAuxCbor,
+		emptyInvalidCbor,
+	)
+	blocks := make([]ledger.Block, 0, count)
+	currentPrev := prevHash
+	for i := range count {
+		block := &alonzo.AlonzoBlock{
+			BlockHeader: &alonzo.AlonzoBlockHeader{
+				ShelleyBlockHeader: shelley.ShelleyBlockHeader{
+					Body: shelley.ShelleyBlockHeaderBody{
+						BlockNumber: startBlockNumber + uint64(i),
+						Slot:        startSlot + uint64(i)*slotIncrement,
+						PrevHash:    currentPrev,
+						IssuerVkey:  common.IssuerVkey{},
+						VrfKey:      make([]byte, 32),
+						NonceVrf: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						LeaderVrf: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						BlockBodySize:     bodySize,
+						BlockBodyHash:     bodyHash,
+						OpCertHotVkey:     make([]byte, 32),
+						OpCertSignature:   make([]byte, 64),
+						ProtoMajorVersion: alonzo.MinProtocolVersionAlonzo,
+						ProtoMinorVersion: 0,
+					},
+					Signature: make([]byte, 64),
+				},
+			},
+		}
+		blockCbor, err := cbor.Encode(block)
+		if err != nil {
+			return nil, fmt.Errorf("encode Alonzo block %d: %w", i, err)
+		}
+		decoded, err := alonzo.NewAlonzoBlockFromCbor(blockCbor)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"decode generated Alonzo block %d: %w",
+				i,
+				err,
+			)
+		}
+		if !bytes.Equal(decoded.Cbor(), blockCbor) {
+			return nil, fmt.Errorf(
+				"Alonzo block %d Cbor mismatch after round-trip",
+				i,
+			)
+		}
+		blocks = append(blocks, decoded)
+		currentPrev = decoded.Hash()
+	}
+	return blocks, nil
+}
 
 // GenerateBabbageChain builds a connected chain of empty Babbage blocks using
 // the first Babbage protocol version.
@@ -121,7 +216,11 @@ func GenerateBabbageChainWithProtocolVersion(
 		}
 		decoded, err := babbage.NewBabbageBlockFromCbor(blockCbor)
 		if err != nil {
-			return nil, fmt.Errorf("decode generated Babbage block %d: %w", i, err)
+			return nil, fmt.Errorf(
+				"decode generated Babbage block %d: %w",
+				i,
+				err,
+			)
 		}
 		if !bytes.Equal(decoded.Cbor(), blockCbor) {
 			return nil, fmt.Errorf(
@@ -203,7 +302,11 @@ func GenerateShelleyChain(
 		}
 		decoded, err := shelley.NewShelleyBlockFromCbor(blockCbor)
 		if err != nil {
-			return nil, fmt.Errorf("decode generated Shelley block %d: %w", i, err)
+			return nil, fmt.Errorf(
+				"decode generated Shelley block %d: %w",
+				i,
+				err,
+			)
 		}
 		if !bytes.Equal(decoded.Cbor(), blockCbor) {
 			return nil, fmt.Errorf(
