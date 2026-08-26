@@ -69,6 +69,12 @@ func GenerateConwayChain(
 	bodyHash := ComputeBlockBodyHash(
 		emptyTxsCbor, emptyWitsCbor, emptyAuxCbor, emptyInvalidCbor,
 	)
+	bodySize := computeBlockBodySize(
+		emptyTxsCbor,
+		emptyWitsCbor,
+		emptyAuxCbor,
+		emptyInvalidCbor,
+	)
 	blocks := make([]ledger.Block, 0, count)
 	currentPrev := prevHash
 	for i := range count {
@@ -82,7 +88,7 @@ func GenerateConwayChain(
 				Output: make([]byte, 64),
 				Proof:  make([]byte, 80),
 			},
-			BlockBodySize: 0,
+			BlockBodySize: bodySize,
 			BlockBodyHash: bodyHash,
 			OpCert: babbage.BabbageOpCert{
 				HotVkey:   make([]byte, 32),
@@ -132,4 +138,12 @@ func ComputeBlockBodyHash(parts ...[]byte) common.Blake2b256 {
 	}
 	h := blake2b.Sum256(combined)
 	return common.NewBlake2b256(h[:])
+}
+
+func computeBlockBodySize(parts ...[]byte) uint64 {
+	var size uint64
+	for _, part := range parts {
+		size += uint64(len(part))
+	}
+	return size
 }
