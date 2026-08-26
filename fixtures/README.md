@@ -106,3 +106,11 @@ Current upstream exceptions are encoded in the harness rather than ignored:
 - Dijkstra `GenTx_*` fixtures currently validate through payload/body-hash
   semantics because the imported fixture shape is ahead of full
   `gouroboros` transaction decoding support
+
+## Generated block chains
+
+`GenerateShelleyChain`, `GenerateBabbageChain`, and `GenerateConwayChain`
+return connected empty blocks whose CBOR round-trips through `gouroboros`.
+Use `GenerateBabbageChainWithProtocolVersion` when a test needs valid Babbage
+bytes with a specific header protocol version, including an unknown version for
+fail-closed classification coverage.
