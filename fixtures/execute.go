@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -181,8 +180,12 @@ func executeFixtureWithIndex(
 const (
 	consensusV2FixtureRoot = "ouroboros-consensus/ouroboros-consensus-cardano/" +
 		"golden/cardano/CardanoNodeToNodeVersion2/"
-	strictDecodePlaceholderErrorText = "invalid blake2b-256 hash length: expected 32 bytes, got 2"
 )
+
+var strictDecodePlaceholderErrorTexts = map[string]struct{}{
+	"invalid blake2b-256 hash: expected 32 bytes, got 2":        {},
+	"invalid blake2b-256 hash length: expected 32 bytes, got 2": {},
+}
 
 // strictDecodePlaceholderFixtures identifies the preserved upstream captures
 // and ledger goldens whose two-byte hash placeholders are accepted by older
@@ -210,7 +213,12 @@ func isStrictDecodePlaceholderFixture(fixture Fixture) bool {
 }
 
 func isStrictDecodePlaceholderError(err error) bool {
-	return strings.Contains(err.Error(), strictDecodePlaceholderErrorText)
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if _, ok := strictDecodePlaceholderErrorTexts[current.Error()]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func executeFixture(

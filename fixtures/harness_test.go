@@ -249,6 +249,34 @@ func TestFixtureExecutionHarness(t *testing.T) {
 			)
 		}
 
+		txFixture, err := harness.Fixture(
+			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/GenTx_Byron",
+		)
+		if err != nil {
+			t.Fatalf("Fixture failed: %v", err)
+		}
+		tx, err := txFixture.DecodeLedgerTransaction()
+		if err != nil {
+			t.Fatalf("DecodeLedgerTransaction failed: %v", err)
+		}
+		if len(tx.Cbor()) == 0 {
+			t.Fatal("DecodeLedgerTransaction returned empty CBOR")
+		}
+
+		txIDFixture, err := harness.Fixture(
+			"ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/GenTxId_Byron",
+		)
+		if err != nil {
+			t.Fatalf("Fixture failed: %v", err)
+		}
+		txIDBytes, err := txIDFixture.LedgerTransactionIDBytes()
+		if err != nil {
+			t.Fatalf("LedgerTransactionIDBytes failed: %v", err)
+		}
+		if len(txIDBytes) != 32 {
+			t.Fatalf("expected 32-byte transaction ID, got %d bytes", len(txIDBytes))
+		}
+
 		canonicalTxFixture, err := harness.Fixture(
 			"cardano-api/cardano-api/test/cardano-api-golden/files/tx-canonical.json",
 		)
