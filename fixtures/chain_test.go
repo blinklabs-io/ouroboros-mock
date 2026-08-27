@@ -219,6 +219,9 @@ func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
 		if conwayBlock.BlockHeader == nil {
 			t.Fatalf("block %d has no Conway header", i)
 		}
+		if got := len(conwayBlock.BlockHeader.Signature); got != 448 {
+			t.Fatalf("block %d KES signature width = %d, want 448", i, got)
+		}
 		var bodyFields map[uint]cbor.RawMessage
 		if _, err := cbor.Decode(
 			conwayBlock.TransactionBodies[0].Cbor(),

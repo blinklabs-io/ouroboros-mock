@@ -135,7 +135,7 @@ func GenerateConwayChain(
 // generated transactions have distinct output addresses and therefore
 // distinct transaction-body hashes. The transaction data is protocol/wire
 // valid test data, but is not intended to satisfy full ledger balance rules:
-// the transactions have no inputs and are not spendable ledger transactions.
+// the inputs do not reference spendable ledger UTxOs.
 func GenerateConwayChainWithTransactions(
 	startBlockNumber uint64,
 	prevHash common.Blake2b256,
@@ -200,7 +200,7 @@ func GenerateConwayChainWithTransactions(
 			BlockHeader: &ledger.ConwayBlockHeader{
 				BabbageBlockHeader: ledger.BabbageBlockHeader{
 					Body:      body,
-					Signature: make([]byte, 64),
+					Signature: make([]byte, 448),
 				},
 			},
 			TransactionBodies:      transactionBodies,
