@@ -18,8 +18,10 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
 
@@ -115,6 +117,112 @@ func TestGenerateConwayChainEmpty(t *testing.T) {
 		if len(gen) != 0 {
 			t.Fatalf("count %d: expected empty slice, got %d", count, len(gen))
 		}
+	}
+}
+
+func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
+	blocks, err := fixtures.GenerateConwayChainWithTransactions(
+		10,
+		common.Blake2b256{},
+		100,
+		20,
+		3,
+	)
+	if err != nil {
+		t.Fatalf("GenerateConwayChainWithTransactions: %s", err)
+	}
+
+	var transactionHashes []common.Blake2b256
+	for i, block := range blocks {
+		decoded, err := ledger.NewBlockFromCbor(uint(block.Type()), block.Cbor())
+		if err != nil {
+			t.Fatalf("block %d decode failed: %s", i, err)
+		}
+		transactions := decoded.Transactions()
+		if len(transactions) != 1 {
+			t.Fatalf("block %d has %d transactions, want 1", i, len(transactions))
+		}
+		outputs := transactions[0].Outputs()
+		if len(outputs) != 1 {
+			t.Fatalf("block %d transaction has %d outputs, want 1", i, len(outputs))
+		}
+		if got := outputs[0].Amount().Uint64(); got != 1_000_000+uint64(i) {
+			t.Fatalf("block %d output amount = %d, want %d", i, got, 1_000_000+uint64(i))
+		}
+		addressBytes, err := outputs[0].Address().Bytes()
+		if err != nil {
+			t.Fatalf("block %d output address encode failed: %s", i, err)
+		}
+		if got := len(addressBytes); got != 1+common.AddressHashSize {
+			t.Fatalf("block %d output address width = %d, want %d", i, got, 1+common.AddressHashSize)
+		}
+
+		wireTransaction, err := conway.NewConwayTransactionFromCbor(
+			transactions[0].Cbor(),
+		)
+		if err != nil {
+			t.Fatalf("block %d transaction decode failed: %s", i, err)
+		}
+		if len(wireTransaction.Outputs()) != 1 {
+			t.Fatalf("block %d wire transaction has no output", i)
+		}
+		transactionHashes = append(transactionHashes, transactions[0].Hash())
+
+		var fields []cbor.RawMessage
+		if _, err := cbor.Decode(decoded.Cbor(), &fields); err != nil {
+			t.Fatalf("block %d body decode failed: %s", i, err)
+		}
+		if len(fields) != 5 {
+			t.Fatalf("block %d has %d body fields, want 5", i, len(fields))
+		}
+		if got := fixtures.ComputeBlockBodyHash(
+			fields[1], fields[2], fields[3], fields[4],
+		); got != decoded.BlockBodyHash() {
+			t.Fatalf("block %d body hash mismatch", i)
+		}
+		var bodySize uint64
+		for _, field := range fields[1:] {
+			bodySize += uint64(len(field))
+		}
+		if got := decoded.BlockBodySize(); got != bodySize {
+			t.Fatalf("block %d body size = %d, want %d", i, got, bodySize)
+		}
+
+		conwayBlock, ok := decoded.(*conway.ConwayBlock)
+		if !ok {
+			t.Fatalf("block %d decoded as %T, want Conway block", i, decoded)
+		}
+		if conwayBlock.BlockHeader == nil {
+			t.Fatalf("block %d has no Conway header", i)
+		}
+	}
+	if len(transactionHashes) != 3 {
+		t.Fatalf("got %d transaction hashes, want 3", len(transactionHashes))
+	}
+	for i := 1; i < len(transactionHashes); i++ {
+		if transactionHashes[i] == transactionHashes[i-1] {
+			t.Fatalf("transaction hash %d equals previous transaction hash", i)
+		}
+	}
+}
+
+func TestGenerateConwayChainWithTransactionsDoesNotAliasBodies(t *testing.T) {
+	blocks, err := fixtures.GenerateConwayChainWithTransactions(
+		1,
+		common.Blake2b256{},
+		1,
+		1,
+		2,
+	)
+	if err != nil {
+		t.Fatalf("GenerateConwayChainWithTransactions: %s", err)
+	}
+	first := blocks[0].(*conway.ConwayBlock)
+	second := blocks[1].(*conway.ConwayBlock)
+	secondAmount := second.TransactionBodies[0].TxOutputs[0].OutputAmount.Amount
+	first.TransactionBodies[0].TxOutputs[0].OutputAmount.Amount++
+	if got := second.TransactionBodies[0].TxOutputs[0].OutputAmount.Amount; got != secondAmount {
+		t.Fatalf("mutating one block changed another block's transaction output")
 	}
 }
 
