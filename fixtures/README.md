@@ -109,8 +109,23 @@ Current upstream exceptions are encoded in the harness rather than ignored:
 
 ## Generated block chains
 
-`GenerateShelleyChain`, `GenerateBabbageChain`, and `GenerateConwayChain`
-return connected empty blocks whose CBOR round-trips through `gouroboros`.
+`GenerateShelleyChain`, `GenerateAlonzoChain`, `GenerateBabbageChain`, and
+`GenerateConwayChain` return connected empty blocks whose CBOR round-trips
+through `gouroboros`.
+`GenerateConwayChainWithTransactions` returns connected Conway blocks containing
+one CDDL-shaped transaction with one input and one output per block. The
+transactions are suitable for decode, storage, and replay tests but do not
+reference spendable ledger UTxOs.
 Use `GenerateBabbageChainWithProtocolVersion` when a test needs valid Babbage
 bytes with a specific header protocol version, including an unknown version for
 fail-closed classification coverage.
+
+### Strict decoder compatibility
+
+The curated upstream corpus is retained byte-for-byte. A small explicit set of
+historical consensus captures contains two-byte hash placeholders. Older
+decoders accept them, while strict hash decoding rejects them with the recorded
+hash-length error. The execution harness continues to execute every such
+fixture: it accepts either a complete decode or that exact documented rejection.
+Any other failure remains a harness failure, and newly added fixtures are not
+included without an explicit review of their decoding contract.

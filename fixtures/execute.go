@@ -37,6 +37,12 @@ type ExecutionResult struct {
 	Success bool
 	Error   error
 
+	// ExpectedStrictDecodeRejection reports that a preserved upstream fixture
+	// was rejected by strict hash decoding as documented compatibility data.
+	// The fixture remains in the corpus and its rejection is checked, rather
+	// than being omitted from execution.
+	ExpectedStrictDecodeRejection bool
+
 	// CaseCount is the number of executable cases covered by the fixture.
 	// Most fixtures contribute one case, while translation corpora contain many.
 	CaseCount int
@@ -157,12 +163,62 @@ func executeFixtureWithIndex(
 		result.CaseCount = caseCount
 	}
 	if err != nil {
+		if isStrictDecodePlaceholderFixture(fixture) &&
+			isStrictDecodePlaceholderError(err) {
+			result.ExpectedStrictDecodeRejection = true
+			result.Success = true
+			return result
+		}
 		result.Error = err
 		return result
 	}
 
 	result.Success = true
 	return result
+}
+
+const (
+	consensusV2FixtureRoot = "ouroboros-consensus/ouroboros-consensus-cardano/" +
+		"golden/cardano/CardanoNodeToNodeVersion2/"
+)
+
+var strictDecodePlaceholderErrorTexts = map[string]struct{}{
+	"invalid blake2b-256 hash: expected 32 bytes, got 2":        {},
+	"invalid blake2b-256 hash length: expected 32 bytes, got 2": {},
+}
+
+// strictDecodePlaceholderFixtures identifies the preserved upstream captures
+// and ledger goldens whose two-byte hash placeholders are accepted by older
+// decoders but rejected by strict hash decoding. Keep this list explicit: new
+// fixtures must either decode normally or be reviewed and added deliberately.
+var strictDecodePlaceholderFixtures = func() map[string]struct{} {
+	fixtures := make(map[string]struct{})
+	fixtures["cardano-ledger/eras/alonzo/test-suite/golden/block.cbor"] = struct{}{}
+	fixtures["cardano-ledger/eras/alonzo/test-suite/golden/tx.cbor"] = struct{}{}
+	for _, era := range []string{
+		"Shelley", "Allegra", "Mary", "Alonzo", "Babbage", "Conway",
+	} {
+		for _, prefix := range []string{
+			"Block_", "Header_", "GenTx_", "GenTxId_",
+		} {
+			fixtures[consensusV2FixtureRoot+prefix+era] = struct{}{}
+		}
+	}
+	return fixtures
+}()
+
+func isStrictDecodePlaceholderFixture(fixture Fixture) bool {
+	_, ok := strictDecodePlaceholderFixtures[fixture.RelPath]
+	return ok
+}
+
+func isStrictDecodePlaceholderError(err error) bool {
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if _, ok := strictDecodePlaceholderErrorTexts[current.Error()]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func executeFixture(
