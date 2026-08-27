@@ -25,6 +25,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/gouroboros/ledger/mary"
+	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -233,6 +234,8 @@ func GenerateConwayChainWithTransactions(
 func newConwayFixtureTransactionBody(
 	index uint64,
 ) (ledger.ConwayTransactionBody, error) {
+	inputHash := common.Blake2b256{}
+	binary.BigEndian.PutUint64(inputHash[:], index)
 	addressBytes := make([]byte, 1+common.AddressHashSize)
 	addressBytes[0] = common.AddressTypeKeyNone << 4
 	// The address remains a fixed-width testnet enterprise address while its
@@ -247,12 +250,18 @@ func newConwayFixtureTransactionBody(
 		)
 	}
 	return ledger.ConwayTransactionBody{
+		TxInputs: conway.NewConwayTransactionInputSet(
+			[]shelley.ShelleyTransactionInput{{
+				TxId: inputHash,
+			}},
+		),
 		TxOutputs: []babbage.BabbageTransactionOutput{{
 			OutputAddress: address,
 			OutputAmount: mary.MaryTransactionOutputValue{
 				Amount: 1_000_000 + index,
 			},
 		}},
+		TxFee: 1,
 	}, nil
 }
 

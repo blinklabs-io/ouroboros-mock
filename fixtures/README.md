@@ -112,6 +112,10 @@ Current upstream exceptions are encoded in the harness rather than ignored:
 `GenerateShelleyChain`, `GenerateAlonzoChain`, `GenerateBabbageChain`, and
 `GenerateConwayChain` return connected empty blocks whose CBOR round-trips
 through `gouroboros`.
+`GenerateConwayChainWithTransactions` returns connected Conway blocks containing
+one CDDL-shaped transaction with one input and one output per block. The
+transactions are suitable for decode, storage, and replay tests but do not
+reference spendable ledger UTxOs.
 Use `GenerateBabbageChainWithProtocolVersion` when a test needs valid Babbage
 bytes with a specific header protocol version, including an unknown version for
 fail-closed classification coverage.

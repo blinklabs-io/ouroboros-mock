@@ -121,9 +121,10 @@ func TestGenerateConwayChainEmpty(t *testing.T) {
 }
 
 func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
+	origin := common.Blake2b256{31: 0x42}
 	blocks, err := fixtures.GenerateConwayChainWithTransactions(
 		10,
-		common.Blake2b256{},
+		origin,
 		100,
 		20,
 		3,
@@ -132,7 +133,7 @@ func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
 		t.Fatalf("GenerateConwayChainWithTransactions: %s", err)
 	}
 
-	var transactionHashes []common.Blake2b256
+	transactionHashes := make(map[common.Blake2b256]struct{}, len(blocks))
 	for i, block := range blocks {
 		decoded, err := ledger.NewBlockFromCbor(uint(block.Type()), block.Cbor())
 		if err != nil {
@@ -141,6 +142,25 @@ func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
 		transactions := decoded.Transactions()
 		if len(transactions) != 1 {
 			t.Fatalf("block %d has %d transactions, want 1", i, len(transactions))
+		}
+		if got := decoded.BlockNumber(); got != 10+uint64(i) {
+			t.Fatalf("block %d number = %d, want %d", i, got, 10+uint64(i))
+		}
+		if got := decoded.SlotNumber(); got != 100+20*uint64(i) {
+			t.Fatalf("block %d slot = %d, want %d", i, got, 100+20*uint64(i))
+		}
+		wantPrevHash := origin
+		if i > 0 {
+			wantPrevHash = blocks[i-1].Hash()
+		}
+		if got := decoded.PrevHash(); got != wantPrevHash {
+			t.Fatalf("block %d previous hash = %s, want %s", i, got, wantPrevHash)
+		}
+		if got := len(transactions[0].Inputs()); got != 1 {
+			t.Fatalf("block %d transaction has %d inputs, want 1", i, got)
+		}
+		if got := transactions[0].Fee().Uint64(); got != 1 {
+			t.Fatalf("block %d transaction fee = %d, want 1", i, got)
 		}
 		outputs := transactions[0].Outputs()
 		if len(outputs) != 1 {
@@ -166,7 +186,11 @@ func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
 		if len(wireTransaction.Outputs()) != 1 {
 			t.Fatalf("block %d wire transaction has no output", i)
 		}
-		transactionHashes = append(transactionHashes, transactions[0].Hash())
+		transactionHash := transactions[0].Hash()
+		if _, exists := transactionHashes[transactionHash]; exists {
+			t.Fatalf("block %d repeats transaction hash %s", i, transactionHash)
+		}
+		transactionHashes[transactionHash] = struct{}{}
 
 		var fields []cbor.RawMessage
 		if _, err := cbor.Decode(decoded.Cbor(), &fields); err != nil {
@@ -195,13 +219,45 @@ func TestGenerateConwayChainWithTransactionsRoundTrip(t *testing.T) {
 		if conwayBlock.BlockHeader == nil {
 			t.Fatalf("block %d has no Conway header", i)
 		}
+		var bodyFields map[uint]cbor.RawMessage
+		if _, err := cbor.Decode(
+			conwayBlock.TransactionBodies[0].Cbor(),
+			&bodyFields,
+		); err != nil {
+			t.Fatalf("block %d transaction body decode failed: %s", i, err)
+		}
+		for _, requiredKey := range []uint{0, 1, 2} {
+			if _, exists := bodyFields[requiredKey]; !exists {
+				t.Fatalf(
+					"block %d transaction body omits required key %d",
+					i,
+					requiredKey,
+				)
+			}
+		}
 	}
 	if len(transactionHashes) != 3 {
 		t.Fatalf("got %d transaction hashes, want 3", len(transactionHashes))
 	}
-	for i := 1; i < len(transactionHashes); i++ {
-		if transactionHashes[i] == transactionHashes[i-1] {
-			t.Fatalf("transaction hash %d equals previous transaction hash", i)
+}
+
+func TestGenerateConwayChainWithTransactionsEmpty(t *testing.T) {
+	for _, count := range []int{0, -1} {
+		blocks, err := fixtures.GenerateConwayChainWithTransactions(
+			1,
+			common.Blake2b256{},
+			1,
+			1,
+			count,
+		)
+		if err != nil {
+			t.Fatalf("count %d: unexpected error %s", count, err)
+		}
+		if blocks == nil {
+			t.Fatalf("count %d: expected non-nil slice", count)
+		}
+		if len(blocks) != 0 {
+			t.Fatalf("count %d: expected empty slice, got %d", count, len(blocks))
 		}
 	}
 }
