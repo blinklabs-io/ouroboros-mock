@@ -95,7 +95,7 @@ func GenerateAllegraChain(
 			return nil, fmt.Errorf("decode generated Allegra block %d: %w", i, err)
 		}
 		if !bytes.Equal(decoded.Cbor(), blockCbor) {
-			return nil, fmt.Errorf("Allegra block %d Cbor mismatch after round-trip", i)
+			return nil, fmt.Errorf("allegra block %d Cbor mismatch after round-trip", i)
 		}
 		blocks = append(blocks, decoded)
 		currentPrev = decoded.Hash()
@@ -170,7 +170,7 @@ func GenerateMaryChain(
 			return nil, fmt.Errorf("decode generated Mary block %d: %w", i, err)
 		}
 		if !bytes.Equal(decoded.Cbor(), blockCbor) {
-			return nil, fmt.Errorf("Mary block %d Cbor mismatch after round-trip", i)
+			return nil, fmt.Errorf("mary block %d Cbor mismatch after round-trip", i)
 		}
 		blocks = append(blocks, decoded)
 		currentPrev = decoded.Hash()
