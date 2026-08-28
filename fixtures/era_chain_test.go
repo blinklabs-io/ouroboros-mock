@@ -21,6 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
@@ -40,6 +41,15 @@ func TestGenerateBabbageChainRoundTrip(t *testing.T) {
 		fixtures.GenerateBabbageChain,
 		ledger.BlockTypeBabbage,
 		babbage.MinProtocolVersionBabbage,
+	)
+}
+
+func TestGenerateDijkstraChainRoundTrip(t *testing.T) {
+	assertGeneratedChain(
+		t,
+		fixtures.GenerateDijkstraChain,
+		ledger.BlockTypeDijkstra,
+		dijkstra.MinProtocolVersionDijkstra,
 	)
 }
 
@@ -235,6 +245,8 @@ func protocolMajor(block ledger.Block) uint64 {
 	case *alonzo.AlonzoBlock:
 		return block.BlockHeader.Body.ProtoMajorVersion
 	case *babbage.BabbageBlock:
+		return block.BlockHeader.Body.ProtoVersion.Major
+	case *dijkstra.DijkstraBlock:
 		return block.BlockHeader.Body.ProtoVersion.Major
 	case *shelley.ShelleyBlock:
 		return block.BlockHeader.Body.ProtoMajorVersion
