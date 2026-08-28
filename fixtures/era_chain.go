@@ -24,9 +24,78 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/gouroboros/ledger/mary"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
+
+// GenerateDijkstraChain builds a connected chain of empty Dijkstra blocks.
+func GenerateDijkstraChain(
+	startBlockNumber uint64,
+	prevHash common.Blake2b256,
+	startSlot, slotIncrement uint64,
+	count int,
+) ([]ledger.Block, error) {
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
+	body := dijkstra.DijkstraBlockBody{
+		InvalidTransactions: []uint{},
+		Transactions:        []dijkstra.DijkstraTransaction{},
+	}
+	bodyCbor, err := cbor.Encode(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Dijkstra block body: %w", err)
+	}
+	bodySize := uint64(len(bodyCbor))
+	bodyHash := body.Hash()
+	blocks := make([]ledger.Block, 0, count)
+	currentPrev := prevHash
+	for i := range count {
+		block := &dijkstra.DijkstraBlock{
+			BlockHeader: &dijkstra.DijkstraBlockHeader{
+				BabbageBlockHeader: babbage.BabbageBlockHeader{
+					Body: babbage.BabbageBlockHeaderBody{
+						BlockNumber: startBlockNumber + uint64(i),
+						Slot:        startSlot + uint64(i)*slotIncrement,
+						PrevHash:    currentPrev,
+						IssuerVkey:  common.IssuerVkey{},
+						VrfKey:      make([]byte, 32),
+						VrfResult: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						BlockBodySize: bodySize,
+						BlockBodyHash: bodyHash,
+						OpCert: babbage.BabbageOpCert{
+							HotVkey:   make([]byte, 32),
+							Signature: make([]byte, 64),
+						},
+						ProtoVersion: babbage.BabbageProtoVersion{
+							Major: dijkstra.MinProtocolVersionDijkstra,
+						},
+					},
+					Signature: make([]byte, 64),
+				},
+			},
+			BlockBody: body,
+		}
+		blockCbor, err := cbor.Encode(block)
+		if err != nil {
+			return nil, fmt.Errorf("encode Dijkstra block %d: %w", i, err)
+		}
+		decoded, err := dijkstra.NewDijkstraBlockFromCbor(blockCbor)
+		if err != nil {
+			return nil, fmt.Errorf("decode generated Dijkstra block %d: %w", i, err)
+		}
+		if !bytes.Equal(decoded.Cbor(), blockCbor) {
+			return nil, fmt.Errorf("dijkstra block %d Cbor mismatch after round-trip", i)
+		}
+		blocks = append(blocks, decoded)
+		currentPrev = decoded.Hash()
+	}
+	return blocks, nil
+}
 
 // GenerateAllegraChain builds a connected chain of empty Allegra blocks.
 func GenerateAllegraChain(

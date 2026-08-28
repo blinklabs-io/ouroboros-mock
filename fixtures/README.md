@@ -110,8 +110,9 @@ Current upstream exceptions are encoded in the harness rather than ignored:
 ## Generated block chains
 
 `GenerateShelleyChain`, `GenerateAllegraChain`, `GenerateMaryChain`,
-`GenerateAlonzoChain`, `GenerateBabbageChain`, and `GenerateConwayChain` return
-connected empty blocks whose CBOR round-trips through `gouroboros`.
+`GenerateAlonzoChain`, `GenerateBabbageChain`, `GenerateConwayChain`, and
+`GenerateDijkstraChain` return connected empty blocks whose CBOR round-trips
+through `gouroboros`.
 `GenerateConwayChainWithTransactions` returns connected Conway blocks containing
 one CDDL-shaped transaction with one input and one output per block. The
 transactions are suitable for decode, storage, and replay tests but do not
