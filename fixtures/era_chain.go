@@ -20,11 +20,163 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/allegra"
 	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/mary"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
+
+// GenerateAllegraChain builds a connected chain of empty Allegra blocks.
+func GenerateAllegraChain(
+	startBlockNumber uint64,
+	prevHash common.Blake2b256,
+	startSlot, slotIncrement uint64,
+	count int,
+) ([]ledger.Block, error) {
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
+	emptyTxsCbor, err := cbor.Encode([]allegra.AllegraTransactionBody{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Allegra tx bodies: %w", err)
+	}
+	emptyWitsCbor, err := cbor.Encode([]shelley.ShelleyTransactionWitnessSet{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Allegra witnesses: %w", err)
+	}
+	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Allegra metadata set: %w", err)
+	}
+	bodyHash := ComputeBlockBodyHash(emptyTxsCbor, emptyWitsCbor, emptyAuxCbor)
+	bodySize := computeBlockBodySize(emptyTxsCbor, emptyWitsCbor, emptyAuxCbor)
+	blocks := make([]ledger.Block, 0, count)
+	currentPrev := prevHash
+	for i := range count {
+		block := &allegra.AllegraBlock{
+			BlockHeader: &allegra.AllegraBlockHeader{
+				ShelleyBlockHeader: shelley.ShelleyBlockHeader{
+					Body: shelley.ShelleyBlockHeaderBody{
+						BlockNumber: startBlockNumber + uint64(i),
+						Slot:        startSlot + uint64(i)*slotIncrement,
+						PrevHash:    currentPrev,
+						IssuerVkey:  common.IssuerVkey{},
+						VrfKey:      make([]byte, 32),
+						NonceVrf: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						LeaderVrf: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						BlockBodySize:     bodySize,
+						BlockBodyHash:     bodyHash,
+						OpCertHotVkey:     make([]byte, 32),
+						OpCertSignature:   make([]byte, 64),
+						ProtoMajorVersion: allegra.MinProtocolVersionAllegra,
+						ProtoMinorVersion: 0,
+					},
+					Signature: make([]byte, 64),
+				},
+			},
+			TransactionBodies:      []allegra.AllegraTransactionBody{},
+			TransactionWitnessSets: []shelley.ShelleyTransactionWitnessSet{},
+			TransactionMetadataSet: common.TransactionMetadataSet{},
+		}
+		blockCbor, err := cbor.Encode(block)
+		if err != nil {
+			return nil, fmt.Errorf("encode Allegra block %d: %w", i, err)
+		}
+		decoded, err := allegra.NewAllegraBlockFromCbor(blockCbor)
+		if err != nil {
+			return nil, fmt.Errorf("decode generated Allegra block %d: %w", i, err)
+		}
+		if !bytes.Equal(decoded.Cbor(), blockCbor) {
+			return nil, fmt.Errorf("Allegra block %d Cbor mismatch after round-trip", i)
+		}
+		blocks = append(blocks, decoded)
+		currentPrev = decoded.Hash()
+	}
+	return blocks, nil
+}
+
+// GenerateMaryChain builds a connected chain of empty Mary blocks.
+func GenerateMaryChain(
+	startBlockNumber uint64,
+	prevHash common.Blake2b256,
+	startSlot, slotIncrement uint64,
+	count int,
+) ([]ledger.Block, error) {
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
+	emptyTxsCbor, err := cbor.Encode([]mary.MaryTransactionBody{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Mary tx bodies: %w", err)
+	}
+	emptyWitsCbor, err := cbor.Encode([]shelley.ShelleyTransactionWitnessSet{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Mary witnesses: %w", err)
+	}
+	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Mary metadata set: %w", err)
+	}
+	bodyHash := ComputeBlockBodyHash(emptyTxsCbor, emptyWitsCbor, emptyAuxCbor)
+	bodySize := computeBlockBodySize(emptyTxsCbor, emptyWitsCbor, emptyAuxCbor)
+	blocks := make([]ledger.Block, 0, count)
+	currentPrev := prevHash
+	for i := range count {
+		block := &mary.MaryBlock{
+			BlockHeader: &mary.MaryBlockHeader{
+				ShelleyBlockHeader: shelley.ShelleyBlockHeader{
+					Body: shelley.ShelleyBlockHeaderBody{
+						BlockNumber: startBlockNumber + uint64(i),
+						Slot:        startSlot + uint64(i)*slotIncrement,
+						PrevHash:    currentPrev,
+						IssuerVkey:  common.IssuerVkey{},
+						VrfKey:      make([]byte, 32),
+						NonceVrf: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						LeaderVrf: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						BlockBodySize:     bodySize,
+						BlockBodyHash:     bodyHash,
+						OpCertHotVkey:     make([]byte, 32),
+						OpCertSignature:   make([]byte, 64),
+						ProtoMajorVersion: mary.MinProtocolVersionMary,
+						ProtoMinorVersion: 0,
+					},
+					Signature: make([]byte, 64),
+				},
+			},
+			TransactionBodies:      []mary.MaryTransactionBody{},
+			TransactionWitnessSets: []shelley.ShelleyTransactionWitnessSet{},
+			TransactionMetadataSet: common.TransactionMetadataSet{},
+		}
+		blockCbor, err := cbor.Encode(block)
+		if err != nil {
+			return nil, fmt.Errorf("encode Mary block %d: %w", i, err)
+		}
+		decoded, err := mary.NewMaryBlockFromCbor(blockCbor)
+		if err != nil {
+			return nil, fmt.Errorf("decode generated Mary block %d: %w", i, err)
+		}
+		if !bytes.Equal(decoded.Cbor(), blockCbor) {
+			return nil, fmt.Errorf("Mary block %d Cbor mismatch after round-trip", i)
+		}
+		blocks = append(blocks, decoded)
+		currentPrev = decoded.Hash()
+	}
+	return blocks, nil
+}
 
 // GenerateAlonzoChain builds a connected chain of empty Alonzo blocks using
 // the first Alonzo protocol version.
