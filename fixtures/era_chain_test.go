@@ -18,10 +18,12 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/allegra"
 	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
+	"github.com/blinklabs-io/gouroboros/ledger/mary"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
@@ -44,21 +46,39 @@ func TestGenerateBabbageChainRoundTrip(t *testing.T) {
 	)
 }
 
-func TestGenerateDijkstraChainRoundTrip(t *testing.T) {
-	assertGeneratedChain(
-		t,
-		fixtures.GenerateDijkstraChain,
-		ledger.BlockTypeDijkstra,
-		dijkstra.MinProtocolVersionDijkstra,
-	)
-}
-
 func TestGenerateShelleyChainRoundTrip(t *testing.T) {
 	assertGeneratedChain(
 		t,
 		fixtures.GenerateShelleyChain,
 		ledger.BlockTypeShelley,
 		shelley.MinProtocolVersionShelley,
+	)
+}
+
+func TestGenerateAllegraChainRoundTrip(t *testing.T) {
+	assertGeneratedChain(
+		t,
+		fixtures.GenerateAllegraChain,
+		ledger.BlockTypeAllegra,
+		allegra.MinProtocolVersionAllegra,
+	)
+}
+
+func TestGenerateMaryChainRoundTrip(t *testing.T) {
+	assertGeneratedChain(
+		t,
+		fixtures.GenerateMaryChain,
+		ledger.BlockTypeMary,
+		mary.MinProtocolVersionMary,
+	)
+}
+
+func TestGenerateDijkstraChainRoundTrip(t *testing.T) {
+	assertGeneratedChain(
+		t,
+		fixtures.GenerateDijkstraChain,
+		ledger.BlockTypeDijkstra,
+		dijkstra.MinProtocolVersionDijkstra,
 	)
 }
 
@@ -246,6 +266,10 @@ func protocolMajor(block ledger.Block) uint64 {
 		return block.BlockHeader.Body.ProtoMajorVersion
 	case *babbage.BabbageBlock:
 		return block.BlockHeader.Body.ProtoVersion.Major
+	case *allegra.AllegraBlock:
+		return block.BlockHeader.Body.ProtoMajorVersion
+	case *mary.MaryBlock:
+		return block.BlockHeader.Body.ProtoMajorVersion
 	case *dijkstra.DijkstraBlock:
 		return block.BlockHeader.Body.ProtoVersion.Major
 	case *shelley.ShelleyBlock:
