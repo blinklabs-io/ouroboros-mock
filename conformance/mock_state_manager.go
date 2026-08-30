@@ -874,9 +874,9 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	)
 
 	// Set up committee member lookup
-	committeeMembers := m.committeeMembers         // capture for closure
-	hotKeyAuth := m.hotKeyAuthorizations           // capture for closure
-	proposedMembers := m.govState.CommitteeMembers // get proposed from govState
+	committeeMembers := m.committeeMembers // capture for closure
+	hotKeyAuth := m.hotKeyAuthorizations   // capture for closure
+	proposals := m.govState.Proposals      // capture for closure
 	builder.WithCommitteeMember(
 		func(coldKey common.Blake2b224) (*common.CommitteeMember, error) {
 			// Check current members first
@@ -891,16 +891,21 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 				}
 				return member, nil
 			}
-			// Check proposed members
-			if memberInfo, ok := proposedMembers[coldKey]; ok {
-				member := &common.CommitteeMember{
-					ColdKey:     coldKey,
-					ExpiryEpoch: memberInfo.ExpiryEpoch,
+			// Check members proposed by pending UpdateCommittee actions.
+			for _, proposal := range proposals {
+				if proposal.ActionType != common.GovActionTypeUpdateCommittee {
+					continue
 				}
-				if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot {
-					member.HotKey = &hotKey
+				if expiry, ok := proposal.ProposedMembers[coldKey]; ok {
+					member := &common.CommitteeMember{
+						ColdKey:     coldKey,
+						ExpiryEpoch: expiry,
+					}
+					if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot {
+						member.HotKey = &hotKey
+					}
+					return member, nil
 				}
-				return member, nil
 			}
 			return nil, nil
 		},
