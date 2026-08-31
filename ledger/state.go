@@ -104,6 +104,12 @@ type CommitteeCredentialMemberFunc func(
 	lcommon.Credential,
 ) (*lcommon.CommitteeMember, error)
 
+// CommitteeHotCredentialMemberFunc is a callback for exact hot-credential
+// committee member lookups.
+type CommitteeHotCredentialMemberFunc func(
+	lcommon.Credential,
+) (*lcommon.CommitteeMember, error)
+
 // DRepRegistrationFunc is a callback for DRep registration lookups
 type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
 
@@ -150,17 +156,18 @@ type MockLedgerState struct {
 	rewardSnapshot            lcommon.RewardSnapshot      // static snapshot value
 
 	// GovState callbacks and state
-	CommitteeMemberCallback           CommitteeMemberFunc
-	CommitteeCredentialMemberCallback CommitteeCredentialMemberFunc
-	DRepRegistrationCallback          DRepRegistrationFunc
-	DRepDelegationCallback            DRepDelegationFunc
-	ConstitutionCallback              ConstitutionFunc
-	TreasuryValueCallback             TreasuryValueFunc
-	GovActionByIdCallback             GovActionByIdFunc
-	committeeMembers                  []lcommon.CommitteeMember
-	drepRegistrations                 []lcommon.DRepRegistration
-	govActions                        map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
-	constitution                      *lcommon.Constitution              // static constitution value
+	CommitteeMemberCallback              CommitteeMemberFunc
+	CommitteeCredentialMemberCallback    CommitteeCredentialMemberFunc
+	CommitteeHotCredentialMemberCallback CommitteeHotCredentialMemberFunc
+	DRepRegistrationCallback             DRepRegistrationFunc
+	DRepDelegationCallback               DRepDelegationFunc
+	ConstitutionCallback                 ConstitutionFunc
+	TreasuryValueCallback                TreasuryValueFunc
+	GovActionByIdCallback                GovActionByIdFunc
+	committeeMembers                     []lcommon.CommitteeMember
+	drepRegistrations                    []lcommon.DRepRegistration
+	govActions                           map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
+	constitution                         *lcommon.Constitution              // static constitution value
 	// ProposedCommitteeMembers tracks committee members proposed in pending
 	// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC
 	// should succeed if the member is either a current member OR proposed
@@ -397,6 +404,36 @@ func (ls *MockLedgerState) CommitteeCredentialMember(
 	if coldCredential.CredType == lcommon.CredentialTypeAddrKeyHash &&
 		ls.CommitteeMemberCallback != nil {
 		return ls.CommitteeMemberCallback(coldCredential.Credential)
+	}
+	return nil, nil
+}
+
+// CommitteeStateAvailable reports that MockLedgerState authoritatively models
+// committee state, including when the modeled committee is empty.
+func (ls *MockLedgerState) CommitteeStateAvailable() (bool, error) {
+	return true, nil
+}
+
+// CommitteeHotCredentialMember looks up a committee member by full hot
+// credential identity.
+func (ls *MockLedgerState) CommitteeHotCredentialMember(
+	hotCredential lcommon.Credential,
+) (*lcommon.CommitteeMember, error) {
+	if ls.CommitteeHotCredentialMemberCallback != nil {
+		return ls.CommitteeHotCredentialMemberCallback(hotCredential)
+	}
+	// The legacy committee-member shape carries only hashes, so stored hot
+	// credentials represent key credentials.
+	if hotCredential.CredType != lcommon.CredentialTypeAddrKeyHash {
+		return nil, nil
+	}
+	for idx := range ls.committeeMembers {
+		member := &ls.committeeMembers[idx]
+		if member.HotKey != nil &&
+			*member.HotKey == hotCredential.Credential &&
+			!member.Resigned {
+			return member, nil
+		}
 	}
 	return nil, nil
 }
@@ -715,6 +752,15 @@ func (b *LedgerStateBuilder) WithCommitteeCredentialMember(
 	fn CommitteeCredentialMemberFunc,
 ) *LedgerStateBuilder {
 	b.state.CommitteeCredentialMemberCallback = fn
+	return b
+}
+
+// WithCommitteeHotCredentialMember sets the exact hot-credential committee
+// member lookup callback.
+func (b *LedgerStateBuilder) WithCommitteeHotCredentialMember(
+	fn CommitteeHotCredentialMemberFunc,
+) *LedgerStateBuilder {
+	b.state.CommitteeHotCredentialMemberCallback = fn
 	return b
 }
 

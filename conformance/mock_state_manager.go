@@ -550,8 +550,11 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
+			if m.committeeResignations[coldKey] ||
+				m.govState.CommitteeResignations[coldKey] {
+				break
+			}
 			m.hotKeyAuthorizations[coldKey] = authCert.HotCredential
-			delete(m.committeeResignations, coldKey)
 			m.govState.AuthorizeHotCredential(
 				authCert.ColdCredential,
 				authCert.HotCredential,
@@ -1233,51 +1236,76 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 		legacyMembers = append(legacyMembers, member)
 	}
 	builder.WithCommitteeMembers(legacyMembers)
-	builder.WithCommitteeCredentialMember(
-		func(coldCredential common.Credential) (*common.CommitteeMember, error) {
-			coldKey := ledger.NewRewardAccountKey(coldCredential)
-			// Check current members first
-			if expiry, ok := committeeMembers[coldKey]; ok {
-				member := &common.CommitteeMember{
+	credentialMember := func(
+		coldCredential common.Credential,
+	) (*common.CommitteeMember, error) {
+		coldKey := ledger.NewRewardAccountKey(coldCredential)
+		// Check current members first
+		if expiry, ok := committeeMembers[coldKey]; ok {
+			member := &common.CommitteeMember{
+				ColdKey:     coldCredential.Credential,
+				ExpiryEpoch: expiry,
+				Resigned:    resignations[coldKey],
+			}
+			// Add hot key if authorized
+			if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot &&
+				!member.Resigned {
+				hotHash := hotKey.Credential
+				member.HotKey = &hotHash
+			}
+			return member, nil
+		}
+		// Check members proposed by pending UpdateCommittee actions.
+		for _, proposal := range proposals {
+			if proposal.ActionType != common.GovActionTypeUpdateCommittee {
+				continue
+			}
+			if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
+				return &common.CommitteeMember{
 					ColdKey:     coldCredential.Credential,
 					ExpiryEpoch: expiry,
 					Resigned:    resignations[coldKey],
-				}
-				// Add hot key if authorized
-				if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot &&
-					!member.Resigned {
-					hotHash := hotKey.Credential
-					member.HotKey = &hotHash
-				}
-				return member, nil
+				}, nil
 			}
-			// Check members proposed by pending UpdateCommittee actions.
-			for _, proposal := range proposals {
-				if proposal.ActionType != common.GovActionTypeUpdateCommittee {
-					continue
-				}
-				if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
+			if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
+				!hasCredentialHash(
+					proposal.ProposedMembersByCredential,
+					coldCredential.Credential,
+				) {
+				if expiry, ok := proposal.ProposedMembers[coldCredential.Credential]; ok {
 					return &common.CommitteeMember{
 						ColdKey:     coldCredential.Credential,
 						ExpiryEpoch: expiry,
 						Resigned:    resignations[coldKey],
 					}, nil
 				}
-				if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
-					!hasCredentialHash(
-						proposal.ProposedMembersByCredential,
-						coldCredential.Credential,
-					) {
-					if expiry, ok := proposal.ProposedMembers[coldCredential.Credential]; ok {
-						return &common.CommitteeMember{
-							ColdKey:     coldCredential.Credential,
-							ExpiryEpoch: expiry,
-							Resigned:    resignations[coldKey],
-						}, nil
-					}
-				}
 			}
-			return nil, nil
+		}
+		return nil, nil
+	}
+	builder.WithCommitteeCredentialMember(credentialMember)
+	builder.WithCommitteeHotCredentialMember(
+		func(hotCredential common.Credential) (*common.CommitteeMember, error) {
+			var matched *common.CommitteeMember
+			for coldKey, authorizedHotCredential := range hotKeyAuth {
+				if authorizedHotCredential.CredType != hotCredential.CredType ||
+					authorizedHotCredential.Credential != hotCredential.Credential ||
+					resignations[coldKey] {
+					continue
+				}
+				member, err := credentialMember(coldKey.AsCredential())
+				if err != nil {
+					return nil, err
+				}
+				if member == nil {
+					continue
+				}
+				if matched != nil {
+					return nil, nil
+				}
+				matched = member
+			}
+			return matched, nil
 		},
 	)
 

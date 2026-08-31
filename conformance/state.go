@@ -785,6 +785,18 @@ func (g *GovernanceState) AuthorizeHotCredential(
 	hotCredential common.Credential,
 ) {
 	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	if g.CommitteeResignations[coldKey] {
+		return
+	}
+	if member := g.CommitteeMembersByCredential[coldKey]; member != nil &&
+		member.Resigned {
+		return
+	}
+	if coldCredential.CredType == common.CredentialTypeAddrKeyHash {
+		if member := g.CommitteeMembers[coldCredential.Credential]; member != nil && member.Resigned {
+			return
+		}
+	}
 	if !hasCredentialHash(
 		g.HotKeyAuthorizationsByCredential,
 		coldCredential.Credential,
@@ -800,7 +812,6 @@ func (g *GovernanceState) AuthorizeHotCredential(
 		}
 	}
 	g.HotKeyAuthorizationsByCredential[coldKey] = hotCredential
-	delete(g.CommitteeResignations, coldKey)
 	g.syncLegacyHotKeyAuthorizations()
 	if member, ok := g.CommitteeMembersByCredential[coldKey]; ok {
 		hotCredentialCopy := hotCredential
@@ -827,7 +838,16 @@ func (g *GovernanceState) AuthorizeHotKey(
 			Credential: hotKey,
 		},
 	)
+	if g.CommitteeResignations[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}] {
+		return
+	}
 	if member := g.legacyKeyCommitteeMember(coldKey); member != nil {
+		if member.Resigned {
+			return
+		}
 		hotKeyCopy := hotKey
 		member.HotKey = &hotKeyCopy
 		member.Resigned = false

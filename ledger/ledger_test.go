@@ -865,6 +865,38 @@ func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
 	assert.Equal(t, uint64(100), legacyMember.ExpiryEpoch)
 }
 
+func TestCommitteeCredentialStateDistinguishesAuthorityAndCredentialTags(t *testing.T) {
+	hotHash := lcommon.Blake2b224{0x44}
+	state := ledger.NewLedgerStateBuilder().WithCommitteeMembers(
+		[]lcommon.CommitteeMember{{
+			ColdKey: lcommon.Blake2b224{0x33},
+			HotKey:  &hotHash,
+		}},
+	).Build()
+	provider, ok := any(state).(interface {
+		CommitteeStateAvailable() (bool, error)
+		CommitteeHotCredentialMember(lcommon.Credential) (*lcommon.CommitteeMember, error)
+	})
+	require.True(t, ok)
+	available, err := provider.CommitteeStateAvailable()
+	require.NoError(t, err)
+	require.True(t, available)
+
+	keyMember, err := provider.CommitteeHotCredentialMember(lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: hotHash,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, keyMember)
+
+	scriptMember, err := provider.CommitteeHotCredentialMember(lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: hotHash,
+	})
+	require.NoError(t, err)
+	require.Nil(t, scriptMember)
+}
+
 func TestLedgerStateBuilder_CommitteeCredentialStateRejectsAmbiguousHash(
 	t *testing.T,
 ) {
