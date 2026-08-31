@@ -155,33 +155,34 @@ func (m *MockStateManager) LoadInitialState(
 	for _, hash := range state.DRepRegistrations {
 		m.drepRegistrations[hash] = true
 	}
-	// Load committee members
-	if len(state.CommitteeMembersByCredential) > 0 {
-		maps.Copy(m.committeeMembers, state.CommitteeMembersByCredential)
-	} else {
-		for coldKey, expiry := range state.CommitteeMembers {
-			m.committeeMembers[ledger.RewardAccountKey{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: coldKey,
-			}] = expiry
+	// Load committee members. Legacy entries represent key credentials, but a
+	// hash already present in the typed state may be its compatibility projection.
+	maps.Copy(m.committeeMembers, state.CommitteeMembersByCredential)
+	for coldKey, expiry := range state.CommitteeMembers {
+		if hasCredentialHash(m.committeeMembers, coldKey) {
+			continue
 		}
+		m.committeeMembers[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = expiry
 	}
 
-	// Load hot key authorizations
-	if len(state.HotKeyAuthorizationsByCredential) > 0 {
-		maps.Copy(
-			m.hotKeyAuthorizations,
-			state.HotKeyAuthorizationsByCredential,
-		)
-	} else {
-		for coldKey, hotKey := range state.HotKeyAuthorizations {
-			m.hotKeyAuthorizations[ledger.RewardAccountKey{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: coldKey,
-			}] = common.Credential{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: hotKey,
-			}
+	// Load hot key authorizations using the same compatibility rule.
+	maps.Copy(
+		m.hotKeyAuthorizations,
+		state.HotKeyAuthorizationsByCredential,
+	)
+	for coldKey, hotKey := range state.HotKeyAuthorizations {
+		if hasCredentialHash(m.hotKeyAuthorizations, coldKey) {
+			continue
+		}
+		m.hotKeyAuthorizations[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hotKey,
 		}
 	}
 	maps.Copy(m.committeeResignations, state.CommitteeResignations)
@@ -550,6 +551,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
 			m.hotKeyAuthorizations[coldKey] = authCert.HotCredential
+			delete(m.committeeResignations, coldKey)
 			m.govState.AuthorizeHotCredential(
 				authCert.ColdCredential,
 				authCert.HotCredential,
@@ -985,6 +987,7 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 		m.govState.Roots.ConstitutionalCommittee = &id
 		for coldKey := range proposal.RemovedMembers {
 			delete(m.govState.CommitteeMembersByCredential, coldKey)
+			delete(m.govState.CommitteeMembers, coldKey.Credential)
 			delete(m.committeeMembers, coldKey)
 			delete(m.govState.HotKeyAuthorizationsByCredential, coldKey)
 			delete(
@@ -1199,6 +1202,34 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	hotKeyAuth := m.hotKeyAuthorizations    // capture for closure
 	resignations := m.committeeResignations // capture for closure
 	proposals := m.govState.Proposals       // capture for closure
+	legacyMembersByHash := make(map[common.Blake2b224]common.CommitteeMember)
+	ambiguousMemberHashes := make(map[common.Blake2b224]bool)
+	for coldKey, expiry := range committeeMembers {
+		hash := coldKey.Credential
+		if ambiguousMemberHashes[hash] {
+			continue
+		}
+		if _, exists := legacyMembersByHash[hash]; exists {
+			delete(legacyMembersByHash, hash)
+			ambiguousMemberHashes[hash] = true
+			continue
+		}
+		member := common.CommitteeMember{
+			ColdKey:     hash,
+			ExpiryEpoch: expiry,
+			Resigned:    resignations[coldKey],
+		}
+		if hotKey, ok := hotKeyAuth[coldKey]; ok && !member.Resigned {
+			hotHash := hotKey.Credential
+			member.HotKey = &hotHash
+		}
+		legacyMembersByHash[hash] = member
+	}
+	legacyMembers := make([]common.CommitteeMember, 0, len(legacyMembersByHash))
+	for _, member := range legacyMembersByHash {
+		legacyMembers = append(legacyMembers, member)
+	}
+	builder.WithCommitteeMembers(legacyMembers)
 	builder.WithCommitteeCredentialMember(
 		func(coldCredential common.Credential) (*common.CommitteeMember, error) {
 			coldKey := ledger.NewRewardAccountKey(coldCredential)
@@ -1230,7 +1261,10 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 					}, nil
 				}
 				if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
-					len(proposal.ProposedMembersByCredential) == 0 {
+					!hasCredentialHash(
+						proposal.ProposedMembersByCredential,
+						coldCredential.Credential,
+					) {
 					if expiry, ok := proposal.ProposedMembers[coldCredential.Credential]; ok {
 						return &common.CommitteeMember{
 							ColdKey:     coldCredential.Credential,

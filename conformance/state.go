@@ -206,6 +206,18 @@ func NewGovernanceState() *GovernanceState {
 	}
 }
 
+func hasCredentialHash[V any](
+	values map[ledger.RewardAccountKey]V,
+	hash common.Blake2b224,
+) bool {
+	for credential := range values {
+		if credential.Credential == hash {
+			return true
+		}
+	}
+	return false
+}
+
 // LoadFromParsedState loads governance state from a parsed initial state.
 func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.CurrentEpoch = state.CurrentEpoch
@@ -245,15 +257,18 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.Constitution = nil
 
 	// Load committee members
-	committeeMembers := state.CommitteeMembersByCredential
-	if len(committeeMembers) == 0 {
+	committeeMembers := maps.Clone(state.CommitteeMembersByCredential)
+	if committeeMembers == nil {
 		committeeMembers = make(map[ledger.RewardAccountKey]uint64)
-		for coldKey, expiry := range state.CommitteeMembers {
-			committeeMembers[ledger.RewardAccountKey{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: coldKey,
-			}] = expiry
+	}
+	for coldKey, expiry := range state.CommitteeMembers {
+		if hasCredentialHash(committeeMembers, coldKey) {
+			continue
 		}
+		committeeMembers[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = expiry
 	}
 	for coldKey, expiry := range committeeMembers {
 		member := &CommitteeMemberInfo{
@@ -266,19 +281,22 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.syncLegacyCommitteeMembers()
 
 	// Load hot key authorizations and link to committee members
-	hotKeyAuthorizations := state.HotKeyAuthorizationsByCredential
-	if len(hotKeyAuthorizations) == 0 {
+	hotKeyAuthorizations := maps.Clone(state.HotKeyAuthorizationsByCredential)
+	if hotKeyAuthorizations == nil {
 		hotKeyAuthorizations = make(
 			map[ledger.RewardAccountKey]common.Credential,
 		)
-		for coldKey, hotKey := range state.HotKeyAuthorizations {
-			hotKeyAuthorizations[ledger.RewardAccountKey{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: coldKey,
-			}] = common.Credential{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: hotKey,
-			}
+	}
+	for coldKey, hotKey := range state.HotKeyAuthorizations {
+		if hasCredentialHash(hotKeyAuthorizations, coldKey) {
+			continue
+		}
+		hotKeyAuthorizations[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hotKey,
 		}
 	}
 	for coldKey, hotKey := range hotKeyAuthorizations {
@@ -439,7 +457,10 @@ func (g *GovernanceState) GetCommitteeCredentialMember(
 		return member
 	}
 	if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
-		len(g.CommitteeMembersByCredential) == 0 {
+		!hasCredentialHash(
+			g.CommitteeMembersByCredential,
+			coldCredential.Credential,
+		) {
 		if member := g.CommitteeMembers[coldCredential.Credential]; member != nil {
 			return member
 		}
@@ -458,7 +479,10 @@ func (g *GovernanceState) GetCommitteeCredentialMember(
 			}
 		}
 		if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
-			len(proposal.ProposedMembersByCredential) == 0 {
+			!hasCredentialHash(
+				proposal.ProposedMembersByCredential,
+				coldCredential.Credential,
+			) {
 			expiry, ok := proposal.ProposedMembers[coldCredential.Credential]
 			if !ok {
 				continue
@@ -502,7 +526,10 @@ func (g *GovernanceState) IsProposedCommitteeCredentialMember(
 				return true
 			}
 			if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
-				len(proposal.ProposedMembersByCredential) == 0 {
+				!hasCredentialHash(
+					proposal.ProposedMembersByCredential,
+					coldCredential.Credential,
+				) {
 				_, ok := proposal.ProposedMembers[coldCredential.Credential]
 				if ok {
 					return true
@@ -758,7 +785,22 @@ func (g *GovernanceState) AuthorizeHotCredential(
 	hotCredential common.Credential,
 ) {
 	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	if !hasCredentialHash(
+		g.HotKeyAuthorizationsByCredential,
+		coldCredential.Credential,
+	) {
+		if legacyHotKey, ok := g.HotKeyAuthorizations[coldCredential.Credential]; ok {
+			g.HotKeyAuthorizationsByCredential[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: coldCredential.Credential,
+			}] = common.Credential{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: legacyHotKey,
+			}
+		}
+	}
 	g.HotKeyAuthorizationsByCredential[coldKey] = hotCredential
+	delete(g.CommitteeResignations, coldKey)
 	g.syncLegacyHotKeyAuthorizations()
 	if member, ok := g.CommitteeMembersByCredential[coldKey]; ok {
 		hotCredentialCopy := hotCredential
@@ -785,10 +827,6 @@ func (g *GovernanceState) AuthorizeHotKey(
 			Credential: hotKey,
 		},
 	)
-	delete(g.CommitteeResignations, ledger.RewardAccountKey{
-		CredType:   common.CredentialTypeAddrKeyHash,
-		Credential: coldKey,
-	})
 	if member := g.legacyKeyCommitteeMember(coldKey); member != nil {
 		hotKeyCopy := hotKey
 		member.HotKey = &hotKeyCopy
@@ -844,10 +882,13 @@ func (g *GovernanceState) legacyKeyCommitteeMember(
 }
 
 func (g *GovernanceState) syncLegacyCommitteeMembers() {
+	legacyMembers := maps.Clone(g.CommitteeMembers)
 	clear(g.CommitteeMembers)
 	ambiguous := make(map[common.Blake2b224]bool)
+	typedHashes := make(map[common.Blake2b224]bool)
 	for credential, member := range g.CommitteeMembersByCredential {
 		hash := credential.Credential
+		typedHashes[hash] = true
 		if ambiguous[hash] {
 			continue
 		}
@@ -857,6 +898,12 @@ func (g *GovernanceState) syncLegacyCommitteeMembers() {
 			continue
 		}
 		g.CommitteeMembers[hash] = member
+	}
+	for coldKey, member := range legacyMembers {
+		if typedHashes[coldKey] {
+			continue
+		}
+		g.CommitteeMembers[coldKey] = member
 	}
 }
 

@@ -264,9 +264,33 @@ func (v *Validator) validateCertificates(
 		}
 	}
 
+	resignedCredentials := make(map[ledger.RewardAccountKey]bool)
 	for _, cert := range certs {
+		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
+			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
+			if resignedCredentials[coldKey] {
+				return fmt.Errorf(
+					"cannot authorize hot key for resigned CC member %x",
+					authCert.ColdCredential.Credential,
+				)
+			}
+		}
+		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
+			coldKey := ledger.NewRewardAccountKey(resignCert.ColdCredential)
+			if resignedCredentials[coldKey] {
+				return fmt.Errorf(
+					"cannot resign already resigned CC member %x",
+					resignCert.ColdCredential.Credential,
+				)
+			}
+		}
 		if err := v.validateCertificate(cert, govState, withdrawnCreds); err != nil {
 			return err
+		}
+		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
+			resignedCredentials[ledger.NewRewardAccountKey(
+				resignCert.ColdCredential,
+			)] = true
 		}
 	}
 
@@ -346,7 +370,13 @@ func (v *Validator) validateCertificate(
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldCredential := authCert.ColdCredential
 			member := govState.GetCommitteeCredentialMember(coldCredential)
-			if member != nil && member.Resigned {
+			if member == nil {
+				return fmt.Errorf(
+					"cannot authorize hot key for non-member %x",
+					coldCredential.Credential,
+				)
+			}
+			if member.Resigned {
 				return fmt.Errorf(
 					"cannot authorize hot key for resigned CC member %x",
 					coldCredential.Credential,
@@ -369,14 +399,7 @@ func (v *Validator) validateCertificate(
 						coldCredential.Credential,
 					)
 				}
-				coldKey := ledger.NewRewardAccountKey(coldCredential)
-				// Check if this cold key is a current committee member
-				_, isMember := govState.CommitteeMembersByCredential[coldKey]
-				// Also check if this cold key is proposed in any pending UpdateCommittee proposal
-				isProposed := govState.IsProposedCommitteeCredentialMember(
-					coldCredential,
-				)
-				if !isMember && !isProposed {
+				if member == nil {
 					return fmt.Errorf(
 						"cannot resign non-member %x",
 						coldCredential.Credential[:],
@@ -554,12 +577,12 @@ func (v *Validator) validateUpdateCommittee(
 	govState *GovernanceState,
 ) error {
 	// ConflictingCommitteeUpdate: no credential should be both added and removed
-	removedCreds := make(map[common.Blake2b224]bool)
+	removedCreds := make(map[ledger.RewardAccountKey]bool)
 	for _, cred := range ga.Credentials {
-		removedCreds[cred.Credential] = true
+		removedCreds[ledger.NewRewardAccountKey(cred)] = true
 	}
 	for cred := range ga.CredEpochs {
-		if cred != nil && removedCreds[cred.Credential] {
+		if cred != nil && removedCreds[ledger.NewRewardAccountKey(*cred)] {
 			return fmt.Errorf(
 				"conflicting committee update: credential %x is both added and removed",
 				cred.Credential,

@@ -122,6 +122,593 @@ func TestGovernanceStateLegacyCommitteeMutationCompatibility(t *testing.T) {
 	require.False(t, firstMember.Resigned)
 }
 
+func TestAuthorizeHotCredentialClearsCommitteeResignation(t *testing.T) {
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	hotCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	state := NewGovernanceState()
+	member := &CommitteeMemberInfo{
+		ColdCredential: coldCredential,
+		ColdKey:        coldCredential.Credential,
+		ExpiryEpoch:    42,
+		Resigned:       true,
+	}
+	state.CommitteeMembersByCredential[coldKey] = member
+	state.CommitteeResignations[coldKey] = true
+
+	state.AuthorizeHotCredential(coldCredential, hotCredential)
+
+	require.NotContains(t, state.CommitteeResignations, coldKey)
+	require.False(t, member.Resigned)
+	require.Equal(
+		t,
+		hotCredential,
+		state.HotKeyAuthorizationsByCredential[coldKey],
+	)
+}
+
+func TestSyncLegacyCommitteeMembersPreservesUnrelatedEntries(t *testing.T) {
+	legacyHash := common.Blake2b224{0x01}
+	typedHash := common.Blake2b224{0x02}
+	ambiguousHash := common.Blake2b224{0x03}
+	legacyMember := &CommitteeMemberInfo{ColdKey: legacyHash, ExpiryEpoch: 40}
+	typedMember := &CommitteeMemberInfo{ColdKey: typedHash, ExpiryEpoch: 41}
+	state := NewGovernanceState()
+	state.CommitteeMembers[legacyHash] = legacyMember
+	state.CommitteeMembers[ambiguousHash] = &CommitteeMemberInfo{
+		ColdKey:     ambiguousHash,
+		ExpiryEpoch: 39,
+	}
+	state.CommitteeMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: typedHash,
+	}] = typedMember
+	state.CommitteeMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: ambiguousHash,
+	}] = &CommitteeMemberInfo{ColdKey: ambiguousHash, ExpiryEpoch: 42}
+	state.CommitteeMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: ambiguousHash,
+	}] = &CommitteeMemberInfo{ColdKey: ambiguousHash, ExpiryEpoch: 43}
+
+	state.syncLegacyCommitteeMembers()
+
+	require.Same(t, legacyMember, state.CommitteeMembers[legacyHash])
+	require.Same(t, typedMember, state.CommitteeMembers[typedHash])
+	require.NotContains(t, state.CommitteeMembers, ambiguousHash)
+}
+
+func TestResignCommitteeCertificateMembershipCompatibility(t *testing.T) {
+	coldHash := common.Blake2b224{0x01}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldHash,
+	}
+	certificate := func(
+		credential common.Credential,
+	) *common.ResignCommitteeColdCertificate {
+		return &common.ResignCommitteeColdCertificate{
+			CertType:       uint(common.CertificateTypeResignCommitteeCold),
+			ColdCredential: credential,
+		}
+	}
+	validator := NewValidator()
+
+	t.Run("legacy current member", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.CommitteeMembers[coldHash] = &CommitteeMemberInfo{
+			ColdKey:     coldHash,
+			ExpiryEpoch: 42,
+		}
+		require.NoError(t, validator.validateCertificate(
+			certificate(keyCredential),
+			state,
+			nil,
+		))
+	})
+
+	t.Run("true non-member", func(t *testing.T) {
+		err := validator.validateCertificate(
+			certificate(keyCredential),
+			NewGovernanceState(),
+			nil,
+		)
+		require.ErrorContains(t, err, "cannot resign non-member")
+	})
+
+	t.Run("same hash script member is not key member", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.CommitteeMembersByCredential[ledger.NewRewardAccountKey(
+			scriptCredential,
+		)] = &CommitteeMemberInfo{
+			ColdCredential: scriptCredential,
+			ColdKey:        coldHash,
+			ExpiryEpoch:    42,
+		}
+		state.syncLegacyCommitteeMembers()
+		err := validator.validateCertificate(
+			certificate(keyCredential),
+			state,
+			nil,
+		)
+		require.ErrorContains(t, err, "cannot resign non-member")
+	})
+
+	t.Run("same hash typed members remain exact", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.CommitteeMembersByCredential[ledger.NewRewardAccountKey(
+			keyCredential,
+		)] = &CommitteeMemberInfo{
+			ColdCredential: keyCredential,
+			ColdKey:        coldHash,
+			ExpiryEpoch:    42,
+		}
+		state.CommitteeMembersByCredential[ledger.NewRewardAccountKey(
+			scriptCredential,
+		)] = &CommitteeMemberInfo{
+			ColdCredential: scriptCredential,
+			ColdKey:        coldHash,
+			ExpiryEpoch:    43,
+		}
+		state.syncLegacyCommitteeMembers()
+		require.Nil(t, state.GetCommitteeMember(coldHash))
+		require.NoError(t, validator.validateCertificate(
+			certificate(keyCredential),
+			state,
+			nil,
+		))
+		require.NoError(t, validator.validateCertificate(
+			certificate(scriptCredential),
+			state,
+			nil,
+		))
+	})
+}
+
+func TestCommitteeCertificateValidationUsesSequentialState(t *testing.T) {
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	hotCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	state := NewGovernanceState()
+	state.CommitteeMembersByCredential[ledger.NewRewardAccountKey(
+		coldCredential,
+	)] = &CommitteeMemberInfo{
+		ColdCredential: coldCredential,
+		ColdKey:        coldCredential.Credential,
+		ExpiryEpoch:    42,
+	}
+	resignation := &common.ResignCommitteeColdCertificate{
+		CertType:       uint(common.CertificateTypeResignCommitteeCold),
+		ColdCredential: coldCredential,
+	}
+	authorization := &common.AuthCommitteeHotCertificate{
+		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+		ColdCredential: coldCredential,
+		HotCredential:  hotCredential,
+	}
+	txWithCertificates := func(
+		certificates ...common.Certificate,
+	) *conway.ConwayTransaction {
+		wrappers := make([]common.CertificateWrapper, len(certificates))
+		for idx, certificate := range certificates {
+			wrappers[idx] = common.CertificateWrapper{
+				Type:        certificate.Type(),
+				Certificate: certificate,
+			}
+		}
+		return &conway.ConwayTransaction{
+			Body: conway.ConwayTransactionBody{
+				TxCertificates: wrappers,
+			},
+			TxIsValid: true,
+		}
+	}
+	validator := NewValidator()
+
+	require.ErrorContains(t, validator.validateCertificates(
+		txWithCertificates(resignation, authorization),
+		state,
+	), "cannot authorize hot key for resigned CC member")
+	require.NoError(t, validator.validateCertificates(
+		txWithCertificates(authorization, resignation),
+		state,
+	))
+	require.ErrorContains(t, validator.validateCertificates(
+		txWithCertificates(resignation, resignation),
+		state,
+	), "cannot resign already resigned CC member")
+}
+
+func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
+	coldHash := common.Blake2b224{0x01}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldHash,
+	}
+	authorization := func(
+		credential common.Credential,
+	) *common.AuthCommitteeHotCertificate {
+		return &common.AuthCommitteeHotCertificate{
+			CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+			ColdCredential: credential,
+			HotCredential: common.Credential{
+				Credential: common.Blake2b224{0x02},
+			},
+		}
+	}
+	validator := NewValidator()
+
+	t.Run("true non-member", func(t *testing.T) {
+		err := validator.validateCertificate(
+			authorization(keyCredential),
+			NewGovernanceState(),
+			nil,
+		)
+		require.ErrorContains(t, err, "cannot authorize hot key for non-member")
+	})
+
+	t.Run("same hash script member is not key member", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.CommitteeMembersByCredential[ledger.NewRewardAccountKey(
+			scriptCredential,
+		)] = &CommitteeMemberInfo{
+			ColdCredential: scriptCredential,
+			ColdKey:        coldHash,
+			ExpiryEpoch:    42,
+		}
+		err := validator.validateCertificate(
+			authorization(keyCredential),
+			state,
+			nil,
+		)
+		require.ErrorContains(t, err, "cannot authorize hot key for non-member")
+		require.NoError(t, validator.validateCertificate(
+			authorization(scriptCredential),
+			state,
+			nil,
+		))
+	})
+
+	t.Run("exact proposed member", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.Proposals["proposal#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType: common.GovActionTypeUpdateCommittee,
+				ProposedMembersByCredential: map[ledger.RewardAccountKey]uint64{
+					ledger.NewRewardAccountKey(keyCredential): 42,
+				},
+			},
+		}
+		require.NoError(t, validator.validateCertificate(
+			authorization(keyCredential),
+			state,
+			nil,
+		))
+		err := validator.validateCertificate(
+			authorization(scriptCredential),
+			state,
+			nil,
+		)
+		require.ErrorContains(t, err, "cannot authorize hot key for non-member")
+	})
+}
+
+func TestMixedLegacyAndTypedCommitteeState(t *testing.T) {
+	legacyHash := common.Blake2b224{0x01}
+	typedHash := common.Blake2b224{0x02}
+	legacyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: legacyHash,
+	}
+	typedCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: typedHash,
+	}
+	legacyMember := &CommitteeMemberInfo{
+		ColdKey:     legacyHash,
+		ExpiryEpoch: 41,
+	}
+	state := NewGovernanceState()
+	state.CommitteeMembers[legacyHash] = legacyMember
+	state.CommitteeMembersByCredential[ledger.NewRewardAccountKey(
+		typedCredential,
+	)] = &CommitteeMemberInfo{
+		ColdCredential: typedCredential,
+		ColdKey:        typedHash,
+		ExpiryEpoch:    42,
+	}
+
+	require.Same(
+		t,
+		legacyMember,
+		state.GetCommitteeCredentialMember(legacyCredential),
+	)
+	require.NoError(t, NewValidator().validateCertificate(
+		&common.ResignCommitteeColdCertificate{
+			CertType:       uint(common.CertificateTypeResignCommitteeCold),
+			ColdCredential: legacyCredential,
+		},
+		state,
+		nil,
+	))
+}
+
+func TestAuthorizeHotCredentialPreservesLegacyHashCollision(t *testing.T) {
+	coldHash := common.Blake2b224{0x01}
+	legacyHotHash := common.Blake2b224{0x02}
+	scriptHotHash := common.Blake2b224{0x03}
+	keyCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldHash,
+	}
+	scriptCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldHash,
+	}
+	state := NewGovernanceState()
+	state.HotKeyAuthorizations[coldHash] = legacyHotHash
+
+	state.AuthorizeHotCredential(scriptCold.AsCredential(), common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: scriptHotHash,
+	})
+
+	require.Equal(t, common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: legacyHotHash,
+	}, state.HotKeyAuthorizationsByCredential[keyCold])
+	require.Equal(t, common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: scriptHotHash,
+	}, state.HotKeyAuthorizationsByCredential[scriptCold])
+	require.NotContains(t, state.HotKeyAuthorizations, coldHash)
+}
+
+func TestLoadInitialStateMergesLegacyAndTypedCommitteeState(t *testing.T) {
+	legacyHash := common.Blake2b224{0x01}
+	legacyHotHash := common.Blake2b224{0x02}
+	typedHash := common.Blake2b224{0x03}
+	typedHotHash := common.Blake2b224{0x04}
+	legacyKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: legacyHash,
+	}
+	typedScript := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: typedHash,
+	}
+	initialState := &ParsedInitialState{
+		CommitteeMembers: map[common.Blake2b224]uint64{
+			legacyHash: 41,
+		},
+		CommitteeMembersByCredential: map[ledger.RewardAccountKey]uint64{
+			typedScript: 42,
+		},
+		HotKeyAuthorizations: map[common.Blake2b224]common.Blake2b224{
+			legacyHash: legacyHotHash,
+		},
+		HotKeyAuthorizationsByCredential: map[ledger.RewardAccountKey]common.Credential{
+			typedScript: {
+				CredType:   common.CredentialTypeScriptHash,
+				Credential: typedHotHash,
+			},
+		},
+	}
+	stateManager := NewMockStateManager()
+	require.NoError(t, stateManager.LoadInitialState(initialState, nil))
+
+	require.Equal(t, uint64(41), stateManager.committeeMembers[legacyKey])
+	require.Equal(t, uint64(42), stateManager.committeeMembers[typedScript])
+	require.Equal(t, common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: legacyHotHash,
+	}, stateManager.hotKeyAuthorizations[legacyKey])
+	require.Equal(t, common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: typedHotHash,
+	}, stateManager.hotKeyAuthorizations[typedScript])
+	require.NotNil(
+		t,
+		stateManager.govState.CommitteeMembersByCredential[legacyKey],
+	)
+	require.NotNil(
+		t,
+		stateManager.govState.CommitteeMembersByCredential[typedScript],
+	)
+	require.Contains(
+		t,
+		stateManager.govState.HotKeyAuthorizationsByCredential,
+		legacyKey,
+	)
+	require.Contains(
+		t,
+		stateManager.govState.HotKeyAuthorizationsByCredential,
+		typedScript,
+	)
+}
+
+func TestLoadInitialStateDoesNotPromoteTypedProjection(t *testing.T) {
+	coldHash := common.Blake2b224{0x01}
+	hotHash := common.Blake2b224{0x02}
+	keyCredential := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldHash,
+	}
+	scriptCredential := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldHash,
+	}
+	initialState := &ParsedInitialState{
+		CommitteeMembers: map[common.Blake2b224]uint64{
+			coldHash: 42,
+		},
+		CommitteeMembersByCredential: map[ledger.RewardAccountKey]uint64{
+			scriptCredential: 42,
+		},
+		HotKeyAuthorizations: map[common.Blake2b224]common.Blake2b224{
+			coldHash: hotHash,
+		},
+		HotKeyAuthorizationsByCredential: map[ledger.RewardAccountKey]common.Credential{
+			scriptCredential: {
+				CredType:   common.CredentialTypeScriptHash,
+				Credential: hotHash,
+			},
+		},
+	}
+	stateManager := NewMockStateManager()
+	require.NoError(t, stateManager.LoadInitialState(initialState, nil))
+
+	require.NotContains(t, stateManager.committeeMembers, keyCredential)
+	require.Contains(t, stateManager.committeeMembers, scriptCredential)
+	require.NotContains(t, stateManager.hotKeyAuthorizations, keyCredential)
+	require.Contains(t, stateManager.hotKeyAuthorizations, scriptCredential)
+	require.NotContains(
+		t,
+		stateManager.govState.CommitteeMembersByCredential,
+		keyCredential,
+	)
+	require.Contains(
+		t,
+		stateManager.govState.CommitteeMembersByCredential,
+		scriptCredential,
+	)
+}
+
+func TestBuildLedgerStatePreservesLegacyCommitteeMembers(t *testing.T) {
+	firstHash := common.Blake2b224{0x01}
+	secondHash := common.Blake2b224{0x02}
+	firstHotHash := common.Blake2b224{0x03}
+	firstKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: firstHash,
+	}
+	secondKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: secondHash,
+	}
+	secondScript := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: secondHash,
+	}
+	stateManager := NewMockStateManager()
+	stateManager.committeeMembers[firstKey] = 41
+	stateManager.committeeMembers[secondKey] = 42
+	stateManager.committeeMembers[secondScript] = 43
+	stateManager.hotKeyAuthorizations[firstKey] = common.Credential{
+		Credential: firstHotHash,
+	}
+
+	members, err := stateManager.buildLedgerState().CommitteeMembers()
+	require.NoError(t, err)
+	require.Equal(t, []common.CommitteeMember{{
+		ColdKey:     firstHash,
+		HotKey:      &firstHotHash,
+		ExpiryEpoch: 41,
+	}}, members)
+}
+
+func TestProcessAuthorizationClearsAllResignationState(t *testing.T) {
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	hotCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	stateManager := NewMockStateManager()
+	stateManager.committeeMembers[coldKey] = 42
+	stateManager.govState.CommitteeMembersByCredential[coldKey] = &CommitteeMemberInfo{
+		ColdCredential: coldCredential,
+		ColdKey:        coldCredential.Credential,
+		ExpiryEpoch:    42,
+	}
+	stateManager.processCertificate(&common.ResignCommitteeColdCertificate{
+		CertType:       uint(common.CertificateTypeResignCommitteeCold),
+		ColdCredential: coldCredential,
+	})
+	stateManager.processCertificate(&common.AuthCommitteeHotCertificate{
+		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+		ColdCredential: coldCredential,
+		HotCredential:  hotCredential,
+	})
+
+	require.NotContains(t, stateManager.committeeResignations, coldKey)
+	require.NotContains(
+		t,
+		stateManager.govState.CommitteeResignations,
+		coldKey,
+	)
+	member, err := stateManager.buildLedgerState().
+		CommitteeCredentialMember(coldCredential)
+	require.NoError(t, err)
+	require.NotNil(t, member)
+	require.False(t, member.Resigned)
+	require.NotNil(t, member.HotKey)
+	require.Equal(t, hotCredential.Credential, *member.HotKey)
+}
+
+func TestUpdateCommitteeConflictUsesCredentialIdentity(t *testing.T) {
+	coldHash := common.Blake2b224{0x01}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldHash,
+	}
+	state := NewGovernanceState()
+	validator := NewValidator()
+	update := func(
+		removed common.Credential,
+		added common.Credential,
+	) *common.UpdateCommitteeGovAction {
+		return &common.UpdateCommitteeGovAction{
+			Credentials: []common.Credential{removed},
+			CredEpochs:  map[*common.Credential]uint{&added: 1},
+		}
+	}
+
+	require.NoError(t, validator.validateUpdateCommittee(
+		update(keyCredential, scriptCredential),
+		state,
+	))
+	require.NoError(t, validator.validateUpdateCommittee(
+		update(scriptCredential, keyCredential),
+		state,
+	))
+	require.ErrorContains(t, validator.validateUpdateCommittee(
+		update(keyCredential, keyCredential),
+		state,
+	), "conflicting committee update")
+	require.ErrorContains(t, validator.validateUpdateCommittee(
+		update(scriptCredential, scriptCredential),
+		state,
+	), "conflicting committee update")
+}
+
 func TestLegacyCommitteeMutationDoesNotGuessScriptCredential(t *testing.T) {
 	firstColdKey := common.Blake2b224{0x01}
 	firstHotKey := common.Blake2b224{0x02}
