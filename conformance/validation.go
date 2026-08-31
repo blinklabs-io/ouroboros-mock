@@ -138,8 +138,13 @@ func (v *Validator) validateVoterExists(
 		common.VoterTypeConstitutionalCommitteeHotScriptHash:
 		// For CC voters, we need to find a member with this hot key
 		found := false
-		for _, hotKey := range govState.HotKeyAuthorizations {
-			if hotKey == voterHash {
+		for _, hotKey := range govState.HotKeyAuthorizationsByCredential {
+			expectedType := uint(common.CredentialTypeAddrKeyHash)
+			if voterType == common.VoterTypeConstitutionalCommitteeHotScriptHash {
+				expectedType = common.CredentialTypeScriptHash
+			}
+			if hotKey.CredType == expectedType &&
+				hotKey.Credential == voterHash {
 				found = true
 				break
 			}
@@ -339,12 +344,12 @@ func (v *Validator) validateCertificate(
 
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
-			coldCredential := authCert.ColdCredential.Credential
-			member := govState.GetCommitteeMember(coldCredential)
+			coldCredential := authCert.ColdCredential
+			member := govState.GetCommitteeCredentialMember(coldCredential)
 			if member != nil && member.Resigned {
 				return fmt.Errorf(
 					"cannot authorize hot key for resigned CC member %x",
-					coldCredential,
+					coldCredential.Credential,
 				)
 			}
 		}
@@ -356,15 +361,25 @@ func (v *Validator) validateCertificate(
 		// - "Resigning proposed CC key" should succeed (proposed but not yet enacted)
 		if govState != nil {
 			if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
-				coldHash := resignCert.ColdCredential.Credential
+				coldCredential := resignCert.ColdCredential
+				member := govState.GetCommitteeCredentialMember(coldCredential)
+				if member != nil && member.Resigned {
+					return fmt.Errorf(
+						"cannot resign already resigned CC member %x",
+						coldCredential.Credential,
+					)
+				}
+				coldKey := ledger.NewRewardAccountKey(coldCredential)
 				// Check if this cold key is a current committee member
-				_, isMember := govState.CommitteeMembers[coldHash]
+				_, isMember := govState.CommitteeMembersByCredential[coldKey]
 				// Also check if this cold key is proposed in any pending UpdateCommittee proposal
-				isProposed := govState.IsProposedCommitteeMember(coldHash)
+				isProposed := govState.IsProposedCommitteeCredentialMember(
+					coldCredential,
+				)
 				if !isMember && !isProposed {
 					return fmt.Errorf(
 						"cannot resign non-member %x",
-						coldHash[:],
+						coldCredential.Credential[:],
 					)
 				}
 			}

@@ -794,31 +794,45 @@ func TestCommitteeMemberBuilder_Build_MissingColdKey(t *testing.T) {
 // ProposedCommitteeMembers Tests
 // =============================================================================
 
+type committeeCredentialState interface {
+	CommitteeCredentialMember(
+		lcommon.Credential,
+	) (*lcommon.CommitteeMember, error)
+}
+
+type proposedCommitteeCredentialMembersBuilder interface {
+	WithProposedCommitteeCredentialMembers(
+		map[ledger.RewardAccountKey]uint64,
+	) *ledger.LedgerStateBuilder
+}
+
 func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
 	// Create cold key hashes
 	var coldKey1, coldKey2 lcommon.Blake2b224
 	copy(coldKey1[:], bytes.Repeat([]byte{0x11}, 28))
 	copy(coldKey2[:], bytes.Repeat([]byte{0x22}, 28))
+	coldCredential1 := lcommon.Credential{Credential: coldKey1}
+	coldCredential2 := lcommon.Credential{Credential: coldKey2}
 
 	// Set up proposed committee members with expiry epochs
-	proposed := map[lcommon.Blake2b224]uint64{
-		coldKey1: 100,
-		coldKey2: 200,
+	proposed := map[ledger.RewardAccountKey]uint64{
+		ledger.NewRewardAccountKey(coldCredential1): 100,
+		ledger.NewRewardAccountKey(coldCredential2): 200,
 	}
 
 	state := ledger.NewLedgerStateBuilder().
-		WithProposedCommitteeMembers(proposed).
+		WithProposedCommitteeCredentialMembers(proposed).
 		Build()
 
 	// Lookup proposed member should return synthetic CommitteeMember
-	member, err := state.CommitteeMember(coldKey1)
+	member, err := state.CommitteeCredentialMember(coldCredential1)
 	if err != nil {
 		t.Fatalf("CommitteeMember() returned error: %v", err)
 	}
 	if member == nil {
 		t.Fatal("CommitteeMember() returned nil for proposed member")
 	}
-	if member.ColdKey != coldKey1 {
+	if member.ColdKey != coldCredential1.Credential {
 		t.Errorf("ColdKey mismatch: got %v, want %v", member.ColdKey, coldKey1)
 	}
 	if member.ExpiryEpoch != 100 {
@@ -833,6 +847,69 @@ func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
 	if member.Resigned {
 		t.Error("Resigned should be false for proposed member")
 	}
+
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: coldKey1,
+	}
+	scriptMember, err := state.CommitteeCredentialMember(scriptCredential)
+	if err != nil {
+		t.Fatalf("CommitteeMember() returned error: %v", err)
+	}
+	if scriptMember != nil {
+		t.Fatal("CommitteeMember() conflated key and script credentials")
+	}
+	legacyMember, err := state.CommitteeMember(coldKey1)
+	require.NoError(t, err)
+	require.NotNil(t, legacyMember)
+	assert.Equal(t, uint64(100), legacyMember.ExpiryEpoch)
+}
+
+func TestLedgerStateBuilder_CommitteeCredentialStateRejectsAmbiguousHash(
+	t *testing.T,
+) {
+	coldKey := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x23}, 28))
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: coldKey,
+	}
+	builder := ledger.NewLedgerStateBuilder()
+	typedBuilder, ok := any(builder).(proposedCommitteeCredentialMembersBuilder)
+	require.True(t, ok, "builder does not preserve committee credential types")
+	typedBuilder.WithProposedCommitteeCredentialMembers(
+		map[ledger.RewardAccountKey]uint64{
+			ledger.NewRewardAccountKey(keyCredential):    101,
+			ledger.NewRewardAccountKey(scriptCredential): 202,
+		},
+	)
+	state := builder.Build()
+	typedState, ok := any(state).(committeeCredentialState)
+	require.True(
+		t,
+		ok,
+		"state does not expose credential-aware committee lookup",
+	)
+
+	keyMember, err := typedState.CommitteeCredentialMember(keyCredential)
+	require.NoError(t, err)
+	require.NotNil(t, keyMember)
+	assert.Equal(t, uint64(101), keyMember.ExpiryEpoch)
+	scriptMember, err := typedState.CommitteeCredentialMember(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptMember)
+	assert.Equal(t, uint64(202), scriptMember.ExpiryEpoch)
+
+	legacyMember, err := state.CommitteeMember(coldKey)
+	require.NoError(t, err)
+	assert.Nil(
+		t,
+		legacyMember,
+		"hash-only lookup must not guess credential type",
+	)
 }
 
 func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
@@ -841,6 +918,7 @@ func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
 	// Create a cold key hash
 	var coldKey lcommon.Blake2b224
 	copy(coldKey[:], bytes.Repeat([]byte{0x33}, 28))
+	coldCredential := lcommon.Credential{Credential: coldKey}
 
 	// Create a hot key for the current member
 	var hotKey lcommon.Blake2b224
@@ -855,17 +933,17 @@ func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
 			Resigned:    false,
 		},
 	}
-	proposed := map[lcommon.Blake2b224]uint64{
-		coldKey: 200, // Different expiry epoch
+	proposed := map[ledger.RewardAccountKey]uint64{
+		ledger.NewRewardAccountKey(coldCredential): 200, // Different expiry epoch
 	}
 
 	state := ledger.NewLedgerStateBuilder().
 		WithCommitteeMembers(currentMembers).
-		WithProposedCommitteeMembers(proposed).
+		WithProposedCommitteeCredentialMembers(proposed).
 		Build()
 
 	// Lookup should return the current member, not the proposed one
-	member, err := state.CommitteeMember(coldKey)
+	member, err := state.CommitteeCredentialMember(coldCredential)
 	if err != nil {
 		t.Fatalf("CommitteeMember() returned error: %v", err)
 	}
@@ -888,10 +966,11 @@ func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
 func TestLedgerStateBuilder_CommitteeMember_NotFound(t *testing.T) {
 	var unknownKey lcommon.Blake2b224
 	copy(unknownKey[:], bytes.Repeat([]byte{0x99}, 28))
+	unknownCredential := lcommon.Credential{Credential: unknownKey}
 
 	state := ledger.NewLedgerStateBuilder().Build()
 
-	member, err := state.CommitteeMember(unknownKey)
+	member, err := state.CommitteeCredentialMember(unknownCredential)
 	if err != nil {
 		t.Fatalf("CommitteeMember() returned error: %v", err)
 	}

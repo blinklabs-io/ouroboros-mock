@@ -15,6 +15,7 @@
 package conformance
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
@@ -24,6 +25,82 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
+
+func TestParseVotingStateCommitteeAuthorizationSum(t *testing.T) {
+	hotColdBytes := bytes.Repeat([]byte{0x11}, common.Blake2b224Size)
+	hotKeyBytes := bytes.Repeat([]byte{0x22}, common.Blake2b224Size)
+	resignedColdBytes := bytes.Repeat([]byte{0x33}, common.Blake2b224Size)
+	hotColdCredential := any([]any{uint64(0), hotColdBytes})
+	resignedColdCredential := any([]any{uint64(0), resignedColdBytes})
+	state := &ParsedInitialState{
+		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
+		HotKeyAuthorizationsByCredential: make(
+			map[ledger.RewardAccountKey]common.Credential,
+		),
+		CommitteeResignations: make(map[ledger.RewardAccountKey]bool),
+	}
+	votingState := []any{
+		map[any]any{},
+		map[any]any{
+			&hotColdCredential: []any{
+				uint64(0),
+				[]any{uint64(0), hotKeyBytes},
+			},
+			&resignedColdCredential: []any{uint64(1), nil},
+		},
+	}
+
+	require.NoError(t, parseVotingState(state, votingState))
+	var hotColdKey common.Blake2b224
+	copy(hotColdKey[:], hotColdBytes)
+	var hotKey common.Blake2b224
+	copy(hotKey[:], hotKeyBytes)
+	var resignedColdKey common.Blake2b224
+	copy(resignedColdKey[:], resignedColdBytes)
+	hotColdIdentity := ledger.NewRewardAccountKey(common.Credential{
+		Credential: hotColdKey,
+	})
+	resignedColdIdentity := ledger.NewRewardAccountKey(common.Credential{
+		Credential: resignedColdKey,
+	})
+	require.Equal(
+		t,
+		hotKey,
+		state.HotKeyAuthorizationsByCredential[hotColdIdentity].Credential,
+	)
+	require.True(t, state.CommitteeResignations[resignedColdIdentity])
+	require.NotContains(
+		t,
+		state.HotKeyAuthorizationsByCredential,
+		resignedColdIdentity,
+	)
+}
+
+func TestExtractActionTypeAndMembersIncludesRemovals(t *testing.T) {
+	removedKeyBytes := bytes.Repeat([]byte{0x44}, common.Blake2b224Size)
+	procedure := []any{
+		nil,
+		nil,
+		[]any{
+			uint64(common.GovActionTypeUpdateCommittee),
+			nil,
+			cbor.Set{[]any{uint64(0), removedKeyBytes}},
+			map[any]any{},
+		},
+	}
+
+	actionType, removedMembers, proposedMembers := extractActionTypeAndMembers(
+		procedure,
+	)
+	var removedKey common.Blake2b224
+	copy(removedKey[:], removedKeyBytes)
+	require.Equal(t, common.GovActionTypeUpdateCommittee, actionType)
+	removedIdentity := ledger.NewRewardAccountKey(common.Credential{
+		Credential: removedKey,
+	})
+	require.True(t, removedMembers[removedIdentity])
+	require.Empty(t, proposedMembers)
+}
 
 func TestParseDelegationStatePreservesRewardCredentialIdentity(t *testing.T) {
 	hash := common.NewBlake2b224(make([]byte, 28))
