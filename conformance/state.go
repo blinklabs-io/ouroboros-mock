@@ -452,6 +452,16 @@ func (g *GovernanceState) GetCommitteeMember(
 func (g *GovernanceState) GetCommitteeCredentialMember(
 	coldCredential common.Credential,
 ) *CommitteeMemberInfo {
+	return g.getCommitteeCredentialMemberAtEpoch(
+		coldCredential,
+		g.CurrentEpoch,
+	)
+}
+
+func (g *GovernanceState) getCommitteeCredentialMemberAtEpoch(
+	coldCredential common.Credential,
+	currentEpoch uint64,
+) *CommitteeMemberInfo {
 	coldKey := ledger.NewRewardAccountKey(coldCredential)
 	if member := g.CommitteeMembersByCredential[coldKey]; member != nil {
 		return member
@@ -466,8 +476,7 @@ func (g *GovernanceState) GetCommitteeCredentialMember(
 		}
 	}
 	for _, proposal := range g.Proposals {
-		if proposal == nil ||
-			proposal.ActionType != common.GovActionTypeUpdateCommittee {
+		if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
 			continue
 		}
 		if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
@@ -521,7 +530,7 @@ func (g *GovernanceState) IsProposedCommitteeCredentialMember(
 ) bool {
 	coldKey := ledger.NewRewardAccountKey(coldCredential)
 	for _, proposal := range g.Proposals {
-		if proposal.ActionType == common.GovActionTypeUpdateCommittee {
+		if isActiveUpdateCommitteeProposal(proposal, g.CurrentEpoch) {
 			if _, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
 				return true
 			}
@@ -538,6 +547,15 @@ func (g *GovernanceState) IsProposedCommitteeCredentialMember(
 		}
 	}
 	return false
+}
+
+func isActiveUpdateCommitteeProposal(
+	proposal *ProposalState,
+	currentEpoch uint64,
+) bool {
+	return proposal != nil &&
+		proposal.ActionType == common.GovActionTypeUpdateCommittee &&
+		currentEpoch <= proposal.ExpiresAfter
 }
 
 // GetProposal returns a proposal by its GovActionId.

@@ -1205,6 +1205,7 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	hotKeyAuth := m.hotKeyAuthorizations    // capture for closure
 	resignations := m.committeeResignations // capture for closure
 	proposals := m.govState.Proposals       // capture for closure
+	currentEpoch := m.govState.CurrentEpoch
 	legacyMembersByHash := make(map[common.Blake2b224]common.CommitteeMember)
 	ambiguousMemberHashes := make(map[common.Blake2b224]bool)
 	for coldKey, expiry := range committeeMembers {
@@ -1253,7 +1254,7 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 			}
 			// Check members proposed by pending UpdateCommittee actions.
 			for _, proposal := range proposals {
-				if proposal.ActionType != common.GovActionTypeUpdateCommittee {
+				if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
 					continue
 				}
 				if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok {

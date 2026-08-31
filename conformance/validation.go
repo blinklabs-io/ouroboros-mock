@@ -58,7 +58,7 @@ func (v *Validator) ValidateTransaction(
 	}
 
 	// Validate certificates
-	if err := v.validateCertificates(tx, govState); err != nil {
+	if err := v.validateCertificates(tx, epoch, govState); err != nil {
 		return fmt.Errorf("certificate validation failed: %w", err)
 	}
 
@@ -245,6 +245,7 @@ func (v *Validator) validateWithdrawals(
 // validateCertificates validates certificates in the transaction.
 func (v *Validator) validateCertificates(
 	tx common.Transaction,
+	epoch uint64,
 	govState *GovernanceState,
 ) error {
 	certs := tx.Certificates()
@@ -284,7 +285,12 @@ func (v *Validator) validateCertificates(
 				)
 			}
 		}
-		if err := v.validateCertificate(cert, govState, withdrawnCreds); err != nil {
+		if err := v.validateCertificate(
+			cert,
+			epoch,
+			govState,
+			withdrawnCreds,
+		); err != nil {
 			return err
 		}
 		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
@@ -301,6 +307,7 @@ func (v *Validator) validateCertificates(
 // withdrawnCreds contains credentials being withdrawn in the same transaction.
 func (v *Validator) validateCertificate(
 	cert common.Certificate,
+	epoch uint64,
 	govState *GovernanceState,
 	withdrawnCreds map[ledger.RewardAccountKey]bool,
 ) error {
@@ -369,7 +376,10 @@ func (v *Validator) validateCertificate(
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldCredential := authCert.ColdCredential
-			member := govState.GetCommitteeCredentialMember(coldCredential)
+			member := govState.getCommitteeCredentialMemberAtEpoch(
+				coldCredential,
+				epoch,
+			)
 			if member == nil {
 				return fmt.Errorf(
 					"cannot authorize hot key for non-member %x",
@@ -392,7 +402,10 @@ func (v *Validator) validateCertificate(
 		if govState != nil {
 			if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
 				coldCredential := resignCert.ColdCredential
-				member := govState.GetCommitteeCredentialMember(coldCredential)
+				member := govState.getCommitteeCredentialMemberAtEpoch(
+					coldCredential,
+					epoch,
+				)
 				if member != nil && member.Resigned {
 					return fmt.Errorf(
 						"cannot resign already resigned CC member %x",

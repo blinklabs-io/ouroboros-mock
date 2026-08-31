@@ -214,6 +214,7 @@ func TestResignCommitteeCertificateMembershipCompatibility(t *testing.T) {
 		}
 		require.NoError(t, validator.validateCertificate(
 			certificate(keyCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		))
@@ -222,6 +223,7 @@ func TestResignCommitteeCertificateMembershipCompatibility(t *testing.T) {
 	t.Run("true non-member", func(t *testing.T) {
 		err := validator.validateCertificate(
 			certificate(keyCredential),
+			0,
 			NewGovernanceState(),
 			nil,
 		)
@@ -240,6 +242,7 @@ func TestResignCommitteeCertificateMembershipCompatibility(t *testing.T) {
 		state.syncLegacyCommitteeMembers()
 		err := validator.validateCertificate(
 			certificate(keyCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		)
@@ -266,11 +269,13 @@ func TestResignCommitteeCertificateMembershipCompatibility(t *testing.T) {
 		require.Nil(t, state.GetCommitteeMember(coldHash))
 		require.NoError(t, validator.validateCertificate(
 			certificate(keyCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		))
 		require.NoError(t, validator.validateCertificate(
 			certificate(scriptCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		))
@@ -324,18 +329,22 @@ func TestCommitteeCertificateValidationUsesSequentialState(t *testing.T) {
 
 	require.ErrorContains(t, validator.validateCertificates(
 		txWithCertificates(resignation, authorization),
+		state.CurrentEpoch,
 		state,
 	), "cannot authorize hot key for resigned CC member")
 	require.NoError(t, validator.validateCertificates(
 		txWithCertificates(authorization, resignation),
+		state.CurrentEpoch,
 		state,
 	))
 	require.NoError(t, validator.validateCertificates(
 		txWithCertificates(authorization, authorization),
+		state.CurrentEpoch,
 		state,
 	))
 	require.ErrorContains(t, validator.validateCertificates(
 		txWithCertificates(resignation, resignation),
+		state.CurrentEpoch,
 		state,
 	), "cannot resign already resigned CC member")
 }
@@ -462,6 +471,7 @@ func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
 	t.Run("true non-member", func(t *testing.T) {
 		err := validator.validateCertificate(
 			authorization(keyCredential),
+			0,
 			NewGovernanceState(),
 			nil,
 		)
@@ -479,12 +489,14 @@ func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
 		}
 		err := validator.validateCertificate(
 			authorization(keyCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		)
 		require.ErrorContains(t, err, "cannot authorize hot key for non-member")
 		require.NoError(t, validator.validateCertificate(
 			authorization(scriptCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		))
@@ -502,16 +514,148 @@ func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
 		}
 		require.NoError(t, validator.validateCertificate(
 			authorization(keyCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		))
 		err := validator.validateCertificate(
 			authorization(scriptCredential),
+			state.CurrentEpoch,
 			state,
 			nil,
 		)
 		require.ErrorContains(t, err, "cannot authorize hot key for non-member")
 	})
+}
+
+func TestCommitteeCertificateValidationHonorsProposalExpiry(t *testing.T) {
+	const expiresAfter = uint64(10)
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	hotCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	committeeKey := ledger.NewRewardAccountKey(coldCredential)
+	certificateCases := []struct {
+		name           string
+		certificate    common.Certificate
+		nonMemberError string
+	}{
+		{
+			name: "authorization",
+			certificate: &common.AuthCommitteeHotCertificate{
+				CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+				ColdCredential: coldCredential,
+				HotCredential:  hotCredential,
+			},
+			nonMemberError: "cannot authorize hot key for non-member",
+		},
+		{
+			name: "resignation",
+			certificate: &common.ResignCommitteeColdCertificate{
+				CertType:       uint(common.CertificateTypeResignCommitteeCold),
+				ColdCredential: coldCredential,
+			},
+			nonMemberError: "cannot resign non-member",
+		},
+	}
+	validator := NewValidator()
+
+	newProposedMemberState := func() *GovernanceState {
+		state := NewGovernanceState()
+		state.AddProposal("proposal#0", GovActionInfo{
+			ActionType:   common.GovActionTypeUpdateCommittee,
+			ExpiresAfter: expiresAfter,
+			ProposedMembersByCredential: map[ledger.RewardAccountKey]uint64{
+				committeeKey: 20,
+			},
+		})
+		return state
+	}
+
+	for _, certificateCase := range certificateCases {
+		t.Run(certificateCase.name, func(t *testing.T) {
+			for _, epochCase := range []struct {
+				name        string
+				epoch       uint64
+				shouldError bool
+			}{
+				{name: "before expiry", epoch: expiresAfter - 1},
+				{name: "at expiry", epoch: expiresAfter},
+				{name: "after expiry", epoch: expiresAfter + 1, shouldError: true},
+			} {
+				t.Run(epochCase.name, func(t *testing.T) {
+					state := newProposedMemberState()
+					// Keep the stored epoch stale to prove transaction validation
+					// uses the epoch supplied by the harness.
+					state.CurrentEpoch = 0
+					tx := ledger.NewTransactionBuilder().WithCertificates(
+						certificateCase.certificate,
+					)
+					err := validator.ValidateTransaction(
+						tx,
+						0,
+						epochCase.epoch,
+						state,
+						nil,
+					)
+					if epochCase.shouldError {
+						require.ErrorContains(
+							t,
+							err,
+							certificateCase.nonMemberError,
+						)
+						return
+					}
+					require.NoError(t, err)
+				})
+			}
+
+			t.Run("current member after proposal expiry", func(t *testing.T) {
+				state := newProposedMemberState()
+				state.CommitteeMembersByCredential[committeeKey] = &CommitteeMemberInfo{
+					ColdCredential: coldCredential,
+					ColdKey:        coldCredential.Credential,
+					ExpiryEpoch:    20,
+				}
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					certificateCase.certificate,
+				)
+				require.NoError(t, validator.ValidateTransaction(
+					tx,
+					0,
+					expiresAfter+1,
+					state,
+					nil,
+				))
+			})
+
+			t.Run("non-member", func(t *testing.T) {
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					certificateCase.certificate,
+				)
+				err := validator.ValidateTransaction(
+					tx,
+					0,
+					expiresAfter-1,
+					NewGovernanceState(),
+					nil,
+				)
+				require.ErrorContains(t, err, certificateCase.nonMemberError)
+			})
+		})
+	}
+
+	state := newProposedMemberState()
+	state.CurrentEpoch = expiresAfter
+	require.NotNil(t, state.GetCommitteeCredentialMember(coldCredential))
+	require.True(t, state.IsProposedCommitteeCredentialMember(coldCredential))
+	state.CurrentEpoch++
+	require.Nil(t, state.GetCommitteeCredentialMember(coldCredential))
+	require.False(t, state.IsProposedCommitteeCredentialMember(coldCredential))
 }
 
 func TestMixedLegacyAndTypedCommitteeState(t *testing.T) {
@@ -549,6 +693,7 @@ func TestMixedLegacyAndTypedCommitteeState(t *testing.T) {
 			CertType:       uint(common.CertificateTypeResignCommitteeCold),
 			ColdCredential: legacyCredential,
 		},
+		state.CurrentEpoch,
 		state,
 		nil,
 	))
@@ -868,6 +1013,7 @@ func TestCurrentCommitteeResignationIsVisible(t *testing.T) {
 	assert.True(t, member.Resigned)
 	require.ErrorContains(t, NewValidator().validateCertificate(
 		authorization,
+		stateManager.govState.CurrentEpoch,
 		stateManager.govState,
 		nil,
 	), "cannot authorize hot key for resigned CC member")
@@ -876,6 +1022,7 @@ func TestCurrentCommitteeResignationIsVisible(t *testing.T) {
 			CertType:       uint(common.CertificateTypeResignCommitteeCold),
 			ColdCredential: coldCredential,
 		},
+		stateManager.govState.CurrentEpoch,
 		stateManager.govState,
 		nil,
 	), "cannot resign already resigned CC member")
@@ -915,6 +1062,7 @@ func TestProposedCommitteeResignationRejectsReauthorization(t *testing.T) {
 	assert.True(t, member.Resigned)
 	require.ErrorContains(t, NewValidator().validateCertificate(
 		authorization,
+		stateManager.govState.CurrentEpoch,
 		stateManager.govState,
 		nil,
 	), "cannot authorize hot key for resigned CC member")
@@ -1003,6 +1151,7 @@ func TestCommitteeRemovalClearsStateBeforeReelection(t *testing.T) {
 	}
 	require.NoError(t, NewValidator().validateCertificate(
 		authorization,
+		stateManager.govState.CurrentEpoch,
 		stateManager.govState,
 		nil,
 	))
