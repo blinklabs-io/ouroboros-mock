@@ -998,15 +998,18 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 			delete(m.govState.CommitteeResignations, coldKey)
 			delete(m.committeeResignations, coldKey)
 		}
-		proposedMembers := proposal.ProposedMembersByCredential
-		if len(proposedMembers) == 0 {
+		proposedMembers := maps.Clone(proposal.ProposedMembersByCredential)
+		if proposedMembers == nil {
 			proposedMembers = make(map[ledger.RewardAccountKey]uint64)
-			for coldKey, expiry := range proposal.ProposedMembers {
-				proposedMembers[ledger.RewardAccountKey{
-					CredType:   common.CredentialTypeAddrKeyHash,
-					Credential: coldKey,
-				}] = expiry
+		}
+		for coldKey, expiry := range proposal.ProposedMembers {
+			if hasCredentialHash(proposedMembers, coldKey) {
+				continue
 			}
+			proposedMembers[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: coldKey,
+			}] = expiry
 		}
 		for coldKey, expiry := range proposedMembers {
 			member := &CommitteeMemberInfo{

@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -329,10 +330,110 @@ func TestCommitteeCertificateValidationUsesSequentialState(t *testing.T) {
 		txWithCertificates(authorization, resignation),
 		state,
 	))
+	require.NoError(t, validator.validateCertificates(
+		txWithCertificates(authorization, authorization),
+		state,
+	))
 	require.ErrorContains(t, validator.validateCertificates(
 		txWithCertificates(resignation, resignation),
 		state,
 	), "cannot resign already resigned CC member")
+}
+
+func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
+	t *testing.T,
+) {
+	ambiguousHash := common.Blake2b224{0x01}
+	unambiguousHash := common.Blake2b224{0x02}
+	nonMemberHash := common.Blake2b224{0x03}
+	keyMember := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: ambiguousHash,
+	}
+	scriptMember := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: ambiguousHash,
+	}
+	unambiguousMember := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: unambiguousHash,
+	}
+	stateManager := NewMockStateManager()
+	for _, coldKey := range []ledger.RewardAccountKey{
+		keyMember,
+		scriptMember,
+		unambiguousMember,
+	} {
+		stateManager.committeeMembers[coldKey] = 42
+		stateManager.govState.CommitteeMembersByCredential[coldKey] =
+			&CommitteeMemberInfo{
+				ColdCredential: coldKey.AsCredential(),
+				ColdKey:        coldKey.Credential,
+				ExpiryEpoch:    42,
+			}
+	}
+	stateManager.govState.syncLegacyCommitteeMembers()
+	txWithAuthorization := func(
+		coldCredential common.Credential,
+	) *conway.ConwayTransaction {
+		certificate := &common.AuthCommitteeHotCertificate{
+			CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+			ColdCredential: coldCredential,
+			HotCredential: common.Credential{
+				Credential: common.Blake2b224{0x04},
+			},
+		}
+		return &conway.ConwayTransaction{
+			Body: conway.ConwayTransactionBody{
+				TxCertificates: []common.CertificateWrapper{{
+					Type:        certificate.Type(),
+					Certificate: certificate,
+				}},
+			},
+			TxIsValid: true,
+		}
+	}
+	validator := NewValidator()
+	for _, coldKey := range []ledger.RewardAccountKey{
+		keyMember,
+		scriptMember,
+	} {
+		tx := txWithAuthorization(coldKey.AsCredential())
+		require.NoError(t, validator.ValidateTransaction(
+			tx,
+			0,
+			0,
+			stateManager.govState,
+			nil,
+		))
+		require.ErrorContains(t, conway.UtxoValidateCommitteeCertificates(
+			tx,
+			0,
+			stateManager.buildLedgerState(),
+			nil,
+		), "not a CC member")
+	}
+	require.ErrorContains(t, validator.ValidateTransaction(
+		txWithAuthorization(common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: nonMemberHash,
+		}),
+		0,
+		0,
+		stateManager.govState,
+		nil,
+	), "cannot authorize hot key for non-member")
+
+	hashOnlyRule := reflect.ValueOf(
+		conway.UtxoValidateCommitteeCertificates,
+	).Pointer()
+	for _, rule := range ConformanceValidationRules {
+		if reflect.ValueOf(rule).Pointer() == hashOnlyRule {
+			t.Fatal(
+				"hash-only committee certificate rule must not run after exact credential validation",
+			)
+		}
+	}
 }
 
 func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
@@ -926,6 +1027,114 @@ func TestCommitteeRemovalClearsStateBeforeReelection(t *testing.T) {
 	require.NotNil(t, legacyMember.HotKey)
 	assert.Equal(t, hotKey, *legacyMember.HotKey)
 	assert.False(t, legacyMember.Resigned)
+}
+
+func TestUpdateCommitteeEnactmentMergesCredentialViews(t *testing.T) {
+	legacyHash := common.Blake2b224{0x01}
+	typedHash := common.Blake2b224{0x02}
+	ambiguousHash := common.Blake2b224{0x03}
+	replacementHash := common.Blake2b224{0x04}
+	legacyKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: legacyHash,
+	}
+	typedScript := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: typedHash,
+	}
+	typedKeyProjection := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: typedHash,
+	}
+	ambiguousKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: ambiguousHash,
+	}
+	ambiguousScript := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: ambiguousHash,
+	}
+	replacementKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: replacementHash,
+	}
+	replacementScript := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: replacementHash,
+	}
+	stateManager := NewMockStateManager()
+	stateManager.committeeMembers[replacementScript] = 40
+	stateManager.govState.CommitteeMembersByCredential[replacementScript] =
+		&CommitteeMemberInfo{
+			ColdCredential: replacementScript.AsCredential(),
+			ColdKey:        replacementHash,
+			ExpiryEpoch:    40,
+		}
+	stateManager.govState.syncLegacyCommitteeMembers()
+	ratifiedEpoch := uint64(1)
+	stateManager.govState.Proposals["update#0"] = &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType: common.GovActionTypeUpdateCommittee,
+			RemovedMembers: map[ledger.RewardAccountKey]bool{
+				replacementScript: true,
+			},
+			ProposedMembers: map[common.Blake2b224]uint64{
+				legacyHash:      41,
+				typedHash:       42,
+				ambiguousHash:   43,
+				replacementHash: 45,
+			},
+			ProposedMembersByCredential: map[ledger.RewardAccountKey]uint64{
+				typedScript:     42,
+				ambiguousKey:    43,
+				ambiguousScript: 44,
+				replacementKey:  45,
+			},
+			ExpiresAfter: 10,
+		},
+		RatifiedEpoch: &ratifiedEpoch,
+	}
+
+	require.NoError(t, stateManager.ProcessEpochBoundary(2))
+	require.NotContains(t, stateManager.govState.Proposals, "update#0")
+	require.Equal(t, uint64(41), stateManager.committeeMembers[legacyKey])
+	require.Equal(t, uint64(42), stateManager.committeeMembers[typedScript])
+	require.NotContains(t, stateManager.committeeMembers, typedKeyProjection)
+	require.Equal(t, uint64(43), stateManager.committeeMembers[ambiguousKey])
+	require.Equal(t, uint64(44), stateManager.committeeMembers[ambiguousScript])
+	require.NotContains(t, stateManager.committeeMembers, replacementScript)
+	require.Equal(t, uint64(45), stateManager.committeeMembers[replacementKey])
+	require.NotNil(
+		t,
+		stateManager.govState.GetCommitteeCredentialMember(
+			legacyKey.AsCredential(),
+		),
+	)
+	require.Nil(
+		t,
+		stateManager.govState.GetCommitteeCredentialMember(
+			typedKeyProjection.AsCredential(),
+		),
+	)
+	require.NotNil(
+		t,
+		stateManager.govState.GetCommitteeCredentialMember(
+			typedScript.AsCredential(),
+		),
+	)
+	require.Nil(t, stateManager.govState.GetCommitteeMember(ambiguousHash))
+	require.NotNil(
+		t,
+		stateManager.govState.GetCommitteeCredentialMember(
+			ambiguousKey.AsCredential(),
+		),
+	)
+	require.NotNil(
+		t,
+		stateManager.govState.GetCommitteeCredentialMember(
+			ambiguousScript.AsCredential(),
+		),
+	)
 }
 
 func TestNoConfidenceEnactmentClearsCommitteeState(t *testing.T) {

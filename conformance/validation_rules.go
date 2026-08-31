@@ -63,6 +63,8 @@ var ConformanceValidationRules = []common.UtxoValidationRuleFunc{
 	conway.UtxoValidateNativeScripts,
 	conway.UtxoValidateDelegation,
 	conway.UtxoValidateWithdrawals,
-	conway.UtxoValidateCommitteeCertificates,
+	// Committee certificates are validated first by Validator using full
+	// credential identity and sequential certificate state. The core rule uses
+	// hash-only lookup and cannot distinguish key/script credentials.
 	conway.UtxoValidateMalformedReferenceScripts,
 }
