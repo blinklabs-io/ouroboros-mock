@@ -980,6 +980,203 @@ func TestApplyTransactionDeregistersExactDRepCredential(t *testing.T) {
 	require.True(t, stateManager.drepRegistrations[sharedHash])
 }
 
+func TestDRepVoteRefreshesExactCredentialForRatification(t *testing.T) {
+	const (
+		currentEpoch = uint64(5)
+		activity     = uint64(3)
+	)
+	sharedHash := common.Blake2b224{0x61}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	stakeCredential := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x62},
+	}
+	actionID := &common.GovActionId{
+		TransactionId: common.Blake2b256{0x63},
+	}
+	proposalID := formatGovActionIdFromPtr(actionID)
+	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = currentEpoch
+	stateManager.govState.CurrentEpoch = currentEpoch
+	stateManager.protocolParams = &conway.ConwayProtocolParameters{
+		DRepInactivityPeriod: activity,
+		DRepVotingThresholds: conway.DRepVotingThresholds{
+			CommitteeNoConfidence: cbor.Rat{Rat: big.NewRat(1, 1)},
+		},
+		PoolVotingThresholds: conway.PoolVotingThresholds{
+			CommitteeNoConfidence: cbor.Rat{Rat: new(big.Rat)},
+		},
+	}
+	stateManager.govState.RegisterDRepCredentialUntil(keyCredential, 4)
+	stateManager.govState.RegisterDRepCredentialUntil(scriptCredential, 4)
+	stateManager.rewardAccounts[stakeCredential] = 100
+	stateManager.govState.DRepDelegationsByCredential[stakeCredential] = common.Drep{
+		Type:       common.DrepTypeScriptHash,
+		Credential: scriptCredential.Credential[:],
+	}
+	stateManager.govState.Proposals[proposalID] = &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType:     common.GovActionTypeUpdateCommittee,
+			SubmittedEpoch: currentEpoch - 1,
+			ExpiresAfter:   currentEpoch + 5,
+		},
+	}
+	tx := ledger.NewTransactionBuilder().WithVotingProcedures(
+		common.VotingProcedures{
+			&common.Voter{
+				Type: common.VoterTypeDRepScriptHash,
+				Hash: sharedHash,
+			}: {
+				actionID: {Vote: common.GovVoteYes},
+			},
+		},
+	)
+
+	require.NoError(t, NewValidator().ValidateTransaction(
+		tx,
+		0,
+		currentEpoch,
+		stateManager.govState,
+		stateManager.protocolParams,
+	))
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.Equal(
+		t,
+		currentEpoch+activity,
+		stateManager.govState.DRepExpiries[ledger.NewRewardAccountKey(
+			scriptCredential,
+		)],
+	)
+	require.Equal(
+		t,
+		uint64(4),
+		stateManager.govState.DRepExpiries[ledger.NewRewardAccountKey(
+			keyCredential,
+		)],
+	)
+
+	require.NoError(t, stateManager.ProcessEpochBoundary(currentEpoch+1))
+	proposal := stateManager.govState.Proposals[proposalID]
+	require.NotNil(t, proposal)
+	require.NotNil(t, proposal.RatifiedEpoch)
+	require.Equal(t, currentEpoch+1, *proposal.RatifiedEpoch)
+}
+
+func TestUpdateDRepCertificateReactivatesExactCredential(t *testing.T) {
+	const (
+		currentEpoch = uint64(10)
+		activity     = uint64(4)
+	)
+	sharedHash := common.Blake2b224{0x71}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = currentEpoch
+	stateManager.govState.CurrentEpoch = currentEpoch
+	stateManager.protocolParams = &conway.ConwayProtocolParameters{
+		DRepInactivityPeriod: activity,
+	}
+	stateManager.govState.RegisterDRepCredentialUntil(keyCredential, 9)
+	stateManager.govState.RegisterDRepCredentialUntil(scriptCredential, 20)
+	tx := ledger.NewTransactionBuilder().WithCertificates(
+		&common.UpdateDrepCertificate{
+			CertType:       uint(common.CertificateTypeUpdateDrep),
+			DrepCredential: keyCredential,
+		},
+	)
+
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.True(
+		t,
+		stateManager.govState.IsDRepCredentialActive(
+			keyCredential,
+			currentEpoch,
+		),
+	)
+	require.Equal(
+		t,
+		currentEpoch+activity,
+		stateManager.govState.DRepExpiries[ledger.NewRewardAccountKey(
+			keyCredential,
+		)],
+	)
+	require.Equal(
+		t,
+		uint64(20),
+		stateManager.govState.DRepExpiries[ledger.NewRewardAccountKey(
+			scriptCredential,
+		)],
+	)
+}
+
+func TestDRepVoteRefreshPreservesLegacyRegistration(t *testing.T) {
+	const (
+		currentEpoch = uint64(7)
+		activity     = uint64(2)
+	)
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x81},
+	}
+	actionID := &common.GovActionId{TransactionId: common.Blake2b256{0x82}}
+	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = currentEpoch
+	stateManager.govState.CurrentEpoch = currentEpoch
+	stateManager.protocolParams = &conway.ConwayProtocolParameters{
+		DRepInactivityPeriod: activity,
+	}
+	stateManager.govState.DRepRegistrations[credential.Credential] = true
+	stateManager.govState.Proposals[formatGovActionIdFromPtr(actionID)] =
+		&ProposalState{GovActionInfo: GovActionInfo{ExpiresAfter: 20}}
+	tx := ledger.NewTransactionBuilder().WithVotingProcedures(
+		common.VotingProcedures{
+			&common.Voter{
+				Type: common.VoterTypeDRepKeyHash,
+				Hash: credential.Credential,
+			}: {
+				actionID: {Vote: common.GovVoteYes},
+			},
+		},
+	)
+
+	require.NoError(t, NewValidator().ValidateTransaction(
+		tx,
+		0,
+		currentEpoch,
+		stateManager.govState,
+		stateManager.protocolParams,
+	))
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.Equal(
+		t,
+		currentEpoch+activity,
+		stateManager.govState.DRepExpiries[ledger.NewRewardAccountKey(
+			credential,
+		)],
+	)
+	require.Empty(t, stateManager.govState.DRepRegistrationsByCredential)
+	require.True(
+		t,
+		stateManager.govState.IsDRepCredentialActive(
+			credential,
+			currentEpoch+activity,
+		),
+	)
+}
+
 func TestIsProposedCommitteeMemberCompatibility(t *testing.T) {
 	hash := common.Blake2b224{0x42}
 	key := ledger.RewardAccountKey{
@@ -1938,6 +2135,54 @@ func TestUpdateCommitteeRatificationRequiresThresholdConfiguration(
 			)
 		})
 	}
+}
+
+func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {
+	const runs = 64
+	wantError := "ratify proposal update-a#0: DRep voting threshold unavailable"
+	observedErrors := make(map[string]int)
+	partialMutation := false
+
+	for run := 0; run < runs; run++ {
+		stateManager := NewMockStateManager()
+		stateManager.protocolParams = &conway.ConwayProtocolParameters{
+			PoolVotingThresholds: conway.PoolVotingThresholds{
+				CommitteeNoConfidence: cbor.Rat{Rat: new(big.Rat)},
+			},
+		}
+		for idx := 0; idx < 32; idx++ {
+			id := fmt.Sprintf("info-%02d#0", idx)
+			stateManager.govState.Proposals[id] = &ProposalState{
+				GovActionInfo: GovActionInfo{
+					ActionType:     common.GovActionTypeInfo,
+					SubmittedEpoch: 0,
+					ExpiresAfter:   10,
+				},
+			}
+		}
+		for _, id := range []string{"update-z#0", "update-a#0"} {
+			stateManager.govState.Proposals[id] = &ProposalState{
+				GovActionInfo: GovActionInfo{
+					ActionType:     common.GovActionTypeUpdateCommittee,
+					SubmittedEpoch: 0,
+					ExpiresAfter:   10,
+				},
+			}
+		}
+
+		err := stateManager.ProcessEpochBoundary(1)
+		require.Error(t, err)
+		observedErrors[err.Error()]++
+		for _, proposal := range stateManager.govState.Proposals {
+			if proposal != nil && proposal.RatifiedEpoch != nil {
+				partialMutation = true
+				break
+			}
+		}
+	}
+
+	require.Equal(t, map[string]int{wantError: runs}, observedErrors)
+	require.False(t, partialMutation, "ratification error mutated proposal state")
 }
 
 func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {

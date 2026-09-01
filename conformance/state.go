@@ -788,6 +788,31 @@ func (g *GovernanceState) RegisterDRepCredentialUntil(
 	g.DRepRegistrations[credential.Credential] = true
 }
 
+// refreshDRepCredentialUntil updates the activity expiry for one registered
+// DRep credential. Typed registrations remain independent when key and script
+// credentials share a hash. Hash-only legacy registrations retain their
+// compatibility shape while receiving an expiry for the observed credential.
+func (g *GovernanceState) refreshDRepCredentialUntil(
+	credential common.Credential,
+	expiry uint64,
+) {
+	key := ledger.NewRewardAccountKey(credential)
+	if registered, exists := g.DRepRegistrationsByCredential[key]; exists {
+		if !registered {
+			return
+		}
+		g.DRepExpiries[key] = expiry
+		return
+	}
+	if hasCredentialHash(
+		g.DRepRegistrationsByCredential,
+		credential.Credential,
+	) || !g.DRepRegistrations[credential.Credential] {
+		return
+	}
+	g.DRepExpiries[key] = expiry
+}
+
 // IsDRepCredentialRegistered checks registration by full credential identity.
 // The hash-only map is used only for legacy state without a typed entry sharing
 // the hash.

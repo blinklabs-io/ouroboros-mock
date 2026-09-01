@@ -387,6 +387,7 @@ func (m *MockStateManager) ApplyTransaction(
 	// Process voting procedures
 	votes := tx.VotingProcedures()
 	for voter, voteMap := range votes {
+		m.refreshDRepVoter(voter)
 		for govActionId, votingProc := range voteMap {
 			actionKey := fmt.Sprintf(
 				"%s#%d",
@@ -553,6 +554,14 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			}
 		}
 
+	case common.CertificateTypeUpdateDrep:
+		if drepCert, ok := cert.(*common.UpdateDrepCertificate); ok {
+			m.govState.refreshDRepCredentialUntil(
+				drepCert.DrepCredential,
+				m.drepActivityExpiry(),
+			)
+		}
+
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
@@ -590,6 +599,27 @@ func (m *MockStateManager) drepActivityExpiry() uint64 {
 		return ^uint64(0)
 	}
 	return expiry
+}
+
+func (m *MockStateManager) refreshDRepVoter(voter *common.Voter) {
+	if voter == nil {
+		return
+	}
+	credential := common.Credential{
+		Credential: common.Blake2b224(voter.Hash),
+	}
+	switch voter.Type {
+	case common.VoterTypeDRepKeyHash:
+		credential.CredType = common.CredentialTypeAddrKeyHash
+	case common.VoterTypeDRepScriptHash:
+		credential.CredType = common.CredentialTypeScriptHash
+	default:
+		return
+	}
+	m.govState.refreshDRepCredentialUntil(
+		credential,
+		m.drepActivityExpiry(),
+	)
 }
 
 func (m *MockStateManager) deregisterStakeCredential(
@@ -674,7 +704,14 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 // remaining actions retain the harness's stakeholder-presence approximation.
 func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 	var updateCommitteeStake map[ledger.RewardAccountKey]*big.Int
-	for id, proposal := range m.govState.Proposals {
+	proposalIDs := make([]string, 0, len(m.govState.Proposals))
+	for id := range m.govState.Proposals {
+		proposalIDs = append(proposalIDs, id)
+	}
+	sort.Strings(proposalIDs)
+	toRatify := make([]string, 0, len(proposalIDs))
+	for _, id := range proposalIDs {
+		proposal := m.govState.Proposals[id]
 		if proposal == nil || currentEpoch > proposal.ExpiresAfter {
 			continue
 		}
@@ -690,9 +727,7 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 
 		// Info proposals are auto-ratified (no votes required)
 		if proposal.ActionType == common.GovActionTypeInfo {
-			epoch := currentEpoch
-			proposal.RatifiedEpoch = &epoch
-			m.govState.Proposals[id] = proposal
+			toRatify = append(toRatify, id)
 			continue
 		}
 
@@ -756,9 +791,17 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 		if !meetsRequirements {
 			continue
 		}
+		toRatify = append(toRatify, id)
+	}
 
-		// Ratify: mark as ratified in current epoch
-		// Enactment will happen in the next epoch (handled by ProcessEpochBoundary)
+	// Commit only after every proposal has been evaluated successfully. This
+	// keeps an action-specific parameter error from leaving partial ratification
+	// state behind.
+	for _, id := range toRatify {
+		proposal := m.govState.Proposals[id]
+		if proposal == nil {
+			continue
+		}
 		epoch := currentEpoch
 		proposal.RatifiedEpoch = &epoch
 		m.govState.Proposals[id] = proposal
