@@ -443,6 +443,26 @@ func (v *Validator) validateCertificate(
 			}
 		}
 
+	case common.CertificateTypeVoteDelegation:
+		if delegationCert, ok := cert.(*common.VoteDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
+	case common.CertificateTypeStakeVoteDelegation:
+		if delegationCert, ok := cert.(*common.StakeVoteDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
+	case common.CertificateTypeVoteRegistrationDelegation:
+		if delegationCert, ok := cert.(*common.VoteRegistrationDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
+	case common.CertificateTypeStakeVoteRegistrationDelegation:
+		if delegationCert, ok := cert.(*common.StakeVoteRegistrationDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldCredential := authCert.ColdCredential
@@ -495,6 +515,45 @@ func (v *Validator) validateCertificate(
 		// Other certificate types don't require pre-validation
 	}
 
+	return nil
+}
+
+func validateDRepDelegationTarget(
+	drep common.Drep,
+	govState *GovernanceState,
+) error {
+	var credentialType uint
+	switch drep.Type {
+	case common.DrepTypeAbstain, common.DrepTypeNoConfidence:
+		return nil
+	case common.DrepTypeAddrKeyHash:
+		credentialType = common.CredentialTypeAddrKeyHash
+	case common.DrepTypeScriptHash:
+		credentialType = common.CredentialTypeScriptHash
+	default:
+		return fmt.Errorf(
+			"DRep delegation target has invalid type %d",
+			drep.Type,
+		)
+	}
+	if len(drep.Credential) != len(common.Blake2b224{}) {
+		return fmt.Errorf(
+			"DRep delegation target %d has invalid credential length %d",
+			drep.Type,
+			len(drep.Credential),
+		)
+	}
+	credential := common.Credential{
+		CredType:   credentialType,
+		Credential: common.NewBlake2b224(drep.Credential),
+	}
+	if govState == nil || !govState.IsDRepCredentialRegistered(credential) {
+		return fmt.Errorf(
+			"DRep delegation target %d:%x not registered",
+			credential.CredType,
+			credential.Credential,
+		)
+	}
 	return nil
 }
 

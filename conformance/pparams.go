@@ -303,6 +303,9 @@ func deepCopyPParams(pp common.ProtocolParameters) common.ProtocolParameters {
 	}
 
 	if cpp, ok := pp.(*conway.ConwayProtocolParameters); ok {
+		if cpp == nil {
+			return nil
+		}
 		// Create a shallow copy of the struct
 		ppCopy := *cpp
 

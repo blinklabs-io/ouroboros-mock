@@ -637,7 +637,10 @@ func drepDelegation(drep common.Drep) common.Drep {
 
 // ProcessEpochBoundary implements StateManager.ProcessEpochBoundary.
 func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
-	staged := m.cloneForEpochBoundary()
+	staged, err := m.cloneForEpochBoundary()
+	if err != nil {
+		return err
+	}
 	if err := staged.processEpochBoundary(newEpoch); err != nil {
 		return err
 	}
@@ -708,7 +711,11 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 	return nil
 }
 
-func (m *MockStateManager) cloneForEpochBoundary() *MockStateManager {
+func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
+	if conwayParams, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok &&
+		conwayParams == nil {
+		return nil, errors.New("conway protocol parameters unavailable")
+	}
 	staged := *m
 	staged.protocolParams = deepCopyPParams(m.protocolParams)
 	staged.govState = cloneGovernanceState(m.govState)
@@ -716,7 +723,7 @@ func (m *MockStateManager) cloneForEpochBoundary() *MockStateManager {
 	staged.committeeMembers = maps.Clone(m.committeeMembers)
 	staged.hotKeyAuthorizations = maps.Clone(m.hotKeyAuthorizations)
 	staged.committeeResignations = maps.Clone(m.committeeResignations)
-	return &staged
+	return &staged, nil
 }
 
 func (m *MockStateManager) commitEpochBoundary(staged *MockStateManager) {

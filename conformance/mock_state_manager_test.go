@@ -385,16 +385,25 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 			}
 	}
 	stateManager.govState.syncLegacyCommitteeMembers()
-	txWithAuthorization := func(
+	txWithCertificate := func(
 		coldCredential common.Credential,
+		resign bool,
 	) *conway.ConwayTransaction {
-		certificate := &common.AuthCommitteeHotCertificate{
-			CertType:       uint(common.CertificateTypeAuthCommitteeHot),
-			ColdCredential: coldCredential,
-			HotCredential: common.Credential{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: common.Blake2b224{0x04},
-			},
+		var certificate common.Certificate
+		if resign {
+			certificate = &common.ResignCommitteeColdCertificate{
+				CertType:       uint(common.CertificateTypeResignCommitteeCold),
+				ColdCredential: coldCredential,
+			}
+		} else {
+			certificate = &common.AuthCommitteeHotCertificate{
+				CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+				ColdCredential: coldCredential,
+				HotCredential: common.Credential{
+					CredType:   common.CredentialTypeAddrKeyHash,
+					Credential: common.Blake2b224{0x04},
+				},
+			}
 		}
 		return &conway.ConwayTransaction{
 			Body: conway.ConwayTransactionBody{
@@ -408,6 +417,7 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 	}
 	validator := NewValidator()
 	ledgerState := stateManager.buildLedgerState()
+	committeeRule := ConformanceValidationRules[len(ConformanceValidationRules)-2]
 	for _, coldKey := range []ledger.RewardAccountKey{
 		keyMember,
 		scriptMember,
@@ -419,43 +429,44 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 		require.NotNil(t, member)
 		assert.Equal(t, coldKey.Credential, member.ColdKey)
 	}
-	for _, coldKey := range []ledger.RewardAccountKey{
-		keyMember,
-		scriptMember,
-	} {
-		tx := txWithAuthorization(coldKey.AsCredential())
-		require.NoError(t, validator.ValidateTransaction(
-			tx,
-			0,
-			0,
-			stateManager.govState,
-			nil,
-		))
-		err := conway.UtxoValidateCommitteeCertificates(
-			tx,
-			0,
-			ledgerState,
-			nil,
-		)
-		if err != nil {
-			require.ErrorContains(t, err, "not a CC member")
-			t.Skip(
-				"production exact-credential validation requires the " +
-					"next Gouroboros committee provider release",
-			)
+	for _, resign := range []bool{false, true} {
+		for _, coldKey := range []ledger.RewardAccountKey{
+			keyMember,
+			scriptMember,
+		} {
+			tx := txWithCertificate(coldKey.AsCredential(), resign)
+			require.NoError(t, validator.ValidateTransaction(
+				tx,
+				0,
+				0,
+				stateManager.govState,
+				nil,
+			))
+			require.NoError(t, committeeRule(
+				tx,
+				0,
+				ledgerState,
+				nil,
+			))
 		}
 	}
+	unknownCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: nonMemberHash,
+	}
 	require.ErrorContains(t, validator.ValidateTransaction(
-		txWithAuthorization(common.Credential{
-			CredType:   common.CredentialTypeAddrKeyHash,
-			Credential: nonMemberHash,
-		}),
+		txWithCertificate(unknownCredential, false),
 		0,
 		0,
 		stateManager.govState,
 		nil,
 	), "cannot authorize hot key for non-member")
-
+	require.ErrorContains(t, committeeRule(
+		txWithCertificate(unknownCredential, false),
+		0,
+		ledgerState,
+		nil,
+	), "not a CC member")
 }
 
 func TestCommitteeCertificateValidationUsesConfiguredLayers(t *testing.T) {
@@ -947,6 +958,148 @@ func TestDRepRegistrationValidationUsesExactCredential(t *testing.T) {
 	), "already registered")
 }
 
+func TestDRepDelegationValidationUsesExactCredential(t *testing.T) {
+	sharedHash := common.Blake2b224{0x45}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	stakeCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x46},
+	}
+	drep := func(credential common.Credential) common.Drep {
+		drepType := common.DrepTypeAddrKeyHash
+		if credential.CredType == common.CredentialTypeScriptHash {
+			drepType = common.DrepTypeScriptHash
+		}
+		return common.Drep{
+			Type:       drepType,
+			Credential: append([]byte(nil), credential.Credential[:]...),
+		}
+	}
+	certificateBuilders := map[string]func(common.Drep) common.Certificate{
+		"vote delegation": func(target common.Drep) common.Certificate {
+			return &common.VoteDelegationCertificate{
+				CertType:        uint(common.CertificateTypeVoteDelegation),
+				StakeCredential: stakeCredential,
+				Drep:            target,
+			}
+		},
+		"stake vote delegation": func(target common.Drep) common.Certificate {
+			return &common.StakeVoteDelegationCertificate{
+				CertType: uint(
+					common.CertificateTypeStakeVoteDelegation,
+				),
+				StakeCredential: stakeCredential,
+				Drep:            target,
+			}
+		},
+		"vote registration delegation": func(target common.Drep) common.Certificate {
+			return &common.VoteRegistrationDelegationCertificate{
+				CertType: uint(
+					common.CertificateTypeVoteRegistrationDelegation,
+				),
+				StakeCredential: stakeCredential,
+				Drep:            target,
+			}
+		},
+		"stake vote registration delegation": func(target common.Drep) common.Certificate {
+			return &common.StakeVoteRegistrationDelegationCertificate{
+				CertType: uint(
+					common.CertificateTypeStakeVoteRegistrationDelegation,
+				),
+				StakeCredential: stakeCredential,
+				Drep:            target,
+			}
+		},
+	}
+	tests := []struct {
+		name       string
+		registered *common.Credential
+		target     common.Credential
+		legacy     bool
+		valid      bool
+	}{
+		{
+			name:       "key exact",
+			registered: &keyCredential,
+			target:     keyCredential,
+			valid:      true,
+		},
+		{
+			name:       "script exact",
+			registered: &scriptCredential,
+			target:     scriptCredential,
+			valid:      true,
+		},
+		{
+			name:       "key does not alias script",
+			registered: &keyCredential,
+			target:     scriptCredential,
+		},
+		{
+			name:       "script does not alias key",
+			registered: &scriptCredential,
+			target:     keyCredential,
+		},
+		{name: "legacy key", target: keyCredential, legacy: true, valid: true},
+		{
+			name:   "legacy script",
+			target: scriptCredential,
+			legacy: true,
+			valid:  true,
+		},
+	}
+
+	for certificateName, buildCertificate := range certificateBuilders {
+		for _, test := range tests {
+			t.Run(certificateName+"/"+test.name, func(t *testing.T) {
+				stateManager := NewMockStateManager()
+				if test.registered != nil {
+					stateManager.govState.RegisterDRepCredentialUntil(
+						*test.registered,
+						10,
+					)
+				}
+				if test.legacy {
+					stateManager.govState.DRepRegistrations[sharedHash] = true
+				}
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					buildCertificate(drep(test.target)),
+				)
+
+				err := NewValidator().ValidateTransaction(
+					tx,
+					0,
+					0,
+					stateManager.govState,
+					nil,
+				)
+				if !test.valid {
+					require.ErrorContains(t, err, "DRep delegation target")
+					require.Empty(
+						t,
+						stateManager.govState.DRepDelegationsByCredential,
+					)
+					return
+				}
+				require.NoError(t, err)
+				require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+				assert.Equal(
+					t,
+					drep(test.target),
+					stateManager.govState.DRepDelegationsByCredential[ledger.NewRewardAccountKey(stakeCredential)],
+				)
+			})
+		}
+	}
+}
+
 func TestDRepTransitionValidationUsesSequentialCredentialState(t *testing.T) {
 	const (
 		currentEpoch = uint64(10)
@@ -982,9 +1135,12 @@ func TestDRepTransitionValidationUsesSequentialCredentialState(t *testing.T) {
 			},
 			assertState: func(t *testing.T, stateManager *MockStateManager) {
 				t.Helper()
-				require.True(t, stateManager.govState.IsDRepCredentialRegistered(
-					keyCredential,
-				))
+				require.True(
+					t,
+					stateManager.govState.IsDRepCredentialRegistered(
+						keyCredential,
+					),
+				)
 				require.Equal(
 					t,
 					currentEpoch+activity,
@@ -998,15 +1154,20 @@ func TestDRepTransitionValidationUsesSequentialCredentialState(t *testing.T) {
 			name: "deregistration",
 			certificate: func(credential common.Credential) common.Certificate {
 				return &common.DeregistrationDrepCertificate{
-					CertType:       uint(common.CertificateTypeDeregistrationDrep),
+					CertType: uint(
+						common.CertificateTypeDeregistrationDrep,
+					),
 					DrepCredential: credential,
 				}
 			},
 			assertState: func(t *testing.T, stateManager *MockStateManager) {
 				t.Helper()
-				require.False(t, stateManager.govState.IsDRepCredentialRegistered(
-					keyCredential,
-				))
+				require.False(
+					t,
+					stateManager.govState.IsDRepCredentialRegistered(
+						keyCredential,
+					),
+				)
 			},
 		},
 	}
@@ -1030,23 +1191,26 @@ func TestDRepTransitionValidationUsesSequentialCredentialState(t *testing.T) {
 				require.Empty(t, stateManager.govState.DRepRegistrations)
 			})
 
-			t.Run("other credential type registered earlier", func(t *testing.T) {
-				stateManager := NewMockStateManager()
-				tx := ledger.NewTransactionBuilder().WithCertificates(
-					registration(scriptCredential),
-					test.certificate(keyCredential),
-				)
+			t.Run(
+				"other credential type registered earlier",
+				func(t *testing.T) {
+					stateManager := NewMockStateManager()
+					tx := ledger.NewTransactionBuilder().WithCertificates(
+						registration(scriptCredential),
+						test.certificate(keyCredential),
+					)
 
-				err := NewValidator().ValidateTransaction(
-					tx,
-					0,
-					currentEpoch,
-					stateManager.govState,
-					stateManager.protocolParams,
-				)
-				require.ErrorContains(t, err, "not registered")
-				require.Empty(t, stateManager.govState.DRepRegistrations)
-			})
+					err := NewValidator().ValidateTransaction(
+						tx,
+						0,
+						currentEpoch,
+						stateManager.govState,
+						stateManager.protocolParams,
+					)
+					require.ErrorContains(t, err, "not registered")
+					require.Empty(t, stateManager.govState.DRepRegistrations)
+				},
+			)
 
 			t.Run("other credential type in current state", func(t *testing.T) {
 				stateManager := NewMockStateManager()
@@ -1066,9 +1230,12 @@ func TestDRepTransitionValidationUsesSequentialCredentialState(t *testing.T) {
 					stateManager.protocolParams,
 				)
 				require.ErrorContains(t, err, "not registered")
-				require.True(t, stateManager.govState.IsDRepCredentialRegistered(
-					scriptCredential,
-				))
+				require.True(
+					t,
+					stateManager.govState.IsDRepCredentialRegistered(
+						scriptCredential,
+					),
+				)
 			})
 
 			t.Run("exact credential registered earlier", func(t *testing.T) {
@@ -2309,6 +2476,29 @@ func TestUpdateCommitteeRatificationRequiresThresholdConfiguration(
 			)
 		})
 	}
+}
+
+func TestProcessEpochBoundaryRejectsTypedNilProtocolParameters(t *testing.T) {
+	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = 7
+	stateManager.govState.CurrentEpoch = 7
+	pool := common.PoolKeyHash{0x70}
+	stateManager.poolRegistrations[pool] = true
+	stateManager.govState.PoolRegistrations[pool] = true
+	stateManager.govState.PoolRetirements[pool] = 8
+	var typedNil *conway.ConwayProtocolParameters
+	stateManager.protocolParams = typedNil
+
+	var err error
+	require.NotPanics(t, func() {
+		err = stateManager.ProcessEpochBoundary(8)
+	})
+	require.ErrorContains(t, err, "conway protocol parameters unavailable")
+	assert.Equal(t, uint64(7), stateManager.currentEpoch)
+	assert.Equal(t, uint64(7), stateManager.govState.CurrentEpoch)
+	assert.True(t, stateManager.poolRegistrations[pool])
+	assert.True(t, stateManager.govState.PoolRegistrations[pool])
+	assert.Equal(t, uint64(8), stateManager.govState.PoolRetirements[pool])
 }
 
 func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {

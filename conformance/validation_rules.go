@@ -66,6 +66,82 @@ var ConformanceValidationRules = []common.UtxoValidationRuleFunc{
 	// The exact credential-aware Validator phase runs before this core rule.
 	// Retain both so conformance exercises the upstream ledger rule while the
 	// local phase preserves credential identity and sequential certificate state.
-	conway.UtxoValidateCommitteeCertificates,
+	utxoValidateCommitteeCertificates,
 	conway.UtxoValidateMalformedReferenceScripts,
+}
+
+type committeeCredentialMemberState interface {
+	CommitteeCredentialMember(
+		common.Credential,
+	) (*common.CommitteeMember, error)
+}
+
+type committeeCertificateTransaction struct {
+	common.Transaction
+	certificate common.Certificate
+}
+
+func (t committeeCertificateTransaction) Certificates() []common.Certificate {
+	return []common.Certificate{t.certificate}
+}
+
+type committeeCertificateLedgerState struct {
+	common.LedgerState
+	credential common.Credential
+	provider   committeeCredentialMemberState
+}
+
+func (s committeeCertificateLedgerState) CommitteeMember(
+	coldKey common.Blake2b224,
+) (*common.CommitteeMember, error) {
+	if coldKey == s.credential.Credential {
+		return s.provider.CommitteeCredentialMember(s.credential)
+	}
+	return s.LedgerState.CommitteeMember(coldKey)
+}
+
+// utxoValidateCommitteeCertificates retains the standard Conway rule while
+// projecting each certificate's full cold credential through its hash-only
+// state query. Running one committee certificate at a time prevents key and
+// script credentials with the same hash from aliasing within a transaction.
+func utxoValidateCommitteeCertificates(
+	tx common.Transaction,
+	slot uint64,
+	state common.LedgerState,
+	params common.ProtocolParameters,
+) error {
+	credentialState, ok := state.(committeeCredentialMemberState)
+	if !ok {
+		return conway.UtxoValidateCommitteeCertificates(tx, slot, state, params)
+	}
+
+	for _, certificate := range tx.Certificates() {
+		var coldCredential common.Credential
+		switch typedCertificate := certificate.(type) {
+		case *common.AuthCommitteeHotCertificate:
+			coldCredential = typedCertificate.ColdCredential
+		case *common.ResignCommitteeColdCertificate:
+			coldCredential = typedCertificate.ColdCredential
+		default:
+			continue
+		}
+		transactionView := committeeCertificateTransaction{
+			Transaction: tx,
+			certificate: certificate,
+		}
+		stateView := committeeCertificateLedgerState{
+			LedgerState: state,
+			credential:  coldCredential,
+			provider:    credentialState,
+		}
+		if err := conway.UtxoValidateCommitteeCertificates(
+			transactionView,
+			slot,
+			stateView,
+			params,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
