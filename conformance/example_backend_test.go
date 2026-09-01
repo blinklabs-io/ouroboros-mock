@@ -77,6 +77,15 @@ type stubBackend struct {
 // Verify the stub satisfies the interface at compile time.
 var _ ledger.StateProvider = (*stubBackend)(nil)
 
+type committeeStateProvider interface {
+	ledger.StateProvider
+	CommitteeStateAvailable() (bool, error)
+	CommitteeCredentialMember(common.Credential) (*common.CommitteeMember, error)
+	CommitteeHotCredentialMember(common.Credential) (*common.CommitteeMember, error)
+}
+
+var _ committeeStateProvider = (*stubBackend)(nil)
+
 func (s *stubBackend) NetworkId() uint { return s.getInner().NetworkId() }
 
 func (s *stubBackend) UtxoById(
@@ -157,6 +166,40 @@ func (s *stubBackend) CommitteeMember(
 
 func (s *stubBackend) CommitteeMembers() ([]common.CommitteeMember, error) {
 	return s.getInner().CommitteeMembers()
+}
+
+func (s *stubBackend) CommitteeStateAvailable() (bool, error) {
+	inner, ok := s.getInner().(interface {
+		CommitteeStateAvailable() (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("inner state provider %T does not implement CommitteeStateAvailable", s.getInner())
+	}
+	return inner.CommitteeStateAvailable()
+}
+
+func (s *stubBackend) CommitteeCredentialMember(
+	coldCredential common.Credential,
+) (*common.CommitteeMember, error) {
+	inner, ok := s.getInner().(interface {
+		CommitteeCredentialMember(common.Credential) (*common.CommitteeMember, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("inner state provider %T does not implement CommitteeCredentialMember", s.getInner())
+	}
+	return inner.CommitteeCredentialMember(coldCredential)
+}
+
+func (s *stubBackend) CommitteeHotCredentialMember(
+	hotCredential common.Credential,
+) (*common.CommitteeMember, error) {
+	inner, ok := s.getInner().(interface {
+		CommitteeHotCredentialMember(common.Credential) (*common.CommitteeMember, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("inner state provider %T does not implement CommitteeHotCredentialMember", s.getInner())
+	}
+	return inner.CommitteeHotCredentialMember(hotCredential)
 }
 
 func (s *stubBackend) DRepRegistration(

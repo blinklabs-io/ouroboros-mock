@@ -41,6 +41,21 @@ type StateProvider interface {
 }
 ```
 
+Committee certificate validation also probes an optional authoritative
+committee capability. Backends that model committee state must implement the
+following methods, including when the modeled committee is empty:
+
+```go
+CommitteeStateAvailable() (bool, error)
+CommitteeCredentialMember(common.Credential) (*common.CommitteeMember, error)
+CommitteeHotCredentialMember(common.Credential) (*common.CommitteeMember, error)
+```
+
+The credential-aware methods must preserve key-versus-script credential types
+and return only active, non-resigned members. A backend without this optional
+capability fails closed for committee certificate validation; it must not
+silently fall back to hash-only lookups.
+
 Add a compile-time check to catch missing methods early:
 
 ```go
