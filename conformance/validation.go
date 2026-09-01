@@ -380,13 +380,13 @@ func (v *Validator) validateCertificate(
 				coldCredential,
 				epoch,
 			)
-			if member == nil {
+			if member == nil && govState.hasCommitteeState() {
 				return fmt.Errorf(
 					"cannot authorize hot key for non-member %x",
 					coldCredential.Credential,
 				)
 			}
-			if member.Resigned {
+			if member != nil && member.Resigned {
 				return fmt.Errorf(
 					"cannot authorize hot key for resigned CC member %x",
 					coldCredential.Credential,
@@ -412,7 +412,7 @@ func (v *Validator) validateCertificate(
 						coldCredential.Credential,
 					)
 				}
-				if member == nil {
+				if member == nil && govState.hasCommitteeState() {
 					return fmt.Errorf(
 						"cannot resign non-member %x",
 						coldCredential.Credential[:],

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -752,7 +753,7 @@ func (b *LedgerStateBuilder) WithProposedCommitteeMembers(
 func (b *LedgerStateBuilder) WithProposedCommitteeCredentialMembers(
 	members map[RewardAccountKey]uint64,
 ) *LedgerStateBuilder {
-	b.state.proposedCommitteeMembers = members
+	b.state.proposedCommitteeMembers = maps.Clone(members)
 	return b
 }
 
