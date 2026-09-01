@@ -18,7 +18,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -97,7 +96,7 @@ func TestGovernanceStateLegacyCommitteeMutationCompatibility(t *testing.T) {
 	)
 	require.NotNil(t, firstMember.HotKey)
 	require.Equal(t, firstHotKey, *firstMember.HotKey)
-	require.False(t, firstMember.Resigned)
+	require.True(t, firstMember.Resigned)
 
 	state.AuthorizeHotKey(secondColdKey, secondHotKey)
 	require.Equal(t, firstHotKey, state.HotKeyAuthorizations[firstColdKey])
@@ -217,10 +216,14 @@ func TestResignCommitteeCertificateMembershipCompatibility(t *testing.T) {
 	})
 
 	t.Run("true non-member", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.CommitteeMembers[common.Blake2b224{0xff}] = &CommitteeMemberInfo{
+			ExpiryEpoch: 42,
+		}
 		err := validator.validateCertificate(
 			certificate(keyCredential),
 			0,
-			NewGovernanceState(),
+			state,
 			nil,
 		)
 		require.ErrorContains(t, err, "cannot resign non-member")
@@ -448,15 +451,58 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 		nil,
 	), "cannot authorize hot key for non-member")
 
-	hashOnlyRule := reflect.ValueOf(
-		conway.UtxoValidateCommitteeCertificates,
-	).Pointer()
-	for _, rule := range ConformanceValidationRules {
-		if reflect.ValueOf(rule).Pointer() == hashOnlyRule {
-			t.Fatal(
-				"hash-only committee certificate rule must not run after exact credential validation",
-			)
-		}
+}
+
+func TestCommitteeCertificateValidationUsesConfiguredLayers(t *testing.T) {
+	for _, credentialType := range []uint{
+		common.CredentialTypeAddrKeyHash,
+		common.CredentialTypeScriptHash,
+	} {
+		t.Run(fmt.Sprintf("credential type %d", credentialType), func(t *testing.T) {
+			coldCredential := common.Credential{
+				CredType:   credentialType,
+				Credential: common.Blake2b224{0x51},
+			}
+			coldKey := ledger.NewRewardAccountKey(coldCredential)
+			stateManager := NewMockStateManager()
+			stateManager.committeeMembers[coldKey] = 42
+			stateManager.govState.CommitteeMembersByCredential[coldKey] =
+				&CommitteeMemberInfo{
+					ColdCredential: coldCredential,
+					ColdKey:        coldCredential.Credential,
+					ExpiryEpoch:    42,
+				}
+			certificate := &common.AuthCommitteeHotCertificate{
+				CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+				ColdCredential: coldCredential,
+				HotCredential: common.Credential{
+					Credential: common.Blake2b224{0x52},
+				},
+			}
+			tx := &conway.ConwayTransaction{
+				Body: conway.ConwayTransactionBody{
+					TxCertificates: []common.CertificateWrapper{{
+						Type:        certificate.Type(),
+						Certificate: certificate,
+					}},
+				},
+				TxIsValid: true,
+			}
+
+			require.NoError(t, NewValidator().ValidateTransaction(
+				tx,
+				0,
+				0,
+				stateManager.govState,
+				nil,
+			))
+			require.NoError(t, conway.UtxoValidateCommitteeCertificates(
+				tx,
+				0,
+				stateManager.buildLedgerState(),
+				nil,
+			))
+		})
 	}
 }
 
@@ -484,10 +530,14 @@ func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
 	validator := NewValidator()
 
 	t.Run("true non-member", func(t *testing.T) {
+		state := NewGovernanceState()
+		state.CommitteeMembers[common.Blake2b224{0xff}] = &CommitteeMemberInfo{
+			ExpiryEpoch: 42,
+		}
 		err := validator.validateCertificate(
 			authorization(keyCredential),
 			0,
-			NewGovernanceState(),
+			state,
 			nil,
 		)
 		require.ErrorContains(t, err, "cannot authorize hot key for non-member")
@@ -649,6 +699,11 @@ func TestCommitteeCertificateValidationHonorsProposalExpiry(t *testing.T) {
 			})
 
 			t.Run("non-member", func(t *testing.T) {
+				state := NewGovernanceState()
+				state.CommitteeMembersByCredential[ledger.RewardAccountKey{
+					CredType:   common.CredentialTypeAddrKeyHash,
+					Credential: common.Blake2b224{0xff},
+				}] = &CommitteeMemberInfo{ExpiryEpoch: 20}
 				tx := ledger.NewTransactionBuilder().WithCertificates(
 					certificateCase.certificate,
 				)
@@ -656,10 +711,23 @@ func TestCommitteeCertificateValidationHonorsProposalExpiry(t *testing.T) {
 					tx,
 					0,
 					expiresAfter-1,
-					NewGovernanceState(),
+					state,
 					nil,
 				)
 				require.ErrorContains(t, err, certificateCase.nonMemberError)
+			})
+
+			t.Run("empty incomplete state", func(t *testing.T) {
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					certificateCase.certificate,
+				)
+				require.NoError(t, validator.ValidateTransaction(
+					tx,
+					0,
+					expiresAfter-1,
+					NewGovernanceState(),
+					nil,
+				))
 			})
 		})
 	}
@@ -671,6 +739,44 @@ func TestCommitteeCertificateValidationHonorsProposalExpiry(t *testing.T) {
 	state.CurrentEpoch++
 	require.Nil(t, state.GetCommitteeCredentialMember(coldCredential))
 	require.False(t, state.IsProposedCommitteeCredentialMember(coldCredential))
+}
+
+func TestIsProposedCommitteeMemberCompatibility(t *testing.T) {
+	hash := common.Blake2b224{0x42}
+	key := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	script := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	tests := []struct {
+		name     string
+		members  map[ledger.RewardAccountKey]uint64
+		epoch    uint64
+		expected bool
+	}{
+		{name: "key only", members: map[ledger.RewardAccountKey]uint64{key: 10}, expected: true},
+		{name: "script only", members: map[ledger.RewardAccountKey]uint64{script: 10}, expected: true},
+		{name: "both credential types", members: map[ledger.RewardAccountKey]uint64{key: 10, script: 10}, expected: true},
+		{name: "none", expected: false},
+		{name: "at expiry", members: map[ledger.RewardAccountKey]uint64{key: 10}, epoch: 10, expected: true},
+		{name: "after expiry", members: map[ledger.RewardAccountKey]uint64{key: 10}, epoch: 11, expected: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := NewGovernanceState()
+			state.CurrentEpoch = test.epoch
+			state.Proposals["proposal#0"] = &ProposalState{GovActionInfo: GovActionInfo{
+				ActionType:                  common.GovActionTypeUpdateCommittee,
+				ExpiresAfter:                10,
+				ProposedMembersByCredential: test.members,
+			}}
+			require.Equal(t, test.expected, state.IsProposedCommitteeMember(hash))
+		})
+	}
 }
 
 func TestMixedLegacyAndTypedCommitteeState(t *testing.T) {
@@ -967,6 +1073,41 @@ func TestUpdateCommitteeConflictUsesCredentialIdentity(t *testing.T) {
 		update(scriptCredential, scriptCredential),
 		state,
 	), "conflicting committee update")
+}
+
+func TestApplyTransactionDropsAmbiguousProposedMemberHash(t *testing.T) {
+	sharedHash := common.Blake2b224{0x61}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	action := &common.UpdateCommitteeGovAction{
+		Type: uint(common.GovActionTypeUpdateCommittee),
+		CredEpochs: map[*common.Credential]uint{
+			&keyCredential:    41,
+			&scriptCredential: 42,
+		},
+	}
+	tx := ledger.NewTransactionBuilder().WithProposalProcedures(
+		conway.ConwayProposalProcedure{
+			PPGovAction: conway.ConwayGovAction{
+				Type:   uint(common.GovActionTypeUpdateCommittee),
+				Action: action,
+			},
+		},
+	)
+	stateManager := NewMockStateManager()
+
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.Len(t, stateManager.govState.Proposals, 1)
+	for _, proposal := range stateManager.govState.Proposals {
+		require.Len(t, proposal.ProposedMembersByCredential, 2)
+		require.NotContains(t, proposal.ProposedMembers, sharedHash)
+	}
 }
 
 func TestLegacyCommitteeMutationDoesNotGuessScriptCredential(t *testing.T) {
@@ -1329,6 +1470,43 @@ func TestNoConfidenceEnactmentClearsCommitteeState(t *testing.T) {
 	assert.Empty(t, stateManager.govState.CommitteeMembersByCredential)
 	assert.Empty(t, stateManager.committeeResignations)
 	assert.Empty(t, stateManager.govState.CommitteeResignations)
+}
+
+func TestProcessEpochBoundaryEnactsProposalIDsDeterministically(t *testing.T) {
+	addedCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x44},
+	}
+	addedKey := ledger.NewRewardAccountKey(addedCredential)
+	for range 64 {
+		stateManager := NewMockStateManager()
+		ratifiedEpoch := uint64(1)
+		stateManager.govState.Proposals["a-update#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType:   common.GovActionTypeUpdateCommittee,
+				ExpiresAfter: 10,
+				ProposedMembersByCredential: map[ledger.RewardAccountKey]uint64{
+					addedKey: 20,
+				},
+			},
+			RatifiedEpoch: &ratifiedEpoch,
+		}
+		stateManager.govState.Proposals["b-no-confidence#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType:   common.GovActionTypeNoConfidence,
+				ExpiresAfter: 10,
+			},
+			RatifiedEpoch: &ratifiedEpoch,
+		}
+
+		require.NoError(t, stateManager.ProcessEpochBoundary(2))
+		require.Empty(t, stateManager.govState.CommitteeMembersByCredential)
+		require.Equal(
+			t,
+			"b-no-confidence#0",
+			*stateManager.govState.Roots.ConstitutionalCommittee,
+		)
+	}
 }
 
 func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {

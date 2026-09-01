@@ -63,8 +63,9 @@ var ConformanceValidationRules = []common.UtxoValidationRuleFunc{
 	conway.UtxoValidateNativeScripts,
 	conway.UtxoValidateDelegation,
 	conway.UtxoValidateWithdrawals,
-	// Committee certificates are validated first by Validator using full
-	// credential identity and sequential certificate state. The core rule uses
-	// hash-only lookup and cannot distinguish key/script credentials.
+	// The exact credential-aware Validator phase runs before this core rule.
+	// Retain both so conformance exercises the upstream ledger rule while the
+	// local phase preserves credential identity and sequential certificate state.
+	conway.UtxoValidateCommitteeCertificates,
 	conway.UtxoValidateMalformedReferenceScripts,
 }

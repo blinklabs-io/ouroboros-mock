@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
@@ -60,8 +61,8 @@ type MockStateManager struct {
 	// hotKeyAuthorizations tracks hot key authorizations (cold key -> hot key)
 	hotKeyAuthorizations map[ledger.RewardAccountKey]common.Credential
 
-	// committeeResignations tracks resigned cold keys until the next epoch
-	// prunes credentials outside the resulting current committee.
+	// committeeResignations tracks current and pending committee credentials
+	// that have resigned.
 	committeeResignations map[ledger.RewardAccountKey]bool
 }
 
@@ -341,11 +342,11 @@ func (m *MockStateManager) ApplyTransaction(
 					if cred != nil {
 						credentialKey := ledger.NewRewardAccountKey(*cred)
 						info.ProposedMembersByCredential[credentialKey] = uint64(epoch)
-						if _, exists := info.ProposedMembers[cred.Credential]; !exists || cred.CredType == common.CredentialTypeAddrKeyHash {
-							info.ProposedMembers[cred.Credential] = uint64(epoch)
-						}
 					}
 				}
+				info.ProposedMembers = committeeMembersByHash(
+					info.ProposedMembersByCredential,
+				)
 			case *common.NoConfidenceGovAction:
 				if ga.ActionId != nil {
 					key := fmt.Sprintf("%x#%d", ga.ActionId.TransactionId[:], ga.ActionId.GovActionIdx)
@@ -629,6 +630,7 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 			toEnact = append(toEnact, id)
 		}
 	}
+	sort.Strings(toEnact)
 
 	// Enact collected proposals (update roots)
 	for _, id := range toEnact {
@@ -660,20 +662,9 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 	return nil
 }
 
-// ratifyProposals performs simplified proposal ratification.
-// For conformance testing, we use a simplified model based on CIP-1694 requirements.
-//
-// Per CIP-1694, different action types require votes from different stakeholders:
-// - UpdateCommittee: CC + DRep (no SPO)
-// - NoConfidence: CC + DRep + SPO
-// - HardFork: CC + DRep + SPO
-// - NewConstitution: CC + DRep (no SPO)
-// - ParameterChange: CC + DRep (no SPO)
-// - TreasuryWithdrawal: CC + DRep (no SPO)
-// - Info: No votes required (auto-ratified)
-//
-// Voter types: 0=CC, 2=DRep, 4=SPO
-// Vote values per CIP-1694: 0=No, 1=Yes, 2=Abstain
+// ratifyProposals models the action acceptance needed by the conformance
+// vectors. UpdateCommittee uses stake-weighted DRep and SPO thresholds; the
+// remaining actions retain the harness's stakeholder-presence approximation.
 func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
 	for id, proposal := range m.govState.Proposals {
 		// Skip already-ratified proposals

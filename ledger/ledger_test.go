@@ -794,19 +794,7 @@ func TestCommitteeMemberBuilder_Build_MissingColdKey(t *testing.T) {
 // ProposedCommitteeMembers Tests
 // =============================================================================
 
-type committeeCredentialState interface {
-	CommitteeCredentialMember(
-		lcommon.Credential,
-	) (*lcommon.CommitteeMember, error)
-}
-
-type proposedCommitteeCredentialMembersBuilder interface {
-	WithProposedCommitteeCredentialMembers(
-		map[ledger.RewardAccountKey]uint64,
-	) *ledger.LedgerStateBuilder
-}
-
-func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
+func TestLedgerStateBuilder_WithProposedCommitteeCredentialMembers(t *testing.T) {
 	// Create cold key hashes
 	var coldKey1, coldKey2 lcommon.Blake2b224
 	copy(coldKey1[:], bytes.Repeat([]byte{0x11}, 28))
@@ -823,6 +811,7 @@ func TestLedgerStateBuilder_WithProposedCommitteeMembers(t *testing.T) {
 	state := ledger.NewLedgerStateBuilder().
 		WithProposedCommitteeCredentialMembers(proposed).
 		Build()
+	proposed[ledger.NewRewardAccountKey(coldCredential1)] = 999
 
 	// Lookup proposed member should return synthetic CommitteeMember
 	member, err := state.CommitteeCredentialMember(coldCredential1)
@@ -897,6 +886,35 @@ func TestCommitteeCredentialStateDistinguishesAuthorityAndCredentialTags(t *test
 	require.Nil(t, scriptMember)
 }
 
+func TestLedgerStateBuilder_WithProposedCommitteeMembersLegacy(t *testing.T) {
+	coldKey := lcommon.NewBlake2b224(bytes.Repeat([]byte{0x31}, 28))
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: coldKey,
+	}
+	state := ledger.NewLedgerStateBuilder().
+		WithProposedCommitteeMembers(map[lcommon.Blake2b224]uint64{
+			coldKey: 123,
+		}).
+		Build()
+
+	keyMember, err := state.CommitteeCredentialMember(keyCredential)
+	require.NoError(t, err)
+	require.NotNil(t, keyMember)
+	assert.Equal(t, uint64(123), keyMember.ExpiryEpoch)
+	scriptMember, err := state.CommitteeCredentialMember(scriptCredential)
+	require.NoError(t, err)
+	assert.Nil(t, scriptMember)
+	legacyMember, err := state.CommitteeMember(coldKey)
+	require.NoError(t, err)
+	require.NotNil(t, legacyMember)
+	assert.Equal(t, uint64(123), legacyMember.ExpiryEpoch)
+}
+
 func TestLedgerStateBuilder_CommitteeCredentialStateRejectsAmbiguousHash(
 	t *testing.T,
 ) {
@@ -910,27 +928,19 @@ func TestLedgerStateBuilder_CommitteeCredentialStateRejectsAmbiguousHash(
 		Credential: coldKey,
 	}
 	builder := ledger.NewLedgerStateBuilder()
-	typedBuilder, ok := any(builder).(proposedCommitteeCredentialMembersBuilder)
-	require.True(t, ok, "builder does not preserve committee credential types")
-	typedBuilder.WithProposedCommitteeCredentialMembers(
+	builder.WithProposedCommitteeCredentialMembers(
 		map[ledger.RewardAccountKey]uint64{
 			ledger.NewRewardAccountKey(keyCredential):    101,
 			ledger.NewRewardAccountKey(scriptCredential): 202,
 		},
 	)
 	state := builder.Build()
-	typedState, ok := any(state).(committeeCredentialState)
-	require.True(
-		t,
-		ok,
-		"state does not expose credential-aware committee lookup",
-	)
 
-	keyMember, err := typedState.CommitteeCredentialMember(keyCredential)
+	keyMember, err := state.CommitteeCredentialMember(keyCredential)
 	require.NoError(t, err)
 	require.NotNil(t, keyMember)
 	assert.Equal(t, uint64(101), keyMember.ExpiryEpoch)
-	scriptMember, err := typedState.CommitteeCredentialMember(scriptCredential)
+	scriptMember, err := state.CommitteeCredentialMember(scriptCredential)
 	require.NoError(t, err)
 	require.NotNil(t, scriptMember)
 	assert.Equal(t, uint64(202), scriptMember.ExpiryEpoch)

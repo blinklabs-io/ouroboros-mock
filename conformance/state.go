@@ -520,7 +520,7 @@ func (g *GovernanceState) IsProposedCommitteeMember(
 		CredType:   common.CredentialTypeScriptHash,
 		Credential: coldKey,
 	})
-	return keyProposed != scriptProposed
+	return keyProposed || scriptProposed
 }
 
 // IsProposedCommitteeCredentialMember checks if a full cold credential is
@@ -544,6 +544,21 @@ func (g *GovernanceState) IsProposedCommitteeCredentialMember(
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+func (g *GovernanceState) hasCommitteeState() bool {
+	if len(g.CommitteeMembersByCredential) > 0 || len(g.CommitteeMembers) > 0 {
+		return true
+	}
+	for _, proposal := range g.Proposals {
+		if proposal != nil &&
+			proposal.ActionType == common.GovActionTypeUpdateCommittee &&
+			(len(proposal.ProposedMembersByCredential) > 0 ||
+				len(proposal.ProposedMembers) > 0) {
+			return true
 		}
 	}
 	return false
@@ -836,7 +851,6 @@ func (g *GovernanceState) AuthorizeHotCredential(
 		member.HotCredential = &hotCredentialCopy
 		hotHash := hotCredential.Credential
 		member.HotKey = &hotHash
-		member.Resigned = false
 	}
 }
 
@@ -868,7 +882,6 @@ func (g *GovernanceState) AuthorizeHotKey(
 		}
 		hotKeyCopy := hotKey
 		member.HotKey = &hotKeyCopy
-		member.Resigned = false
 	}
 }
 
