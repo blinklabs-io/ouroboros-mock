@@ -637,6 +637,15 @@ func drepDelegation(drep common.Drep) common.Drep {
 
 // ProcessEpochBoundary implements StateManager.ProcessEpochBoundary.
 func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
+	staged := m.cloneForEpochBoundary()
+	if err := staged.processEpochBoundary(newEpoch); err != nil {
+		return err
+	}
+	m.commitEpochBoundary(staged)
+	return nil
+}
+
+func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 	m.currentEpoch = newEpoch
 	m.govState.CurrentEpoch = newEpoch
 
@@ -697,6 +706,202 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 	}
 
 	return nil
+}
+
+func (m *MockStateManager) cloneForEpochBoundary() *MockStateManager {
+	staged := *m
+	staged.protocolParams = deepCopyPParams(m.protocolParams)
+	staged.govState = cloneGovernanceState(m.govState)
+	staged.poolRegistrations = maps.Clone(m.poolRegistrations)
+	staged.committeeMembers = maps.Clone(m.committeeMembers)
+	staged.hotKeyAuthorizations = maps.Clone(m.hotKeyAuthorizations)
+	staged.committeeResignations = maps.Clone(m.committeeResignations)
+	return &staged
+}
+
+func (m *MockStateManager) commitEpochBoundary(staged *MockStateManager) {
+	m.currentEpoch = staged.currentEpoch
+	m.poolRegistrations = staged.poolRegistrations
+	m.committeeMembers = staged.committeeMembers
+	m.hotKeyAuthorizations = staged.hotKeyAuthorizations
+	m.committeeResignations = staged.committeeResignations
+	m.protocolParams = commitProtocolParameters(
+		m.protocolParams,
+		staged.protocolParams,
+	)
+	if m.govState == nil {
+		m.govState = staged.govState
+	} else {
+		*m.govState = *staged.govState
+	}
+}
+
+func commitProtocolParameters(
+	current common.ProtocolParameters,
+	staged common.ProtocolParameters,
+) common.ProtocolParameters {
+	currentConway, currentOK := current.(*conway.ConwayProtocolParameters)
+	stagedConway, stagedOK := staged.(*conway.ConwayProtocolParameters)
+	if currentOK && stagedOK {
+		*currentConway = *stagedConway
+		return currentConway
+	}
+	return staged
+}
+
+func cloneGovernanceState(state *GovernanceState) *GovernanceState {
+	if state == nil {
+		return nil
+	}
+	cloned := *state
+
+	memberCopies := make(map[*CommitteeMemberInfo]*CommitteeMemberInfo)
+	cloneMember := func(member *CommitteeMemberInfo) *CommitteeMemberInfo {
+		if member == nil {
+			return nil
+		}
+		if clonedMember, ok := memberCopies[member]; ok {
+			return clonedMember
+		}
+		clonedMember := *member
+		if member.HotCredential != nil {
+			hotCredential := *member.HotCredential
+			clonedMember.HotCredential = &hotCredential
+		}
+		if member.HotKey != nil {
+			hotKey := *member.HotKey
+			clonedMember.HotKey = &hotKey
+		}
+		memberCopies[member] = &clonedMember
+		return &clonedMember
+	}
+	cloned.CommitteeMembers = make(
+		map[common.Blake2b224]*CommitteeMemberInfo,
+		len(state.CommitteeMembers),
+	)
+	for credential, member := range state.CommitteeMembers {
+		cloned.CommitteeMembers[credential] = cloneMember(member)
+	}
+	cloned.CommitteeMembersByCredential = make(
+		map[ledger.RewardAccountKey]*CommitteeMemberInfo,
+		len(state.CommitteeMembersByCredential),
+	)
+	for credential, member := range state.CommitteeMembersByCredential {
+		cloned.CommitteeMembersByCredential[credential] = cloneMember(member)
+	}
+
+	cloned.DRepRegistrations = maps.Clone(state.DRepRegistrations)
+	cloned.DRepRegistrationsByCredential = maps.Clone(
+		state.DRepRegistrationsByCredential,
+	)
+	cloned.DRepExpiries = maps.Clone(state.DRepExpiries)
+	cloned.DRepDelegations = maps.Clone(state.DRepDelegations)
+	cloned.DRepDelegationsByCredential = maps.Clone(
+		state.DRepDelegationsByCredential,
+	)
+	cloned.HotKeyAuthorizations = maps.Clone(state.HotKeyAuthorizations)
+	cloned.HotKeyAuthorizationsByCredential = maps.Clone(
+		state.HotKeyAuthorizationsByCredential,
+	)
+	cloned.CommitteeResignations = maps.Clone(state.CommitteeResignations)
+	cloned.StakeRegistrations = maps.Clone(state.StakeRegistrations)
+	cloned.StakeRegistrationsByCredential = maps.Clone(
+		state.StakeRegistrationsByCredential,
+	)
+	cloned.PoolRegistrations = maps.Clone(state.PoolRegistrations)
+	cloned.PoolRewardAccounts = maps.Clone(state.PoolRewardAccounts)
+	cloned.PoolDelegationsByCredential = maps.Clone(
+		state.PoolDelegationsByCredential,
+	)
+	cloned.PoolRetirements = maps.Clone(state.PoolRetirements)
+	cloned.RewardAccounts = maps.Clone(state.RewardAccounts)
+	cloned.RewardAccountBalances = maps.Clone(state.RewardAccountBalances)
+	cloned.Proposals = make(map[string]*ProposalState, len(state.Proposals))
+	for id, proposal := range state.Proposals {
+		cloned.Proposals[id] = cloneProposalState(proposal)
+	}
+	cloned.EnactedProposals = maps.Clone(state.EnactedProposals)
+	cloned.Roots = cloneProposalRoots(state.Roots)
+	cloned.Constitution = cloneConstitutionInfo(state.Constitution)
+	return &cloned
+}
+
+func cloneProposalState(proposal *ProposalState) *ProposalState {
+	if proposal == nil {
+		return nil
+	}
+	cloned := *proposal
+	cloned.Votes = maps.Clone(proposal.Votes)
+	cloned.RemovedMembers = maps.Clone(proposal.RemovedMembers)
+	cloned.ProposedMembers = maps.Clone(proposal.ProposedMembers)
+	cloned.ProposedMembersByCredential = maps.Clone(
+		proposal.ProposedMembersByCredential,
+	)
+	cloned.PolicyHash = append([]byte(nil), proposal.PolicyHash...)
+	if proposal.ParentActionId != nil {
+		parentActionID := *proposal.ParentActionId
+		cloned.ParentActionId = &parentActionID
+	}
+	if proposal.ReturnAccount != nil {
+		returnAccount := *proposal.ReturnAccount
+		cloned.ReturnAccount = &returnAccount
+	}
+	if proposal.ProtocolVersion != nil {
+		protocolVersion := *proposal.ProtocolVersion
+		cloned.ProtocolVersion = &protocolVersion
+	}
+	if proposal.ParameterUpdate != nil {
+		parameterUpdate := *proposal.ParameterUpdate
+		if proposal.ParameterUpdate.CostModels != nil {
+			parameterUpdate.CostModels = make(
+				map[uint][]int64,
+				len(proposal.ParameterUpdate.CostModels),
+			)
+			for version, costModel := range proposal.ParameterUpdate.CostModels {
+				parameterUpdate.CostModels[version] = append(
+					[]int64(nil),
+					costModel...,
+				)
+			}
+		}
+		cloned.ParameterUpdate = &parameterUpdate
+	}
+	if proposal.RatifiedEpoch != nil {
+		ratifiedEpoch := *proposal.RatifiedEpoch
+		cloned.RatifiedEpoch = &ratifiedEpoch
+	}
+	return &cloned
+}
+
+func cloneProposalRoots(roots ProposalRoots) ProposalRoots {
+	cloned := roots
+	if roots.ProtocolParameters != nil {
+		root := *roots.ProtocolParameters
+		cloned.ProtocolParameters = &root
+	}
+	if roots.HardFork != nil {
+		root := *roots.HardFork
+		cloned.HardFork = &root
+	}
+	if roots.ConstitutionalCommittee != nil {
+		root := *roots.ConstitutionalCommittee
+		cloned.ConstitutionalCommittee = &root
+	}
+	if roots.Constitution != nil {
+		root := *roots.Constitution
+		cloned.Constitution = &root
+	}
+	return cloned
+}
+
+func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
+	if constitution == nil {
+		return nil
+	}
+	cloned := *constitution
+	cloned.AnchorHash = append([]byte(nil), constitution.AnchorHash...)
+	cloned.PolicyHash = append([]byte(nil), constitution.PolicyHash...)
+	return &cloned
 }
 
 // ratifyProposals models the action acceptance needed by the conformance

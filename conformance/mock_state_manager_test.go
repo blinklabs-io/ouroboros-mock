@@ -947,6 +947,180 @@ func TestDRepRegistrationValidationUsesExactCredential(t *testing.T) {
 	), "already registered")
 }
 
+func TestDRepTransitionValidationUsesSequentialCredentialState(t *testing.T) {
+	const (
+		currentEpoch = uint64(10)
+		activity     = uint64(4)
+	)
+	sharedHash := common.Blake2b224{0x49}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	registration := func(credential common.Credential) common.Certificate {
+		return &common.RegistrationDrepCertificate{
+			CertType:       uint(common.CertificateTypeRegistrationDrep),
+			DrepCredential: credential,
+		}
+	}
+	tests := []struct {
+		name        string
+		certificate func(common.Credential) common.Certificate
+		assertState func(*testing.T, *MockStateManager)
+	}{
+		{
+			name: "update",
+			certificate: func(credential common.Credential) common.Certificate {
+				return &common.UpdateDrepCertificate{
+					CertType:       uint(common.CertificateTypeUpdateDrep),
+					DrepCredential: credential,
+				}
+			},
+			assertState: func(t *testing.T, stateManager *MockStateManager) {
+				t.Helper()
+				require.True(t, stateManager.govState.IsDRepCredentialRegistered(
+					keyCredential,
+				))
+				require.Equal(
+					t,
+					currentEpoch+activity,
+					stateManager.govState.DRepExpiries[ledger.NewRewardAccountKey(
+						keyCredential,
+					)],
+				)
+			},
+		},
+		{
+			name: "deregistration",
+			certificate: func(credential common.Credential) common.Certificate {
+				return &common.DeregistrationDrepCertificate{
+					CertType:       uint(common.CertificateTypeDeregistrationDrep),
+					DrepCredential: credential,
+				}
+			},
+			assertState: func(t *testing.T, stateManager *MockStateManager) {
+				t.Helper()
+				require.False(t, stateManager.govState.IsDRepCredentialRegistered(
+					keyCredential,
+				))
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Run("missing credential", func(t *testing.T) {
+				stateManager := NewMockStateManager()
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					test.certificate(keyCredential),
+				)
+
+				err := NewValidator().ValidateTransaction(
+					tx,
+					0,
+					currentEpoch,
+					stateManager.govState,
+					stateManager.protocolParams,
+				)
+				require.ErrorContains(t, err, "not registered")
+				require.Empty(t, stateManager.govState.DRepRegistrations)
+			})
+
+			t.Run("other credential type registered earlier", func(t *testing.T) {
+				stateManager := NewMockStateManager()
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					registration(scriptCredential),
+					test.certificate(keyCredential),
+				)
+
+				err := NewValidator().ValidateTransaction(
+					tx,
+					0,
+					currentEpoch,
+					stateManager.govState,
+					stateManager.protocolParams,
+				)
+				require.ErrorContains(t, err, "not registered")
+				require.Empty(t, stateManager.govState.DRepRegistrations)
+			})
+
+			t.Run("other credential type in current state", func(t *testing.T) {
+				stateManager := NewMockStateManager()
+				stateManager.govState.RegisterDRepCredentialUntil(
+					scriptCredential,
+					currentEpoch+activity,
+				)
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					test.certificate(keyCredential),
+				)
+
+				err := NewValidator().ValidateTransaction(
+					tx,
+					0,
+					currentEpoch,
+					stateManager.govState,
+					stateManager.protocolParams,
+				)
+				require.ErrorContains(t, err, "not registered")
+				require.True(t, stateManager.govState.IsDRepCredentialRegistered(
+					scriptCredential,
+				))
+			})
+
+			t.Run("exact credential registered earlier", func(t *testing.T) {
+				stateManager := NewMockStateManager()
+				stateManager.currentEpoch = currentEpoch
+				stateManager.govState.CurrentEpoch = currentEpoch
+				stateManager.protocolParams = &conway.ConwayProtocolParameters{
+					DRepInactivityPeriod: activity,
+				}
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					registration(keyCredential),
+					test.certificate(keyCredential),
+				)
+
+				require.NoError(t, NewValidator().ValidateTransaction(
+					tx,
+					0,
+					currentEpoch,
+					stateManager.govState,
+					stateManager.protocolParams,
+				))
+				require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+				test.assertState(t, stateManager)
+			})
+
+			t.Run("legacy hash-only registration", func(t *testing.T) {
+				stateManager := NewMockStateManager()
+				stateManager.currentEpoch = currentEpoch
+				stateManager.govState.CurrentEpoch = currentEpoch
+				stateManager.protocolParams = &conway.ConwayProtocolParameters{
+					DRepInactivityPeriod: activity,
+				}
+				stateManager.drepRegistrations[sharedHash] = true
+				stateManager.govState.DRepRegistrations[sharedHash] = true
+				tx := ledger.NewTransactionBuilder().WithCertificates(
+					test.certificate(keyCredential),
+				)
+
+				require.NoError(t, NewValidator().ValidateTransaction(
+					tx,
+					0,
+					currentEpoch,
+					stateManager.govState,
+					stateManager.protocolParams,
+				))
+				require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+				test.assertState(t, stateManager)
+			})
+		})
+	}
+}
+
 func TestApplyTransactionDeregistersExactDRepCredential(t *testing.T) {
 	sharedHash := common.Blake2b224{0x51}
 	keyCredential := common.Credential{
@@ -2141,15 +2315,101 @@ func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {
 	const runs = 64
 	wantError := "ratify proposal update-a#0: DRep voting threshold unavailable"
 	observedErrors := make(map[string]int)
-	partialMutation := false
-
-	for run := 0; run < runs; run++ {
+	newStateManager := func() *MockStateManager {
 		stateManager := NewMockStateManager()
+		stateManager.currentEpoch = 7
+		stateManager.govState.CurrentEpoch = 7
 		stateManager.protocolParams = &conway.ConwayProtocolParameters{
+			MinFeeA: 1,
 			PoolVotingThresholds: conway.PoolVotingThresholds{
 				CommitteeNoConfidence: cbor.Rat{Rat: new(big.Rat)},
 			},
 		}
+
+		pool := common.Blake2b224{0x71}
+		stateManager.poolRegistrations[pool] = true
+		stateManager.govState.PoolRegistrations[pool] = true
+		stateManager.govState.PoolRetirements[pool] = 8
+
+		coldCredential := common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: common.Blake2b224{0x72},
+		}
+		hotCredential := common.Credential{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: common.Blake2b224{0x73},
+		}
+		coldKey := ledger.NewRewardAccountKey(coldCredential)
+		member := &CommitteeMemberInfo{
+			ColdCredential: coldCredential,
+			HotCredential:  &hotCredential,
+			ColdKey:        coldCredential.Credential,
+			HotKey:         &hotCredential.Credential,
+			ExpiryEpoch:    20,
+		}
+		stateManager.committeeMembers[coldKey] = member.ExpiryEpoch
+		stateManager.hotKeyAuthorizations[coldKey] = hotCredential
+		stateManager.committeeResignations[coldKey] = true
+		stateManager.govState.CommitteeMembers[coldCredential.Credential] = member
+		stateManager.govState.CommitteeMembersByCredential[coldKey] = member
+		stateManager.govState.HotKeyAuthorizations[coldCredential.Credential] =
+			hotCredential.Credential
+		stateManager.govState.HotKeyAuthorizationsByCredential[coldKey] =
+			hotCredential
+		stateManager.govState.CommitteeResignations[coldKey] = true
+
+		protocolRoot := "old-parameters#0"
+		hardForkRoot := "old-hard-fork#0"
+		committeeRoot := "old-committee#0"
+		constitutionRoot := "old-constitution#0"
+		stateManager.govState.Roots = ProposalRoots{
+			ProtocolParameters:      &protocolRoot,
+			HardFork:                &hardForkRoot,
+			ConstitutionalCommittee: &committeeRoot,
+			Constitution:            &constitutionRoot,
+		}
+		stateManager.govState.Constitution = &ConstitutionInfo{
+			AnchorURL:  "https://example.com/old",
+			AnchorHash: []byte{0x74},
+			PolicyHash: []byte{0x75},
+		}
+		stateManager.govState.EnactedProposals["old-enacted#0"] = true
+
+		ratifiedEpoch := uint64(7)
+		minFeeA := uint(99)
+		stateManager.govState.Proposals["enact-committee#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType:   common.GovActionTypeNoConfidence,
+				ExpiresAfter: 20,
+			},
+			RatifiedEpoch: &ratifiedEpoch,
+		}
+		stateManager.govState.Proposals["enact-constitution#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType:   common.GovActionTypeNewConstitution,
+				ExpiresAfter: 20,
+				PolicyHash:   []byte{0x76},
+			},
+			RatifiedEpoch: &ratifiedEpoch,
+		}
+		stateManager.govState.Proposals["enact-hard-fork#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType:   common.GovActionTypeHardForkInitiation,
+				ExpiresAfter: 20,
+			},
+			RatifiedEpoch: &ratifiedEpoch,
+		}
+		stateManager.govState.Proposals["enact-parameters#0"] = &ProposalState{
+			GovActionInfo: GovActionInfo{
+				ActionType:   common.GovActionTypeParameterChange,
+				ExpiresAfter: 20,
+				ParameterUpdate: &conway.ConwayProtocolParameterUpdate{
+					MinFeeA: &minFeeA,
+				},
+			},
+			RatifiedEpoch: &ratifiedEpoch,
+		}
+
 		for idx := 0; idx < 32; idx++ {
 			id := fmt.Sprintf("info-%02d#0", idx)
 			stateManager.govState.Proposals[id] = &ProposalState{
@@ -2169,20 +2429,26 @@ func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {
 				},
 			}
 		}
+		return stateManager
+	}
 
-		err := stateManager.ProcessEpochBoundary(1)
-		require.Error(t, err)
-		observedErrors[err.Error()]++
-		for _, proposal := range stateManager.govState.Proposals {
-			if proposal != nil && proposal.RatifiedEpoch != nil {
-				partialMutation = true
-				break
-			}
+	for run := 0; run < runs; run++ {
+		stateManager := newStateManager()
+		expected := newStateManager()
+		for range 2 {
+			err := stateManager.ProcessEpochBoundary(8)
+			require.Error(t, err)
+			require.Equal(t, wantError, err.Error())
+			observedErrors[err.Error()]++
+			require.True(
+				t,
+				assert.ObjectsAreEqual(expected, stateManager),
+				"ratification error mutated observable boundary state",
+			)
 		}
 	}
 
-	require.Equal(t, map[string]int{wantError: runs}, observedErrors)
-	require.False(t, partialMutation, "ratification error mutated proposal state")
+	require.Equal(t, map[string]int{wantError: runs * 2}, observedErrors)
 }
 
 func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {

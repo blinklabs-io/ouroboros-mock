@@ -17,6 +17,7 @@ package conformance
 import (
 	"encoding/hex"
 	"fmt"
+	"maps"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
@@ -288,6 +289,25 @@ func (v *Validator) validateCertificates(
 	}
 
 	resignedCredentials := make(map[ledger.RewardAccountKey]bool)
+	certificateState := *govState
+	certificateState.DRepRegistrations = maps.Clone(govState.DRepRegistrations)
+	certificateState.DRepRegistrationsByCredential = maps.Clone(
+		govState.DRepRegistrationsByCredential,
+	)
+	certificateState.DRepExpiries = maps.Clone(govState.DRepExpiries)
+	if certificateState.DRepRegistrations == nil {
+		certificateState.DRepRegistrations = make(map[common.Blake2b224]bool)
+	}
+	if certificateState.DRepRegistrationsByCredential == nil {
+		certificateState.DRepRegistrationsByCredential = make(
+			map[ledger.RewardAccountKey]bool,
+		)
+	}
+	if certificateState.DRepExpiries == nil {
+		certificateState.DRepExpiries = make(
+			map[ledger.RewardAccountKey]uint64,
+		)
+	}
 	for _, cert := range certs {
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
@@ -310,11 +330,12 @@ func (v *Validator) validateCertificates(
 		if err := v.validateCertificate(
 			cert,
 			epoch,
-			govState,
+			&certificateState,
 			withdrawnCreds,
 		); err != nil {
 			return err
 		}
+		applyDRepCertificateValidationTransition(&certificateState, cert)
 		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
 			resignedCredentials[ledger.NewRewardAccountKey(
 				resignCert.ColdCredential,
@@ -398,6 +419,30 @@ func (v *Validator) validateCertificate(
 			}
 		}
 
+	case common.CertificateTypeDeregistrationDrep:
+		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
+			credential := drepCert.DrepCredential
+			if !govState.IsDRepCredentialRegistered(credential) {
+				return fmt.Errorf(
+					"DRep credential %d:%x not registered",
+					credential.CredType,
+					credential.Credential,
+				)
+			}
+		}
+
+	case common.CertificateTypeUpdateDrep:
+		if drepCert, ok := cert.(*common.UpdateDrepCertificate); ok {
+			credential := drepCert.DrepCredential
+			if !govState.IsDRepCredentialRegistered(credential) {
+				return fmt.Errorf(
+					"DRep credential %d:%x not registered",
+					credential.CredType,
+					credential.Credential,
+				)
+			}
+		}
+
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
 			coldCredential := authCert.ColdCredential
@@ -451,6 +496,18 @@ func (v *Validator) validateCertificate(
 	}
 
 	return nil
+}
+
+func applyDRepCertificateValidationTransition(
+	govState *GovernanceState,
+	cert common.Certificate,
+) {
+	switch drepCert := cert.(type) {
+	case *common.RegistrationDrepCertificate:
+		govState.RegisterDRepCredentialUntil(drepCert.DrepCredential, 0)
+	case *common.DeregistrationDrepCertificate:
+		govState.DeregisterDRepCredential(drepCert.DrepCredential)
+	}
 }
 
 // validateProposalProcedures validates proposal procedures in the transaction.
