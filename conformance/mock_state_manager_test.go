@@ -417,7 +417,7 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 	}
 	validator := NewValidator()
 	ledgerState := stateManager.buildLedgerState()
-	committeeRule := ConformanceValidationRules[len(ConformanceValidationRules)-2]
+	committeeRule := utxoValidateCommitteeCertificates
 	for _, coldKey := range []ledger.RewardAccountKey{
 		keyMember,
 		scriptMember,
