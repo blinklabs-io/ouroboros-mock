@@ -71,7 +71,11 @@ var ConformanceValidationRules = []common.UtxoValidationRuleFunc{
 }
 
 type committeeCredentialMemberState interface {
+	CommitteeStateAvailable() (bool, error)
 	CommitteeCredentialMember(
+		common.Credential,
+	) (*common.CommitteeMember, error)
+	CommitteeHotCredentialMember(
 		common.Credential,
 	) (*common.CommitteeMember, error)
 }
@@ -98,6 +102,22 @@ func (s committeeCertificateLedgerState) CommitteeMember(
 		return s.provider.CommitteeCredentialMember(s.credential)
 	}
 	return s.LedgerState.CommitteeMember(coldKey)
+}
+
+func (s committeeCertificateLedgerState) CommitteeStateAvailable() (bool, error) {
+	return s.provider.CommitteeStateAvailable()
+}
+
+func (s committeeCertificateLedgerState) CommitteeCredentialMember(
+	coldCredential common.Credential,
+) (*common.CommitteeMember, error) {
+	return s.provider.CommitteeCredentialMember(coldCredential)
+}
+
+func (s committeeCertificateLedgerState) CommitteeHotCredentialMember(
+	hotCredential common.Credential,
+) (*common.CommitteeMember, error) {
+	return s.provider.CommitteeHotCredentialMember(hotCredential)
 }
 
 // utxoValidateCommitteeCertificates retains the standard Conway rule while

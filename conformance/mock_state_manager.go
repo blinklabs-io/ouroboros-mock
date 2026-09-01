@@ -1568,8 +1568,19 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	builder.WithCommitteeCredentialMember(credentialMember)
 	builder.WithCommitteeHotCredentialMember(
 		func(hotCredential common.Credential) (*common.CommitteeMember, error) {
-			var matched *common.CommitteeMember
-			for coldKey, authorizedHotCredential := range hotKeyAuth {
+			coldKeys := make([]ledger.RewardAccountKey, 0, len(hotKeyAuth))
+			for coldKey := range hotKeyAuth {
+				coldKeys = append(coldKeys, coldKey)
+			}
+			sort.Slice(coldKeys, func(i, j int) bool {
+				if coldKeys[i].CredType != coldKeys[j].CredType {
+					return coldKeys[i].CredType < coldKeys[j].CredType
+				}
+				return string(coldKeys[i].Credential[:]) <
+					string(coldKeys[j].Credential[:])
+			})
+			for _, coldKey := range coldKeys {
+				authorizedHotCredential := hotKeyAuth[coldKey]
 				if authorizedHotCredential.CredType != hotCredential.CredType ||
 					authorizedHotCredential.Credential != hotCredential.Credential ||
 					resignations[coldKey] {
@@ -1582,12 +1593,9 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 				if member == nil {
 					continue
 				}
-				if matched != nil {
-					return nil, nil
-				}
-				matched = member
+				return member, nil
 			}
-			return matched, nil
+			return nil, nil
 		},
 	)
 

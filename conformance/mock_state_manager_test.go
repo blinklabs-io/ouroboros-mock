@@ -849,6 +849,49 @@ func TestValidateVotingPreservesLegacyCommitteeAuthorization(t *testing.T) {
 	), "not authorized")
 }
 
+func TestCommitteeHotCredentialMemberAllowsSharedAuthorization(t *testing.T) {
+	hotCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x21},
+	}
+	firstCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x22},
+	}
+	secondCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x23},
+	}
+	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = 3
+	stateManager.govState.CurrentEpoch = 3
+	stateManager.committeeMembers[firstCold] = 10
+	stateManager.committeeMembers[secondCold] = 11
+	stateManager.hotKeyAuthorizations[firstCold] = hotCredential
+	stateManager.hotKeyAuthorizations[secondCold] = hotCredential
+
+	ledgerState := stateManager.buildLedgerState()
+	member, err := ledgerState.CommitteeHotCredentialMember(hotCredential)
+	require.NoError(t, err)
+	require.NotNil(t, member)
+	assert.Equal(t, firstCold.Credential, member.ColdKey)
+
+	tx := ledger.NewTransactionBuilder().WithVotingProcedures(
+		common.VotingProcedures{
+			&common.Voter{
+				Type: common.VoterTypeConstitutionalCommitteeHotKeyHash,
+				Hash: hotCredential.Credential,
+			}: {},
+		},
+	)
+	require.NoError(t, conway.UtxoValidateUnknownVoters(
+		tx,
+		0,
+		ledgerState,
+		nil,
+	))
+}
+
 func TestDRepCredentialActivityUsesExactRegistration(t *testing.T) {
 	sharedHash := common.Blake2b224{0x21}
 	keyCredential := common.Credential{
