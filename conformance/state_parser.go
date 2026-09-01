@@ -104,8 +104,8 @@ type ParsedInitialState struct {
 	// types.
 	HotKeyAuthorizationsByCredential map[mockledger.RewardAccountKey]common.Credential
 
-	// CommitteeResignations tracks cold keys that permanently resigned while
-	// they were current or pending-proposal committee members.
+	// CommitteeResignations tracks current or pending-proposal committee
+	// credentials whose authorization state is a resignation.
 	CommitteeResignations map[mockledger.RewardAccountKey]bool
 
 	// Proposals maps GovActionId (as "txHash#index") to proposal info.
@@ -260,10 +260,224 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	// Non-fatal: some vectors don't have committee data
 	_ = parseCommitteeFromRawCBOR(state, raw)
 
+	// Credential and governance maps use array keys, which cannot be represented
+	// directly as Go interface-map keys. Decode those maps through comparable
+	// typed keys so their full credential identity and documented field offsets
+	// are preserved.
+	_ = parseCertStateFromRawCBOR(state, raw)
+	_ = parseProposalsFromRawCBOR(state, raw)
+
 	// Extract pparams hash from gov_state (search in ledger_state)
 	state.PParamsHash = extractPParamsHash(ls)
 
 	return state, nil
+}
+
+func rawLedgerState(
+	raw cbor.RawMessage,
+) ([]cbor.RawMessage, error) {
+	var initialState []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &initialState); err != nil {
+		return nil, fmt.Errorf("failed to decode initial_state: %w", err)
+	}
+	if len(initialState) < 4 {
+		return nil, errors.New("initial_state array too short")
+	}
+	var beginEpochState []cbor.RawMessage
+	if _, err := cbor.Decode(initialState[3], &beginEpochState); err != nil {
+		return nil, fmt.Errorf("failed to decode begin_epoch_state: %w", err)
+	}
+	if len(beginEpochState) < 2 {
+		return nil, errors.New("begin_epoch_state array too short")
+	}
+	var ledgerState []cbor.RawMessage
+	if _, err := cbor.Decode(beginEpochState[1], &ledgerState); err != nil {
+		return nil, fmt.Errorf("failed to decode ledger_state: %w", err)
+	}
+	if len(ledgerState) < 2 {
+		return nil, errors.New("ledger_state array too short")
+	}
+	return ledgerState, nil
+}
+
+func parseCertStateFromRawCBOR(
+	state *ParsedInitialState,
+	raw cbor.RawMessage,
+) error {
+	ledgerState, err := rawLedgerState(raw)
+	if err != nil {
+		return err
+	}
+	var certState []cbor.RawMessage
+	if _, err := cbor.Decode(ledgerState[0], &certState); err != nil {
+		return fmt.Errorf("failed to decode cert_state: %w", err)
+	}
+	if len(certState) < 3 {
+		return errors.New("cert_state array too short")
+	}
+	var votingState []cbor.RawMessage
+	if _, err := cbor.Decode(certState[0], &votingState); err == nil &&
+		len(votingState) >= 2 {
+		if dreps, ok := decodeCredentialMapFromRawCBOR(votingState[0]); ok {
+			state.DRepRegistrations = state.DRepRegistrations[:0]
+			clear(state.DRepRegistrationsByCredential)
+			clear(state.DRepExpiries)
+			_ = parseVotingState(state, []any{dreps, nil})
+		}
+		if authorizations, ok := decodeCredentialMapFromRawCBOR(votingState[1]); ok {
+			clear(state.HotKeyAuthorizations)
+			clear(state.HotKeyAuthorizationsByCredential)
+			clear(state.CommitteeResignations)
+			_ = parseVotingState(state, []any{nil, authorizations})
+		}
+	}
+	var delegationState []cbor.RawMessage
+	if _, err := cbor.Decode(certState[2], &delegationState); err == nil &&
+		len(delegationState) > 0 {
+		unifiedMapRaw := delegationState[0]
+		var wrapper []cbor.RawMessage
+		if _, err := cbor.Decode(unifiedMapRaw, &wrapper); err == nil &&
+			len(wrapper) > 0 {
+			unifiedMapRaw = wrapper[0]
+		}
+		if delegations, ok := decodeCredentialMapFromRawCBOR(unifiedMapRaw); ok {
+			clear(state.StakeRegistrations)
+			clear(state.StakeRegistrationsByCredential)
+			clear(state.RewardAccounts)
+			clear(state.RewardAccountBalances)
+			clear(state.PoolDelegationsByCredential)
+			clear(state.DRepDelegations)
+			clear(state.DRepDelegationsByCredential)
+			_ = parseDelegationState(state, []any{delegations})
+		}
+	}
+	return nil
+}
+
+func decodeCredentialMapFromRawCBOR(
+	raw cbor.RawMessage,
+) (map[any]any, bool) {
+	result := make(map[any]any)
+	var entries map[stakeCredential]cbor.RawMessage
+	if _, err := cbor.Decode(raw, &entries); err != nil {
+		return nil, false
+	}
+	for credential, valueRaw := range entries {
+		var value cbor.Value
+		if _, err := cbor.Decode(valueRaw, &value); err != nil {
+			return nil, false
+		}
+		result[credential] = value.Value()
+	}
+	return result, true
+}
+
+type rawGovActionID struct {
+	cbor.StructAsArray
+	TxID  common.Blake2b256
+	Index uint64
+}
+
+//nolint:nilerr // Optional governance encodings remain non-fatal for compatibility.
+func parseProposalsFromRawCBOR(
+	state *ParsedInitialState,
+	raw cbor.RawMessage,
+) error {
+	ledgerState, err := rawLedgerState(raw)
+	if err != nil {
+		return err
+	}
+	var utxoState []cbor.RawMessage
+	if _, err := cbor.Decode(ledgerState[1], &utxoState); err != nil ||
+		len(utxoState) < 4 {
+		return nil
+	}
+	var govState []cbor.RawMessage
+	if _, err := cbor.Decode(utxoState[3], &govState); err != nil ||
+		len(govState) == 0 {
+		return nil
+	}
+	var proposalsState []cbor.RawMessage
+	if _, err := cbor.Decode(govState[0], &proposalsState); err != nil ||
+		len(proposalsState) == 0 {
+		return nil
+	}
+	proposalsRaw := proposalsState[0]
+	var nested []cbor.RawMessage
+	if _, err := cbor.Decode(proposalsRaw, &nested); err == nil &&
+		len(nested) >= 4 {
+		proposalsRaw = nested[0]
+	}
+	var proposals map[rawGovActionID]cbor.RawMessage
+	if _, err := cbor.Decode(proposalsRaw, &proposals); err != nil {
+		return nil
+	}
+	for id, proposalRaw := range proposals {
+		info, ok := parseProposalInfoFromRawCBOR(proposalRaw)
+		if !ok {
+			continue
+		}
+		state.Proposals[fmt.Sprintf(
+			"%s#%d",
+			hex.EncodeToString(id.TxID[:]),
+			id.Index,
+		)] = info
+	}
+	return nil
+}
+
+func parseProposalInfoFromRawCBOR(
+	raw cbor.RawMessage,
+) (GovActionInfo, bool) {
+	var proposalRaw []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &proposalRaw); err != nil ||
+		len(proposalRaw) < 7 {
+		return GovActionInfo{}, false
+	}
+	var proposalValue cbor.Value
+	if _, err := cbor.Decode(raw, &proposalValue); err != nil {
+		return GovActionInfo{}, false
+	}
+	proposal, ok := proposalValue.Value().([]any)
+	if !ok || len(proposal) < 7 {
+		return GovActionInfo{}, false
+	}
+	if votes, ok := decodeCredentialMapFromRawCBOR(proposalRaw[1]); ok {
+		proposal[1] = votes
+	}
+	if votes, ok := decodeCredentialMapFromRawCBOR(proposalRaw[2]); ok {
+		proposal[2] = votes
+	}
+	info := extractProposalInfo(proposal)
+	var procedure []cbor.RawMessage
+	if _, err := cbor.Decode(proposalRaw[4], &procedure); err != nil ||
+		len(procedure) < 3 {
+		return info, true
+	}
+	var action []cbor.RawMessage
+	if _, err := cbor.Decode(procedure[2], &action); err != nil ||
+		len(action) < 4 {
+		return info, true
+	}
+	var actionType uint64
+	if _, err := cbor.Decode(action[0], &actionType); err != nil ||
+		actionType != uint64(common.GovActionTypeUpdateCommittee) {
+		return info, true
+	}
+	var members map[stakeCredential]uint64
+	if _, err := cbor.Decode(action[3], &members); err == nil {
+		clear(info.ProposedMembersByCredential)
+		for credential, expiry := range members {
+			info.ProposedMembersByCredential[mockledger.RewardAccountKey{
+				CredType:   uint(credential.Type),
+				Credential: credential.Hash,
+			}] = expiry
+		}
+		info.ProposedMembers = committeeMembersByHash(
+			info.ProposedMembersByCredential,
+		)
+	}
+	return info, true
 }
 
 // parseCommitteeFromRawCBOR parses committee members from raw CBOR using typed decoders.
@@ -272,36 +486,13 @@ func parseCommitteeFromRawCBOR(
 	state *ParsedInitialState,
 	raw cbor.RawMessage,
 ) error {
-	// Decode the top-level array
-	var arr []cbor.RawMessage
-	if _, err := cbor.Decode(raw, &arr); err != nil {
-		return fmt.Errorf("failed to decode initial_state: %w", err)
+	ledgerState, err := rawLedgerState(raw)
+	if err != nil {
+		return err
 	}
-	if len(arr) < 4 {
-		return errors.New("initial_state array too short")
-	}
-
-	// arr[3] = begin_epoch_state
-	var bes []cbor.RawMessage
-	if _, err := cbor.Decode(arr[3], &bes); err != nil {
-		return fmt.Errorf("failed to decode begin_epoch_state: %w", err)
-	}
-	if len(bes) < 2 {
-		return errors.New("begin_epoch_state array too short")
-	}
-
-	// bes[1] = begin_ledger_state
-	var bls []cbor.RawMessage
-	if _, err := cbor.Decode(bes[1], &bls); err != nil {
-		return fmt.Errorf("failed to decode begin_ledger_state: %w", err)
-	}
-	if len(bls) < 2 {
-		return errors.New("begin_ledger_state array too short")
-	}
-
-	// bls[1] = utxo_state
+	// ledgerState[1] = utxo_state
 	var utxoState []cbor.RawMessage
-	if _, err := cbor.Decode(bls[1], &utxoState); err != nil {
+	if _, err := cbor.Decode(ledgerState[1], &utxoState); err != nil {
 		return fmt.Errorf("failed to decode utxo_state: %w", err)
 	}
 	if len(utxoState) < 4 {
