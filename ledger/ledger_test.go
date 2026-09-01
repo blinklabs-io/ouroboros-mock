@@ -794,13 +794,21 @@ func TestCommitteeMemberBuilder_Build_MissingColdKey(t *testing.T) {
 // ProposedCommitteeMembers Tests
 // =============================================================================
 
-func TestLedgerStateBuilder_WithProposedCommitteeCredentialMembers(t *testing.T) {
+func TestLedgerStateBuilder_WithProposedCommitteeCredentialMembers(
+	t *testing.T,
+) {
 	// Create cold key hashes
 	var coldKey1, coldKey2 lcommon.Blake2b224
 	copy(coldKey1[:], bytes.Repeat([]byte{0x11}, 28))
 	copy(coldKey2[:], bytes.Repeat([]byte{0x22}, 28))
-	coldCredential1 := lcommon.Credential{Credential: coldKey1}
-	coldCredential2 := lcommon.Credential{Credential: coldKey2}
+	coldCredential1 := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: coldKey1,
+	}
+	coldCredential2 := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: coldKey2,
+	}
 
 	// Set up proposed committee members with expiry epochs
 	proposed := map[ledger.RewardAccountKey]uint64{
@@ -854,7 +862,9 @@ func TestLedgerStateBuilder_WithProposedCommitteeCredentialMembers(t *testing.T)
 	assert.Equal(t, uint64(100), legacyMember.ExpiryEpoch)
 }
 
-func TestCommitteeCredentialStateDistinguishesAuthorityAndCredentialTags(t *testing.T) {
+func TestCommitteeCredentialStateDistinguishesAuthorityAndCredentialTags(
+	t *testing.T,
+) {
 	hotHash := lcommon.Blake2b224{0x44}
 	state := ledger.NewLedgerStateBuilder().WithCommitteeMembers(
 		[]lcommon.CommitteeMember{{
@@ -878,10 +888,12 @@ func TestCommitteeCredentialStateDistinguishesAuthorityAndCredentialTags(t *test
 	require.NoError(t, err)
 	require.NotNil(t, keyMember)
 
-	scriptMember, err := provider.CommitteeHotCredentialMember(lcommon.Credential{
-		CredType:   lcommon.CredentialTypeScriptHash,
-		Credential: hotHash,
-	})
+	scriptMember, err := provider.CommitteeHotCredentialMember(
+		lcommon.Credential{
+			CredType:   lcommon.CredentialTypeScriptHash,
+			Credential: hotHash,
+		},
+	)
 	require.NoError(t, err)
 	require.Nil(t, scriptMember)
 }
@@ -960,7 +972,10 @@ func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
 	// Create a cold key hash
 	var coldKey lcommon.Blake2b224
 	copy(coldKey[:], bytes.Repeat([]byte{0x33}, 28))
-	coldCredential := lcommon.Credential{Credential: coldKey}
+	coldCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
 
 	// Create a hot key for the current member
 	var hotKey lcommon.Blake2b224
@@ -1008,7 +1023,10 @@ func TestLedgerStateBuilder_CommitteeMember_PrefersCurrentOverProposed(
 func TestLedgerStateBuilder_CommitteeMember_NotFound(t *testing.T) {
 	var unknownKey lcommon.Blake2b224
 	copy(unknownKey[:], bytes.Repeat([]byte{0x99}, 28))
-	unknownCredential := lcommon.Credential{Credential: unknownKey}
+	unknownCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: unknownKey,
+	}
 
 	state := ledger.NewLedgerStateBuilder().Build()
 

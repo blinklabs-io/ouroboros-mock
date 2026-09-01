@@ -30,7 +30,10 @@ import (
 
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
-	coldCredential := common.Credential{Credential: coldKey}
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
 	coldCredentialKey := ledger.NewRewardAccountKey(coldCredential)
 	hotKey := common.Blake2b224{0x02}
 	const expiryEpoch = uint64(42)
@@ -48,6 +51,7 @@ func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 		ColdCredential: coldCredential,
 		HotCredential: common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hotKey,
 		},
 	})
@@ -96,7 +100,7 @@ func TestGovernanceStateLegacyCommitteeMutationCompatibility(t *testing.T) {
 	)
 	require.NotNil(t, firstMember.HotKey)
 	require.Equal(t, firstHotKey, *firstMember.HotKey)
-	require.True(t, firstMember.Resigned)
+	require.False(t, firstMember.Resigned)
 
 	state.AuthorizeHotKey(secondColdKey, secondHotKey)
 	require.Equal(t, firstHotKey, state.HotKeyAuthorizations[firstColdKey])
@@ -388,6 +392,7 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 			CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 			ColdCredential: coldCredential,
 			HotCredential: common.Credential{
+				CredType:   common.CredentialTypeAddrKeyHash,
 				Credential: common.Blake2b224{0x04},
 			},
 		}
@@ -458,51 +463,57 @@ func TestCommitteeCertificateValidationUsesConfiguredLayers(t *testing.T) {
 		common.CredentialTypeAddrKeyHash,
 		common.CredentialTypeScriptHash,
 	} {
-		t.Run(fmt.Sprintf("credential type %d", credentialType), func(t *testing.T) {
-			coldCredential := common.Credential{
-				CredType:   credentialType,
-				Credential: common.Blake2b224{0x51},
-			}
-			coldKey := ledger.NewRewardAccountKey(coldCredential)
-			stateManager := NewMockStateManager()
-			stateManager.committeeMembers[coldKey] = 42
-			stateManager.govState.CommitteeMembersByCredential[coldKey] =
-				&CommitteeMemberInfo{
-					ColdCredential: coldCredential,
-					ColdKey:        coldCredential.Credential,
-					ExpiryEpoch:    42,
+		t.Run(
+			fmt.Sprintf("credential type %d", credentialType),
+			func(t *testing.T) {
+				coldCredential := common.Credential{
+					CredType:   credentialType,
+					Credential: common.Blake2b224{0x51},
 				}
-			certificate := &common.AuthCommitteeHotCertificate{
-				CertType:       uint(common.CertificateTypeAuthCommitteeHot),
-				ColdCredential: coldCredential,
-				HotCredential: common.Credential{
-					Credential: common.Blake2b224{0x52},
-				},
-			}
-			tx := &conway.ConwayTransaction{
-				Body: conway.ConwayTransactionBody{
-					TxCertificates: []common.CertificateWrapper{{
-						Type:        certificate.Type(),
-						Certificate: certificate,
-					}},
-				},
-				TxIsValid: true,
-			}
+				coldKey := ledger.NewRewardAccountKey(coldCredential)
+				stateManager := NewMockStateManager()
+				stateManager.committeeMembers[coldKey] = 42
+				stateManager.govState.CommitteeMembersByCredential[coldKey] =
+					&CommitteeMemberInfo{
+						ColdCredential: coldCredential,
+						ColdKey:        coldCredential.Credential,
+						ExpiryEpoch:    42,
+					}
+				certificate := &common.AuthCommitteeHotCertificate{
+					CertType: uint(
+						common.CertificateTypeAuthCommitteeHot,
+					),
+					ColdCredential: coldCredential,
+					HotCredential: common.Credential{
+						CredType:   common.CredentialTypeAddrKeyHash,
+						Credential: common.Blake2b224{0x52},
+					},
+				}
+				tx := &conway.ConwayTransaction{
+					Body: conway.ConwayTransactionBody{
+						TxCertificates: []common.CertificateWrapper{{
+							Type:        certificate.Type(),
+							Certificate: certificate,
+						}},
+					},
+					TxIsValid: true,
+				}
 
-			require.NoError(t, NewValidator().ValidateTransaction(
-				tx,
-				0,
-				0,
-				stateManager.govState,
-				nil,
-			))
-			require.NoError(t, conway.UtxoValidateCommitteeCertificates(
-				tx,
-				0,
-				stateManager.buildLedgerState(),
-				nil,
-			))
-		})
+				require.NoError(t, NewValidator().ValidateTransaction(
+					tx,
+					0,
+					0,
+					stateManager.govState,
+					nil,
+				))
+				require.NoError(t, conway.UtxoValidateCommitteeCertificates(
+					tx,
+					0,
+					stateManager.buildLedgerState(),
+					nil,
+				))
+			},
+		)
 	}
 }
 
@@ -523,6 +534,7 @@ func TestCommitteeAuthorizationMembershipValidation(t *testing.T) {
 			CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 			ColdCredential: credential,
 			HotCredential: common.Credential{
+				CredType:   common.CredentialTypeAddrKeyHash,
 				Credential: common.Blake2b224{0x02},
 			},
 		}
@@ -650,7 +662,7 @@ func TestCommitteeCertificateValidationHonorsProposalExpiry(t *testing.T) {
 			}{
 				{name: "before expiry", epoch: expiresAfter - 1},
 				{name: "at expiry", epoch: expiresAfter},
-				{name: "after expiry", epoch: expiresAfter + 1, shouldError: true},
+				{name: "after expiry", epoch: expiresAfter + 1},
 			} {
 				t.Run(epochCase.name, func(t *testing.T) {
 					state := newProposedMemberState()
@@ -741,6 +753,233 @@ func TestCommitteeCertificateValidationHonorsProposalExpiry(t *testing.T) {
 	require.False(t, state.IsProposedCommitteeCredentialMember(coldCredential))
 }
 
+func TestCommitteeCertificateValidationIgnoresExpiredOnlyCurrentState(
+	t *testing.T,
+) {
+	const currentEpoch = uint64(11)
+	targetCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	expiredCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	expiredKey := ledger.NewRewardAccountKey(expiredCredential)
+	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = currentEpoch
+	stateManager.govState.CurrentEpoch = currentEpoch
+	stateManager.committeeMembers[expiredKey] = currentEpoch - 1
+	stateManager.govState.CommitteeMembersByCredential[expiredKey] =
+		&CommitteeMemberInfo{
+			ColdCredential: expiredCredential,
+			ColdKey:        expiredCredential.Credential,
+			ExpiryEpoch:    currentEpoch - 1,
+		}
+	certificate := &common.AuthCommitteeHotCertificate{
+		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
+		ColdCredential: targetCredential,
+		HotCredential: common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: common.Blake2b224{0x03},
+		},
+	}
+	tx := ledger.NewTransactionBuilder().WithCertificates(certificate)
+
+	require.NoError(t, NewValidator().ValidateTransaction(
+		tx,
+		0,
+		currentEpoch,
+		stateManager.govState,
+		nil,
+	))
+	require.NoError(t, conway.UtxoValidateCommitteeCertificates(
+		tx,
+		0,
+		stateManager.buildLedgerState(),
+		nil,
+	))
+}
+
+func TestValidateVotingPreservesLegacyCommitteeAuthorization(t *testing.T) {
+	hotKey := common.Blake2b224{0x11}
+	state := NewGovernanceState()
+	state.HotKeyAuthorizations[common.Blake2b224{0x12}] = hotKey
+	actionID := &common.GovActionId{TransactionId: [32]byte{0x13}}
+	state.Proposals[formatGovActionIdFromPtr(actionID)] = &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType:   common.GovActionTypeNewConstitution,
+			ExpiresAfter: 10,
+		},
+	}
+	vote := func(voterType uint8) *ledger.MockTransaction {
+		return ledger.NewTransactionBuilder().WithVotingProcedures(
+			common.VotingProcedures{
+				&common.Voter{Type: voterType, Hash: hotKey}: {
+					actionID: {Vote: 1},
+				},
+			},
+		)
+	}
+
+	require.NoError(t, NewValidator().ValidateTransaction(
+		vote(common.VoterTypeConstitutionalCommitteeHotKeyHash),
+		0,
+		0,
+		state,
+		nil,
+	))
+	require.ErrorContains(t, NewValidator().ValidateTransaction(
+		vote(common.VoterTypeConstitutionalCommitteeHotScriptHash),
+		0,
+		0,
+		state,
+		nil,
+	), "not authorized")
+}
+
+func TestDRepCredentialActivityUsesExactRegistration(t *testing.T) {
+	sharedHash := common.Blake2b224{0x21}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	state := NewGovernanceState()
+	state.DRepRegistrations[sharedHash] = true
+	state.DRepRegistrationsByCredential[ledger.NewRewardAccountKey(
+		scriptCredential,
+	)] = true
+	state.DRepExpiries[ledger.NewRewardAccountKey(scriptCredential)] = 10
+
+	require.False(t, state.IsDRepCredentialActive(keyCredential, 5))
+	require.True(t, state.IsDRepCredentialActive(scriptCredential, 5))
+
+	state.DRepRegistrationsByCredential[ledger.NewRewardAccountKey(
+		keyCredential,
+	)] = true
+	state.DRepExpiries[ledger.NewRewardAccountKey(keyCredential)] = 4
+	require.False(t, state.IsDRepCredentialActive(keyCredential, 5))
+	require.True(t, state.IsDRepCredentialActive(scriptCredential, 5))
+}
+
+func TestDRepVotingUsesCredentialTypeWithoutRejectingExpiredRegistration(
+	t *testing.T,
+) {
+	sharedHash := common.Blake2b224{0x31}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	state := NewGovernanceState()
+	state.RegisterDRepCredentialUntil(scriptCredential, 4)
+	actionID := &common.GovActionId{TransactionId: [32]byte{0x32}}
+	state.Proposals[formatGovActionIdFromPtr(actionID)] = &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType:   common.GovActionTypeNewConstitution,
+			ExpiresAfter: 10,
+		},
+	}
+	vote := func(voterType uint8) *ledger.MockTransaction {
+		return ledger.NewTransactionBuilder().WithVotingProcedures(
+			common.VotingProcedures{
+				&common.Voter{Type: voterType, Hash: sharedHash}: {
+					actionID: {Vote: 1},
+				},
+			},
+		)
+	}
+
+	require.ErrorContains(t, NewValidator().ValidateTransaction(
+		vote(common.VoterTypeDRepKeyHash),
+		0,
+		5,
+		state,
+		nil,
+	), "not registered")
+	require.NoError(t, NewValidator().ValidateTransaction(
+		vote(common.VoterTypeDRepScriptHash),
+		0,
+		5,
+		state,
+		nil,
+	))
+}
+
+func TestDRepRegistrationValidationUsesExactCredential(t *testing.T) {
+	sharedHash := common.Blake2b224{0x41}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	state := NewGovernanceState()
+	state.RegisterDRepCredentialUntil(scriptCredential, 10)
+	certificate := func(credential common.Credential) common.Certificate {
+		return &common.RegistrationDrepCertificate{
+			CertType:       uint(common.CertificateTypeRegistrationDrep),
+			DrepCredential: credential,
+		}
+	}
+	validator := NewValidator()
+
+	require.NoError(t, validator.ValidateTransaction(
+		ledger.NewTransactionBuilder().
+			WithCertificates(certificate(keyCredential)),
+		0,
+		0,
+		state,
+		nil,
+	))
+	require.ErrorContains(t, validator.ValidateTransaction(
+		ledger.NewTransactionBuilder().
+			WithCertificates(certificate(scriptCredential)),
+		0,
+		0,
+		state,
+		nil,
+	), "already registered")
+}
+
+func TestApplyTransactionDeregistersExactDRepCredential(t *testing.T) {
+	sharedHash := common.Blake2b224{0x51}
+	keyCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	stateManager := NewMockStateManager()
+	stateManager.drepRegistrations[sharedHash] = true
+	stateManager.govState.RegisterDRepCredentialUntil(keyCredential, 10)
+	stateManager.govState.RegisterDRepCredentialUntil(scriptCredential, 20)
+	tx := ledger.NewTransactionBuilder().WithCertificates(
+		&common.DeregistrationDrepCertificate{
+			CertType:       uint(common.CertificateTypeDeregistrationDrep),
+			DrepCredential: scriptCredential,
+		},
+	)
+
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.True(
+		t,
+		stateManager.govState.IsDRepCredentialActive(keyCredential, 10),
+	)
+	require.False(
+		t,
+		stateManager.govState.IsDRepCredentialActive(scriptCredential, 10),
+	)
+	require.True(t, stateManager.drepRegistrations[sharedHash])
+}
+
 func TestIsProposedCommitteeMemberCompatibility(t *testing.T) {
 	hash := common.Blake2b224{0x42}
 	key := ledger.RewardAccountKey{
@@ -757,24 +996,52 @@ func TestIsProposedCommitteeMemberCompatibility(t *testing.T) {
 		epoch    uint64
 		expected bool
 	}{
-		{name: "key only", members: map[ledger.RewardAccountKey]uint64{key: 10}, expected: true},
-		{name: "script only", members: map[ledger.RewardAccountKey]uint64{script: 10}, expected: true},
-		{name: "both credential types", members: map[ledger.RewardAccountKey]uint64{key: 10, script: 10}, expected: true},
+		{
+			name:     "key only",
+			members:  map[ledger.RewardAccountKey]uint64{key: 10},
+			expected: true,
+		},
+		{
+			name:     "script only",
+			members:  map[ledger.RewardAccountKey]uint64{script: 10},
+			expected: true,
+		},
+		{
+			name:     "both credential types",
+			members:  map[ledger.RewardAccountKey]uint64{key: 10, script: 10},
+			expected: true,
+		},
 		{name: "none", expected: false},
-		{name: "at expiry", members: map[ledger.RewardAccountKey]uint64{key: 10}, epoch: 10, expected: true},
-		{name: "after expiry", members: map[ledger.RewardAccountKey]uint64{key: 10}, epoch: 11, expected: false},
+		{
+			name:     "at expiry",
+			members:  map[ledger.RewardAccountKey]uint64{key: 10},
+			epoch:    10,
+			expected: true,
+		},
+		{
+			name:     "after expiry",
+			members:  map[ledger.RewardAccountKey]uint64{key: 10},
+			epoch:    11,
+			expected: false,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			state := NewGovernanceState()
 			state.CurrentEpoch = test.epoch
-			state.Proposals["proposal#0"] = &ProposalState{GovActionInfo: GovActionInfo{
-				ActionType:                  common.GovActionTypeUpdateCommittee,
-				ExpiresAfter:                10,
-				ProposedMembersByCredential: test.members,
-			}}
-			require.Equal(t, test.expected, state.IsProposedCommitteeMember(hash))
+			state.Proposals["proposal#0"] = &ProposalState{
+				GovActionInfo: GovActionInfo{
+					ActionType:                  common.GovActionTypeUpdateCommittee,
+					ExpiresAfter:                10,
+					ProposedMembersByCredential: test.members,
+				},
+			}
+			require.Equal(
+				t,
+				test.expected,
+				state.IsProposedCommitteeMember(hash),
+			)
 		})
 	}
 }
@@ -982,6 +1249,7 @@ func TestBuildLedgerStatePreservesLegacyCommitteeMembers(t *testing.T) {
 	stateManager.committeeMembers[secondKey] = 42
 	stateManager.committeeMembers[secondScript] = 43
 	stateManager.hotKeyAuthorizations[firstKey] = common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
 		Credential: firstHotHash,
 	}
 
@@ -1137,7 +1405,10 @@ func TestLegacyCommitteeMutationDoesNotGuessScriptCredential(t *testing.T) {
 
 func TestCurrentCommitteeResignationIsVisible(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
-	coldCredential := common.Credential{Credential: coldKey}
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
 	coldCredentialKey := ledger.NewRewardAccountKey(coldCredential)
 	hotKey := common.Blake2b224{0x02}
 	stateManager := NewMockStateManager()
@@ -1151,6 +1422,7 @@ func TestCurrentCommitteeResignationIsVisible(t *testing.T) {
 		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 		ColdCredential: coldCredential,
 		HotCredential: common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hotKey,
 		},
 	}
@@ -1185,7 +1457,10 @@ func TestCurrentCommitteeResignationIsVisible(t *testing.T) {
 
 func TestProposedCommitteeResignationRejectsReauthorization(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
-	coldCredential := common.Credential{Credential: coldKey}
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
 	coldCredentialKey := ledger.NewRewardAccountKey(coldCredential)
 	hotKey := common.Blake2b224{0x02}
 	stateManager := NewMockStateManager()
@@ -1205,6 +1480,7 @@ func TestProposedCommitteeResignationRejectsReauthorization(t *testing.T) {
 		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 		ColdCredential: coldCredential,
 		HotCredential: common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hotKey,
 		},
 	}
@@ -1225,7 +1501,10 @@ func TestProposedCommitteeResignationRejectsReauthorization(t *testing.T) {
 
 func TestCommitteeRemovalClearsStateBeforeReelection(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
-	coldCredential := common.Credential{Credential: coldKey}
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
 	coldCredentialKey := ledger.NewRewardAccountKey(coldCredential)
 	hotKey := common.Blake2b224{0x02}
 	stateManager := NewMockStateManager()
@@ -1301,6 +1580,7 @@ func TestCommitteeRemovalClearsStateBeforeReelection(t *testing.T) {
 		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 		ColdCredential: coldCredential,
 		HotCredential: common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hotKey,
 		},
 	}
@@ -1443,7 +1723,10 @@ func TestUpdateCommitteeEnactmentMergesCredentialViews(t *testing.T) {
 
 func TestNoConfidenceEnactmentClearsCommitteeState(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
-	coldCredential := common.Credential{Credential: coldKey}
+	coldCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}
 	coldCredentialKey := ledger.NewRewardAccountKey(coldCredential)
 	stateManager := NewMockStateManager()
 	stateManager.committeeMembers[coldCredentialKey] = 10
@@ -1511,6 +1794,8 @@ func TestProcessEpochBoundaryEnactsProposalIDsDeterministically(t *testing.T) {
 
 func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {
 	stateManager := NewMockStateManager()
+	stateManager.currentEpoch = 5
+	stateManager.govState.CurrentEpoch = 5
 	stateManager.protocolParams = &conway.ConwayProtocolParameters{
 		ProtocolVersion: common.ProtocolParametersProtocolVersion{Major: 10},
 		DRepVotingThresholds: conway.DRepVotingThresholds{
@@ -1521,10 +1806,17 @@ func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {
 		},
 	}
 	stateManager.govState.CommitteeMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
 		Credential: common.Blake2b224{0x01},
-	}] = &CommitteeMemberInfo{}
-	yesStake := ledger.RewardAccountKey{Credential: common.Blake2b224{0x11}}
-	noStake := ledger.RewardAccountKey{Credential: common.Blake2b224{0x12}}
+	}] = &CommitteeMemberInfo{ExpiryEpoch: 10}
+	yesStake := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x11},
+	}
+	noStake := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x12},
+	}
 	yesDRep := common.Blake2b224{0x21}
 	noDRep := common.Blake2b224{0x22}
 	stateManager.rewardAccounts[yesStake] = 40
@@ -1538,15 +1830,18 @@ func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {
 		Credential: noDRep[:],
 	}
 	stateManager.govState.DRepRegistrationsByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
 		Credential: yesDRep,
 	}] = true
 	stateManager.govState.DRepRegistrationsByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
 		Credential: noDRep,
 	}] = true
 	proposal := &ProposalState{GovActionInfo: GovActionInfo{
 		ActionType:    common.GovActionTypeUpdateCommittee,
 		Deposit:       20,
 		ReturnAccount: &yesStake,
+		ExpiresAfter:  10,
 		Votes: map[string]uint8{
 			fmt.Sprintf(
 				"%d:%s",
@@ -1556,8 +1851,16 @@ func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {
 		},
 	}}
 	stateManager.govState.Proposals["update#0"] = proposal
+	stateManager.govState.Proposals["expired#0"] = &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType:    common.GovActionTypeInfo,
+			Deposit:       40,
+			ReturnAccount: &noStake,
+			ExpiresAfter:  4,
+		},
+	}
 
-	stake := stateManager.credentialVotingStake()
+	stake := stateManager.credentialVotingStake(5)
 	assert.True(t, stateManager.drepAcceptedForUpdateCommittee(
 		proposal,
 		stake,
@@ -1568,9 +1871,73 @@ func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {
 		stake,
 		new(big.Rat),
 	))
-	assert.True(t, stateManager.updateCommitteeAccepted(proposal))
+	accepted, err := stateManager.updateCommitteeAcceptedWithStake(
+		proposal,
+		stake,
+	)
+	require.NoError(t, err)
+	assert.True(t, accepted)
 	proposal.Deposit = 0
-	assert.False(t, stateManager.updateCommitteeAccepted(proposal))
+	accepted, err = stateManager.updateCommitteeAcceptedWithStake(
+		proposal,
+		stateManager.credentialVotingStake(5),
+	)
+	require.NoError(t, err)
+	assert.False(t, accepted)
+}
+
+func TestUpdateCommitteeRatificationRequiresThresholdConfiguration(
+	t *testing.T,
+) {
+	tests := []struct {
+		name      string
+		params    common.ProtocolParameters
+		errorText string
+	}{
+		{
+			name:      "Conway parameters unavailable",
+			errorText: "conway protocol parameters unavailable",
+		},
+		{
+			name: "DRep threshold unavailable",
+			params: &conway.ConwayProtocolParameters{
+				PoolVotingThresholds: conway.PoolVotingThresholds{
+					CommitteeNoConfidence: cbor.Rat{Rat: new(big.Rat)},
+				},
+			},
+			errorText: "DRep voting threshold unavailable",
+		},
+		{
+			name: "SPO threshold unavailable",
+			params: &conway.ConwayProtocolParameters{
+				DRepVotingThresholds: conway.DRepVotingThresholds{
+					CommitteeNoConfidence: cbor.Rat{Rat: new(big.Rat)},
+				},
+			},
+			errorText: "SPO voting threshold unavailable",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateManager := NewMockStateManager()
+			stateManager.protocolParams = test.params
+			stateManager.govState.Proposals["update#0"] = &ProposalState{
+				GovActionInfo: GovActionInfo{
+					ActionType:     common.GovActionTypeUpdateCommittee,
+					SubmittedEpoch: 0,
+					ExpiresAfter:   10,
+				},
+			}
+
+			err := stateManager.ProcessEpochBoundary(1)
+			require.ErrorContains(t, err, test.errorText)
+			require.Nil(
+				t,
+				stateManager.govState.Proposals["update#0"].RatifiedEpoch,
+			)
+		})
+	}
 }
 
 func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
@@ -1585,10 +1952,17 @@ func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
 		},
 	}
 	stateManager.govState.CommitteeMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
 		Credential: common.Blake2b224{0x01},
 	}] = &CommitteeMemberInfo{}
-	yesStake := ledger.RewardAccountKey{Credential: common.Blake2b224{0x11}}
-	noStake := ledger.RewardAccountKey{Credential: common.Blake2b224{0x12}}
+	yesStake := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x11},
+	}
+	noStake := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x12},
+	}
 	yesPool := common.PoolKeyHash{0x21}
 	noPool := common.PoolKeyHash{0x22}
 	stateManager.rewardAccounts[yesStake] = 40
@@ -1608,7 +1982,7 @@ func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
 		},
 	}}
 
-	stake := stateManager.credentialVotingStake()
+	stake := stateManager.credentialVotingStake(0)
 	assert.True(t, stateManager.drepAcceptedForUpdateCommittee(
 		proposal,
 		stake,
@@ -1619,7 +1993,12 @@ func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
 		stake,
 		big.NewRat(3, 5),
 	))
-	assert.False(t, stateManager.updateCommitteeAccepted(proposal))
+	accepted, err := stateManager.updateCommitteeAcceptedWithStake(
+		proposal,
+		stake,
+	)
+	require.NoError(t, err)
+	assert.False(t, accepted)
 	proposal.Votes[fmt.Sprintf(
 		"%d:%s",
 		common.VoterTypeStakingPoolKeyHash,
@@ -1630,7 +2009,12 @@ func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
 		stake,
 		big.NewRat(3, 5),
 	))
-	assert.True(t, stateManager.updateCommitteeAccepted(proposal))
+	accepted, err = stateManager.updateCommitteeAcceptedWithStake(
+		proposal,
+		stake,
+	)
+	require.NoError(t, err)
+	assert.True(t, accepted)
 }
 
 func TestUpdateCommitteeZeroThresholdRatifiesWithoutVotes(t *testing.T) {

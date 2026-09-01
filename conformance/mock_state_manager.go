@@ -16,6 +16,7 @@ package conformance
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"math/big"
@@ -543,9 +544,13 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 
 	case common.CertificateTypeDeregistrationDrep:
 		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential.Credential
-			delete(m.drepRegistrations, credential)
-			m.govState.DeregisterDRep(credential)
+			credential := drepCert.DrepCredential
+			m.govState.DeregisterDRepCredential(credential)
+			if m.govState.IsDRepRegistered(credential.Credential) {
+				m.drepRegistrations[credential.Credential] = true
+			} else {
+				delete(m.drepRegistrations, credential.Credential)
+			}
 		}
 
 	case common.CertificateTypeAuthCommitteeHot:
@@ -647,7 +652,9 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 	}
 
 	// Phase 2: Ratify proposals that meet threshold requirements
-	m.ratifyProposals(newEpoch)
+	if err := m.ratifyProposals(newEpoch); err != nil {
+		return err
+	}
 
 	// Phase 3: Expire old proposals
 	for id, proposal := range m.govState.Proposals {
@@ -665,8 +672,12 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 // ratifyProposals models the action acceptance needed by the conformance
 // vectors. UpdateCommittee uses stake-weighted DRep and SPO thresholds; the
 // remaining actions retain the harness's stakeholder-presence approximation.
-func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
+func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
+	var updateCommitteeStake map[ledger.RewardAccountKey]*big.Int
 	for id, proposal := range m.govState.Proposals {
+		if proposal == nil || currentEpoch > proposal.ExpiresAfter {
+			continue
+		}
 		// Skip already-ratified proposals
 		if proposal.RatifiedEpoch != nil {
 			continue
@@ -721,7 +732,17 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
 			// Requires CC + DRep + SPO
 			meetsRequirements = hasCC && hasDRep && hasSPO
 		case common.GovActionTypeUpdateCommittee:
-			meetsRequirements = m.updateCommitteeAccepted(proposal)
+			if updateCommitteeStake == nil {
+				updateCommitteeStake = m.credentialVotingStake(currentEpoch)
+			}
+			var err error
+			meetsRequirements, err = m.updateCommitteeAcceptedWithStake(
+				proposal,
+				updateCommitteeStake,
+			)
+			if err != nil {
+				return fmt.Errorf("ratify proposal %s: %w", id, err)
+			}
 		case common.GovActionTypeNewConstitution,
 			common.GovActionTypeParameterChange,
 			common.GovActionTypeTreasuryWithdrawal:
@@ -742,34 +763,40 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
 		proposal.RatifiedEpoch = &epoch
 		m.govState.Proposals[id] = proposal
 	}
+	return nil
 }
 
-func (m *MockStateManager) updateCommitteeAccepted(
+func (m *MockStateManager) updateCommitteeAcceptedWithStake(
 	proposal *ProposalState,
-) bool {
+	stake map[ledger.RewardAccountKey]*big.Int,
+) (bool, error) {
 	pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters)
 	if !ok {
-		return false
+		return false, errors.New("conway protocol parameters unavailable")
 	}
-	electedCommittee := len(m.govState.CommitteeMembersByCredential) > 0
+	electedCommittee := m.govState.hasActiveCommitteeMember(m.currentEpoch)
 	drepThreshold := pp.DRepVotingThresholds.CommitteeNoConfidence.Rat
 	poolThreshold := pp.PoolVotingThresholds.CommitteeNoConfidence.Rat
 	if electedCommittee {
 		drepThreshold = pp.DRepVotingThresholds.CommitteeNormal.Rat
 		poolThreshold = pp.PoolVotingThresholds.CommitteeNormal.Rat
 	}
-	if drepThreshold == nil || poolThreshold == nil {
-		return false
+	if drepThreshold == nil {
+		return false, errors.New("DRep voting threshold unavailable")
 	}
-	stake := m.credentialVotingStake()
+	if poolThreshold == nil {
+		return false, errors.New("SPO voting threshold unavailable")
+	}
 	return m.drepAcceptedForUpdateCommittee(
 		proposal,
 		stake,
 		drepThreshold,
-	) && m.spoAcceptedForUpdateCommittee(proposal, stake, poolThreshold)
+	) && m.spoAcceptedForUpdateCommittee(proposal, stake, poolThreshold), nil
 }
 
-func (m *MockStateManager) credentialVotingStake() map[ledger.RewardAccountKey]*big.Int {
+func (m *MockStateManager) credentialVotingStake(
+	currentEpoch uint64,
+) map[ledger.RewardAccountKey]*big.Int {
 	credentialStake := make(map[ledger.RewardAccountKey]*big.Int)
 	addStake := func(credential ledger.RewardAccountKey, amount *big.Int) {
 		if amount == nil || amount.Sign() <= 0 {
@@ -797,7 +824,8 @@ func (m *MockStateManager) credentialVotingStake() map[ledger.RewardAccountKey]*
 	}
 	for _, activeProposal := range m.govState.Proposals {
 		if activeProposal == nil || activeProposal.ReturnAccount == nil ||
-			activeProposal.Deposit == 0 {
+			activeProposal.Deposit == 0 ||
+			currentEpoch > activeProposal.ExpiresAfter {
 			continue
 		}
 		addStake(
@@ -1203,6 +1231,9 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	legacyMembersByHash := make(map[common.Blake2b224]common.CommitteeMember)
 	ambiguousMemberHashes := make(map[common.Blake2b224]bool)
 	for coldKey, expiry := range committeeMembers {
+		if currentEpoch > expiry {
+			continue
+		}
 		hash := coldKey.Credential
 		if ambiguousMemberHashes[hash] {
 			continue
@@ -1228,12 +1259,14 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 		legacyMembers = append(legacyMembers, member)
 	}
 	builder.WithCommitteeMembers(legacyMembers)
+	//nolint:unparam // The ledger-state callback contract requires an error.
 	credentialMember := func(
 		coldCredential common.Credential,
 	) (*common.CommitteeMember, error) {
 		coldKey := ledger.NewRewardAccountKey(coldCredential)
 		// Check current members first
-		if expiry, ok := committeeMembers[coldKey]; ok {
+		if expiry, ok := committeeMembers[coldKey]; ok &&
+			currentEpoch <= expiry {
 			member := &common.CommitteeMember{
 				ColdKey:     coldCredential.Credential,
 				ExpiryEpoch: expiry,
@@ -1252,7 +1285,8 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 			if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
 				continue
 			}
-			if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
+			if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok &&
+				currentEpoch <= expiry {
 				return &common.CommitteeMember{
 					ColdKey:     coldCredential.Credential,
 					ExpiryEpoch: expiry,
@@ -1264,7 +1298,8 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 					proposal.ProposedMembersByCredential,
 					coldCredential.Credential,
 				) {
-				if expiry, ok := proposal.ProposedMembers[coldCredential.Credential]; ok {
+				if expiry, ok := proposal.ProposedMembers[coldCredential.Credential]; ok &&
+					currentEpoch <= expiry {
 					return &common.CommitteeMember{
 						ColdKey:     coldCredential.Credential,
 						ExpiryEpoch: expiry,

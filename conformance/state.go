@@ -463,7 +463,10 @@ func (g *GovernanceState) getCommitteeCredentialMemberAtEpoch(
 	currentEpoch uint64,
 ) *CommitteeMemberInfo {
 	coldKey := ledger.NewRewardAccountKey(coldCredential)
-	if member := g.CommitteeMembersByCredential[coldKey]; member != nil {
+	if member := g.CommitteeMembersByCredential[coldKey]; isActiveCommitteeMember(
+		member,
+		currentEpoch,
+	) {
 		return member
 	}
 	if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
@@ -471,7 +474,10 @@ func (g *GovernanceState) getCommitteeCredentialMemberAtEpoch(
 			g.CommitteeMembersByCredential,
 			coldCredential.Credential,
 		) {
-		if member := g.CommitteeMembers[coldCredential.Credential]; member != nil {
+		if member := g.CommitteeMembers[coldCredential.Credential]; isActiveCommitteeMember(
+			member,
+			currentEpoch,
+		) {
 			return member
 		}
 	}
@@ -479,7 +485,8 @@ func (g *GovernanceState) getCommitteeCredentialMemberAtEpoch(
 		if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
 			continue
 		}
-		if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
+		if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok &&
+			currentEpoch <= expiry {
 			return &CommitteeMemberInfo{
 				ColdCredential: coldCredential,
 				ColdKey:        coldCredential.Credential,
@@ -493,7 +500,7 @@ func (g *GovernanceState) getCommitteeCredentialMemberAtEpoch(
 				coldCredential.Credential,
 			) {
 			expiry, ok := proposal.ProposedMembers[coldCredential.Credential]
-			if !ok {
+			if !ok || currentEpoch > expiry {
 				continue
 			}
 			return &CommitteeMemberInfo{
@@ -549,16 +556,50 @@ func (g *GovernanceState) IsProposedCommitteeCredentialMember(
 	return false
 }
 
-func (g *GovernanceState) hasCommitteeState() bool {
-	if len(g.CommitteeMembersByCredential) > 0 || len(g.CommitteeMembers) > 0 {
+func isActiveCommitteeMember(
+	member *CommitteeMemberInfo,
+	currentEpoch uint64,
+) bool {
+	return member != nil && currentEpoch <= member.ExpiryEpoch
+}
+
+func (g *GovernanceState) hasActiveCommitteeMember(currentEpoch uint64) bool {
+	for _, member := range g.CommitteeMembersByCredential {
+		if isActiveCommitteeMember(member, currentEpoch) {
+			return true
+		}
+	}
+	for hash, member := range g.CommitteeMembers {
+		if hasCredentialHash(g.CommitteeMembersByCredential, hash) {
+			continue
+		}
+		if isActiveCommitteeMember(member, currentEpoch) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *GovernanceState) hasCommitteeState(currentEpoch uint64) bool {
+	if g.hasActiveCommitteeMember(currentEpoch) {
 		return true
 	}
 	for _, proposal := range g.Proposals {
-		if proposal != nil &&
-			proposal.ActionType == common.GovActionTypeUpdateCommittee &&
-			(len(proposal.ProposedMembersByCredential) > 0 ||
-				len(proposal.ProposedMembers) > 0) {
-			return true
+		if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
+			continue
+		}
+		for _, expiry := range proposal.ProposedMembersByCredential {
+			if currentEpoch <= expiry {
+				return true
+			}
+		}
+		for hash, expiry := range proposal.ProposedMembers {
+			if hasCredentialHash(proposal.ProposedMembersByCredential, hash) {
+				continue
+			}
+			if currentEpoch <= expiry {
+				return true
+			}
 		}
 	}
 	return false
@@ -747,17 +788,52 @@ func (g *GovernanceState) RegisterDRepCredentialUntil(
 	g.DRepRegistrations[credential.Credential] = true
 }
 
+// IsDRepCredentialRegistered checks registration by full credential identity.
+// The hash-only map is used only for legacy state without a typed entry sharing
+// the hash.
+func (g *GovernanceState) IsDRepCredentialRegistered(
+	credential common.Credential,
+) bool {
+	key := ledger.NewRewardAccountKey(credential)
+	if registered, exists := g.DRepRegistrationsByCredential[key]; exists {
+		return registered
+	}
+	if hasCredentialHash(
+		g.DRepRegistrationsByCredential,
+		credential.Credential,
+	) {
+		return false
+	}
+	return g.DRepRegistrations[credential.Credential]
+}
+
 func (g *GovernanceState) IsDRepCredentialActive(
 	credential common.Credential,
 	currentEpoch uint64,
 ) bool {
 	key := ledger.NewRewardAccountKey(credential)
-	if !g.DRepRegistrationsByCredential[key] &&
-		!g.DRepRegistrations[credential.Credential] {
+	if !g.IsDRepCredentialRegistered(credential) {
 		return false
 	}
 	expiry, known := g.DRepExpiries[key]
 	return !known || currentEpoch <= expiry
+}
+
+// DeregisterDRepCredential deregisters one full DRep credential without
+// deleting a different credential type that carries the same hash.
+func (g *GovernanceState) DeregisterDRepCredential(
+	credential common.Credential,
+) {
+	key := ledger.NewRewardAccountKey(credential)
+	delete(g.DRepRegistrationsByCredential, key)
+	delete(g.DRepExpiries, key)
+	for other, registered := range g.DRepRegistrationsByCredential {
+		if registered && other.Credential == credential.Credential {
+			g.DRepRegistrations[credential.Credential] = true
+			return
+		}
+	}
+	delete(g.DRepRegistrations, credential.Credential)
 }
 
 // DeregisterDRep deregisters a DRep.
@@ -826,7 +902,8 @@ func (g *GovernanceState) AuthorizeHotCredential(
 		return
 	}
 	if coldCredential.CredType == common.CredentialTypeAddrKeyHash {
-		if member := g.CommitteeMembers[coldCredential.Credential]; member != nil && member.Resigned {
+		if member := g.CommitteeMembers[coldCredential.Credential]; member != nil &&
+			member.Resigned {
 			return
 		}
 	}

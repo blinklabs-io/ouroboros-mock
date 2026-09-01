@@ -118,7 +118,11 @@ func (v *Validator) validateVotingProcedures(
 			}
 
 			// Validate voter exists based on type
-			if err := v.validateVoterExists(voter.Type, voterHash, govState); err != nil {
+			if err := v.validateVoterExists(
+				voter.Type,
+				voterHash,
+				govState,
+			); err != nil {
 				return err
 			}
 		}
@@ -149,13 +153,31 @@ func (v *Validator) validateVoterExists(
 				break
 			}
 		}
+		// Hash-only legacy authorizations represent key credentials. Preserve
+		// them for key voters without allowing a script voter with the same hash.
+		if !found &&
+			voterType == common.VoterTypeConstitutionalCommitteeHotKeyHash {
+			for _, hotKey := range govState.HotKeyAuthorizations {
+				if hotKey == voterHash {
+					found = true
+					break
+				}
+			}
+		}
 		if !found {
 			return fmt.Errorf("CC voter hot key %x not authorized", voterHash)
 		}
 
 	case common.VoterTypeDRepKeyHash, common.VoterTypeDRepScriptHash:
-		// Check if DRep is registered
-		if !govState.IsDRepRegistered(voterHash) {
+		credentialType := uint(common.CredentialTypeAddrKeyHash)
+		if voterType == common.VoterTypeDRepScriptHash {
+			credentialType = common.CredentialTypeScriptHash
+		}
+		credential := common.Credential{
+			CredType:   credentialType,
+			Credential: voterHash,
+		}
+		if !govState.IsDRepCredentialRegistered(credential) {
 			return fmt.Errorf("DRep voter %x not registered", voterHash)
 		}
 
@@ -367,9 +389,12 @@ func (v *Validator) validateCertificate(
 
 	case common.CertificateTypeRegistrationDrep:
 		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential.Credential
-			if govState.IsDRepRegistered(credential) {
-				return fmt.Errorf("DRep %x already registered", credential)
+			credential := drepCert.DrepCredential
+			if govState.IsDRepCredentialRegistered(credential) {
+				return fmt.Errorf(
+					"DRep %x already registered",
+					credential.Credential,
+				)
 			}
 		}
 
@@ -380,7 +405,7 @@ func (v *Validator) validateCertificate(
 				coldCredential,
 				epoch,
 			)
-			if member == nil && govState.hasCommitteeState() {
+			if member == nil && govState.hasCommitteeState(epoch) {
 				return fmt.Errorf(
 					"cannot authorize hot key for non-member %x",
 					coldCredential.Credential,
@@ -412,7 +437,7 @@ func (v *Validator) validateCertificate(
 						coldCredential.Credential,
 					)
 				}
-				if member == nil && govState.hasCommitteeState() {
+				if member == nil && govState.hasCommitteeState(epoch) {
 					return fmt.Errorf(
 						"cannot resign non-member %x",
 						coldCredential.Credential[:],
