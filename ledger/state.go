@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -98,6 +99,18 @@ type GetRewardSnapshotFunc func(uint64) (lcommon.RewardSnapshot, error)
 // CommitteeMemberFunc is a callback for committee member lookups
 type CommitteeMemberFunc func(lcommon.Blake2b224) (*lcommon.CommitteeMember, error)
 
+// CommitteeCredentialMemberFunc is a callback for committee member lookups
+// that preserve the credential type.
+type CommitteeCredentialMemberFunc func(
+	lcommon.Credential,
+) (*lcommon.CommitteeMember, error)
+
+// CommitteeHotCredentialMemberFunc is a callback for exact hot-credential
+// committee member lookups.
+type CommitteeHotCredentialMemberFunc func(
+	lcommon.Credential,
+) (*lcommon.CommitteeMember, error)
+
 // DRepRegistrationFunc is a callback for DRep registration lookups
 type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
 
@@ -144,21 +157,23 @@ type MockLedgerState struct {
 	rewardSnapshot            lcommon.RewardSnapshot      // static snapshot value
 
 	// GovState callbacks and state
-	CommitteeMemberCallback  CommitteeMemberFunc
-	DRepRegistrationCallback DRepRegistrationFunc
-	DRepDelegationCallback   DRepDelegationFunc
-	ConstitutionCallback     ConstitutionFunc
-	TreasuryValueCallback    TreasuryValueFunc
-	GovActionByIdCallback    GovActionByIdFunc
-	committeeMembers         []lcommon.CommitteeMember
-	drepRegistrations        []lcommon.DRepRegistration
-	govActions               map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
-	constitution             *lcommon.Constitution              // static constitution value
+	CommitteeMemberCallback              CommitteeMemberFunc
+	CommitteeCredentialMemberCallback    CommitteeCredentialMemberFunc
+	CommitteeHotCredentialMemberCallback CommitteeHotCredentialMemberFunc
+	DRepRegistrationCallback             DRepRegistrationFunc
+	DRepDelegationCallback               DRepDelegationFunc
+	ConstitutionCallback                 ConstitutionFunc
+	TreasuryValueCallback                TreasuryValueFunc
+	GovActionByIdCallback                GovActionByIdFunc
+	committeeMembers                     []lcommon.CommitteeMember
+	drepRegistrations                    []lcommon.DRepRegistration
+	govActions                           map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
+	constitution                         *lcommon.Constitution              // static constitution value
 	// ProposedCommitteeMembers tracks committee members proposed in pending
 	// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC
 	// should succeed if the member is either a current member OR proposed
-	// in a pending UpdateCommittee action. Maps coldKey -> expiryEpoch.
-	proposedCommitteeMembers map[lcommon.Blake2b224]uint64
+	// in a pending UpdateCommittee action. Maps cold credential -> expiryEpoch.
+	proposedCommitteeMembers map[RewardAccountKey]uint64
 
 	// LedgerState fields
 	CostModelsCallback CostModelsFunc
@@ -319,30 +334,106 @@ func (ls *MockLedgerState) RewardAccountBalance(
 	return &balance, nil
 }
 
-// CommitteeMember looks up a constitutional committee member by credential hash.
+// CommitteeMember looks up a constitutional committee member by credential
+// hash. When key and script credentials with the same hash are both present,
+// the hash-only lookup returns nil rather than guessing which one was meant.
 // Per Cardano ledger spec, AUTH_CC should succeed if the member is either a
 // current committee member OR proposed in a pending UpdateCommittee action.
 func (ls *MockLedgerState) CommitteeMember(
 	coldKey lcommon.Blake2b224,
 ) (*lcommon.CommitteeMember, error) {
-	if ls.CommitteeMemberCallback != nil {
+	// Preserve the legacy callback behavior when no credential-aware source is
+	// configured. When both are present, the credential-aware source must win
+	// so the legacy lookup can detect key/script ambiguity.
+	if ls.CommitteeCredentialMemberCallback == nil &&
+		ls.CommitteeMemberCallback != nil {
 		return ls.CommitteeMemberCallback(coldKey)
 	}
-	// Search in stored committee members
-	for i := range ls.committeeMembers {
-		if ls.committeeMembers[i].ColdKey == coldKey {
-			return &ls.committeeMembers[i], nil
+	keyMember, err := ls.CommitteeCredentialMember(lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	scriptMember, err := ls.CommitteeCredentialMember(lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: coldKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if keyMember != nil && scriptMember != nil {
+		return nil, nil
+	}
+	if keyMember != nil {
+		return keyMember, nil
+	}
+	return scriptMember, nil
+}
+
+// CommitteeCredentialMember looks up a constitutional committee member by
+// full cold credential identity.
+func (ls *MockLedgerState) CommitteeCredentialMember(
+	coldCredential lcommon.Credential,
+) (*lcommon.CommitteeMember, error) {
+	if ls.CommitteeCredentialMemberCallback != nil {
+		return ls.CommitteeCredentialMemberCallback(coldCredential)
+	}
+	// The legacy committee member shape carries only a hash. Values supplied
+	// through WithCommitteeMembers therefore represent key credentials.
+	if coldCredential.CredType == lcommon.CredentialTypeAddrKeyHash {
+		for i := range ls.committeeMembers {
+			if ls.committeeMembers[i].ColdKey == coldCredential.Credential {
+				return &ls.committeeMembers[i], nil
+			}
 		}
 	}
-	// Also check proposed members from pending UpdateCommittee proposals
+	// Also check proposed members from pending UpdateCommittee proposals.
 	if ls.proposedCommitteeMembers != nil {
-		if expiryEpoch, ok := ls.proposedCommitteeMembers[coldKey]; ok {
+		if expiryEpoch, ok := ls.proposedCommitteeMembers[NewRewardAccountKey(coldCredential)]; ok {
 			return &lcommon.CommitteeMember{
-				ColdKey:     coldKey,
+				ColdKey:     coldCredential.Credential,
 				HotKey:      nil,
 				ExpiryEpoch: expiryEpoch,
 				Resigned:    false,
 			}, nil
+		}
+	}
+	// A legacy callback cannot distinguish credential types. Preserve it as a
+	// key-credential compatibility fallback without aliasing script credentials.
+	if coldCredential.CredType == lcommon.CredentialTypeAddrKeyHash &&
+		ls.CommitteeMemberCallback != nil {
+		return ls.CommitteeMemberCallback(coldCredential.Credential)
+	}
+	return nil, nil
+}
+
+// CommitteeStateAvailable reports that MockLedgerState authoritatively models
+// committee state, including when the modeled committee is empty.
+func (ls *MockLedgerState) CommitteeStateAvailable() (bool, error) {
+	return true, nil
+}
+
+// CommitteeHotCredentialMember looks up a committee member by full hot
+// credential identity.
+func (ls *MockLedgerState) CommitteeHotCredentialMember(
+	hotCredential lcommon.Credential,
+) (*lcommon.CommitteeMember, error) {
+	if ls.CommitteeHotCredentialMemberCallback != nil {
+		return ls.CommitteeHotCredentialMemberCallback(hotCredential)
+	}
+	// The legacy committee-member shape carries only hashes, so stored hot
+	// credentials represent key credentials.
+	if hotCredential.CredType != lcommon.CredentialTypeAddrKeyHash {
+		return nil, nil
+	}
+	for idx := range ls.committeeMembers {
+		member := &ls.committeeMembers[idx]
+		if member.HotKey != nil &&
+			*member.HotKey == hotCredential.Credential &&
+			!member.Resigned {
+			return member, nil
 		}
 	}
 	return nil, nil
@@ -466,7 +557,7 @@ func NewLedgerStateBuilder() *LedgerStateBuilder {
 			stakeRegistrations:       make(map[RewardAccountKey]bool),
 			rewardAccounts:           make(map[RewardAccountKey]uint64),
 			govActions:               make(map[string]*lcommon.GovActionState),
-			proposedCommitteeMembers: make(map[lcommon.Blake2b224]uint64),
+			proposedCommitteeMembers: make(map[RewardAccountKey]uint64),
 		},
 	}
 }
@@ -656,6 +747,24 @@ func (b *LedgerStateBuilder) WithCommitteeMember(
 	return b
 }
 
+// WithCommitteeCredentialMember sets the credential-aware committee member
+// lookup callback.
+func (b *LedgerStateBuilder) WithCommitteeCredentialMember(
+	fn CommitteeCredentialMemberFunc,
+) *LedgerStateBuilder {
+	b.state.CommitteeCredentialMemberCallback = fn
+	return b
+}
+
+// WithCommitteeHotCredentialMember sets the exact hot-credential committee
+// member lookup callback.
+func (b *LedgerStateBuilder) WithCommitteeHotCredentialMember(
+	fn CommitteeHotCredentialMemberFunc,
+) *LedgerStateBuilder {
+	b.state.CommitteeHotCredentialMemberCallback = fn
+	return b
+}
+
 // WithCommitteeMembers sets the committee members
 func (b *LedgerStateBuilder) WithCommitteeMembers(
 	members []lcommon.CommitteeMember,
@@ -667,12 +776,30 @@ func (b *LedgerStateBuilder) WithCommitteeMembers(
 // WithProposedCommitteeMembers sets the proposed committee members from pending
 // UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC should
 // succeed if the member is either a current member OR proposed in a pending
-// UpdateCommittee action. The map keys are cold key hashes and values are
-// expiry epochs.
+// UpdateCommittee action. The legacy map keys are key-credential hashes and
+// values are expiry epochs.
 func (b *LedgerStateBuilder) WithProposedCommitteeMembers(
 	members map[lcommon.Blake2b224]uint64,
 ) *LedgerStateBuilder {
-	b.state.proposedCommitteeMembers = members
+	b.state.proposedCommitteeMembers = make(
+		map[RewardAccountKey]uint64,
+		len(members),
+	)
+	for coldKey, expiryEpoch := range members {
+		b.state.proposedCommitteeMembers[RewardAccountKey{
+			CredType:   lcommon.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = expiryEpoch
+	}
+	return b
+}
+
+// WithProposedCommitteeCredentialMembers sets proposed committee members while
+// preserving each cold credential's type.
+func (b *LedgerStateBuilder) WithProposedCommitteeCredentialMembers(
+	members map[RewardAccountKey]uint64,
+) *LedgerStateBuilder {
+	b.state.proposedCommitteeMembers = maps.Clone(members)
 	return b
 }
 

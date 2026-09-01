@@ -840,6 +840,7 @@ func TestValidatorStakeRegistrationPreservesCredentialIdentity(t *testing.T) {
 		&common.StakeRegistrationCertificate{
 			StakeCredential: keyCredential,
 		},
+		govState.CurrentEpoch,
 		govState,
 		map[ledger.RewardAccountKey]bool{},
 	))
@@ -847,6 +848,7 @@ func TestValidatorStakeRegistrationPreservesCredentialIdentity(t *testing.T) {
 		&common.StakeRegistrationCertificate{
 			StakeCredential: scriptCredential,
 		},
+		govState.CurrentEpoch,
 		govState,
 		map[ledger.RewardAccountKey]bool{},
 	))

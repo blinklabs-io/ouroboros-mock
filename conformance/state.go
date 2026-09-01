@@ -83,8 +83,14 @@ type GovernanceState struct {
 	// CommitteeMembers maps cold key hash to committee member info.
 	CommitteeMembers map[common.Blake2b224]*CommitteeMemberInfo
 
+	// CommitteeMembersByCredential preserves the full cold credential identity.
+	CommitteeMembersByCredential map[ledger.RewardAccountKey]*CommitteeMemberInfo
+
 	// DRepRegistrations tracks registered DReps.
 	DRepRegistrations map[common.Blake2b224]bool
+
+	DRepRegistrationsByCredential map[ledger.RewardAccountKey]bool
+	DRepExpiries                  map[ledger.RewardAccountKey]uint64
 
 	// DRepDelegations maps stake credentials to their delegated DRep, including
 	// the special always-abstain and always-no-confidence DReps.
@@ -98,6 +104,14 @@ type GovernanceState struct {
 	// HotKeyAuthorizations maps cold keys to hot keys for committee members.
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
 
+	// HotKeyAuthorizationsByCredential preserves both cold and hot credential
+	// types.
+	HotKeyAuthorizationsByCredential map[ledger.RewardAccountKey]common.Credential
+
+	// CommitteeResignations tracks current and pending-proposal members that
+	// resigned and therefore cannot authorize a hot key again.
+	CommitteeResignations map[ledger.RewardAccountKey]bool
+
 	// StakeRegistrations tracks which stake credentials are registered.
 	// Deprecated: use StakeRegistrationsByCredential when credential type
 	// matters.
@@ -109,6 +123,9 @@ type GovernanceState struct {
 
 	// PoolRegistrations tracks which pools are registered.
 	PoolRegistrations map[common.Blake2b224]bool
+
+	PoolRewardAccounts          map[common.PoolKeyHash]ledger.RewardAccountKey
+	PoolDelegationsByCredential map[ledger.RewardAccountKey]common.PoolKeyHash
 
 	// PoolRetirements tracks scheduled pool retirements (pool -> retirement epoch).
 	PoolRetirements map[common.Blake2b224]uint64
@@ -135,10 +152,12 @@ type GovernanceState struct {
 
 // CommitteeMemberInfo contains committee member details.
 type CommitteeMemberInfo struct {
-	ColdKey     common.Blake2b224
-	HotKey      *common.Blake2b224
-	ExpiryEpoch uint64
-	Resigned    bool
+	ColdCredential common.Credential
+	HotCredential  *common.Credential
+	ColdKey        common.Blake2b224
+	HotKey         *common.Blake2b224
+	ExpiryEpoch    uint64
+	Resigned       bool
 }
 
 // ProposalState contains the full state of a governance proposal.
@@ -152,18 +171,33 @@ type ProposalState struct {
 // NewGovernanceState creates a new empty governance state.
 func NewGovernanceState() *GovernanceState {
 	return &GovernanceState{
-		CommitteeMembers:  make(map[common.Blake2b224]*CommitteeMemberInfo),
-		DRepRegistrations: make(map[common.Blake2b224]bool),
-		DRepDelegations:   make(map[common.Blake2b224]common.Drep),
+		CommitteeMembers: make(map[common.Blake2b224]*CommitteeMemberInfo),
+		CommitteeMembersByCredential: make(
+			map[ledger.RewardAccountKey]*CommitteeMemberInfo,
+		),
+		DRepRegistrations:             make(map[common.Blake2b224]bool),
+		DRepRegistrationsByCredential: make(map[ledger.RewardAccountKey]bool),
+		DRepExpiries:                  make(map[ledger.RewardAccountKey]uint64),
+		DRepDelegations:               make(map[common.Blake2b224]common.Drep),
 		DRepDelegationsByCredential: make(
 			map[ledger.RewardAccountKey]common.Drep,
 		),
 		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
-		StakeRegistrations:   make(map[common.Blake2b224]bool),
+		HotKeyAuthorizationsByCredential: make(
+			map[ledger.RewardAccountKey]common.Credential,
+		),
+		CommitteeResignations: make(map[ledger.RewardAccountKey]bool),
+		StakeRegistrations:    make(map[common.Blake2b224]bool),
 		StakeRegistrationsByCredential: make(
 			map[ledger.RewardAccountKey]bool,
 		),
-		PoolRegistrations:     make(map[common.Blake2b224]bool),
+		PoolRegistrations: make(map[common.Blake2b224]bool),
+		PoolRewardAccounts: make(
+			map[common.PoolKeyHash]ledger.RewardAccountKey,
+		),
+		PoolDelegationsByCredential: make(
+			map[ledger.RewardAccountKey]common.PoolKeyHash,
+		),
 		PoolRetirements:       make(map[common.Blake2b224]uint64),
 		RewardAccounts:        make(map[common.Blake2b224]uint64),
 		RewardAccountBalances: make(map[ledger.RewardAccountKey]uint64),
@@ -172,14 +206,35 @@ func NewGovernanceState() *GovernanceState {
 	}
 }
 
+func hasCredentialHash[V any](
+	values map[ledger.RewardAccountKey]V,
+	hash common.Blake2b224,
+) bool {
+	for credential := range values {
+		if credential.Credential == hash {
+			return true
+		}
+	}
+	return false
+}
+
 // LoadFromParsedState loads governance state from a parsed initial state.
 func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.CurrentEpoch = state.CurrentEpoch
 
 	// Reset all mutable state to prevent stale entries from previous loads
 	g.CommitteeMembers = make(map[common.Blake2b224]*CommitteeMemberInfo)
+	g.CommitteeMembersByCredential = make(
+		map[ledger.RewardAccountKey]*CommitteeMemberInfo,
+	)
 	g.HotKeyAuthorizations = make(map[common.Blake2b224]common.Blake2b224)
+	g.HotKeyAuthorizationsByCredential = make(
+		map[ledger.RewardAccountKey]common.Credential,
+	)
+	g.CommitteeResignations = make(map[ledger.RewardAccountKey]bool)
 	g.DRepRegistrations = make(map[common.Blake2b224]bool)
+	g.DRepRegistrationsByCredential = make(map[ledger.RewardAccountKey]bool)
+	g.DRepExpiries = make(map[ledger.RewardAccountKey]uint64)
 	g.DRepDelegations = make(map[common.Blake2b224]common.Drep)
 	g.DRepDelegationsByCredential = make(
 		map[ledger.RewardAccountKey]common.Drep,
@@ -189,6 +244,10 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 		map[ledger.RewardAccountKey]bool,
 	)
 	g.PoolRegistrations = make(map[common.Blake2b224]bool)
+	g.PoolRewardAccounts = make(map[common.PoolKeyHash]ledger.RewardAccountKey)
+	g.PoolDelegationsByCredential = make(
+		map[ledger.RewardAccountKey]common.PoolKeyHash,
+	)
 	g.PoolRetirements = make(map[common.Blake2b224]uint64)
 	g.RewardAccounts = make(map[common.Blake2b224]uint64)
 	g.RewardAccountBalances = make(map[ledger.RewardAccountKey]uint64)
@@ -198,26 +257,81 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.Constitution = nil
 
 	// Load committee members
-	for coldKey, expiry := range state.CommitteeMembers {
-		g.CommitteeMembers[coldKey] = &CommitteeMemberInfo{
-			ColdKey:     coldKey,
-			ExpiryEpoch: expiry,
-		}
+	committeeMembers := maps.Clone(state.CommitteeMembersByCredential)
+	if committeeMembers == nil {
+		committeeMembers = make(map[ledger.RewardAccountKey]uint64)
 	}
+	for coldKey, expiry := range state.CommitteeMembers {
+		if hasCredentialHash(committeeMembers, coldKey) {
+			continue
+		}
+		committeeMembers[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = expiry
+	}
+	for coldKey, expiry := range committeeMembers {
+		member := &CommitteeMemberInfo{
+			ColdCredential: coldKey.AsCredential(),
+			ColdKey:        coldKey.Credential,
+			ExpiryEpoch:    expiry,
+		}
+		g.CommitteeMembersByCredential[coldKey] = member
+	}
+	g.syncLegacyCommitteeMembers()
 
 	// Load hot key authorizations and link to committee members
+	hotKeyAuthorizations := maps.Clone(state.HotKeyAuthorizationsByCredential)
+	if hotKeyAuthorizations == nil {
+		hotKeyAuthorizations = make(
+			map[ledger.RewardAccountKey]common.Credential,
+		)
+	}
 	for coldKey, hotKey := range state.HotKeyAuthorizations {
-		g.HotKeyAuthorizations[coldKey] = hotKey
-		if member, ok := g.CommitteeMembers[coldKey]; ok {
-			hk := hotKey
-			member.HotKey = &hk
+		if hasCredentialHash(hotKeyAuthorizations, coldKey) {
+			continue
+		}
+		hotKeyAuthorizations[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hotKey,
 		}
 	}
+	for coldKey, hotKey := range hotKeyAuthorizations {
+		g.HotKeyAuthorizationsByCredential[coldKey] = hotKey
+		if member, ok := g.CommitteeMembersByCredential[coldKey]; ok {
+			hotCredential := hotKey
+			member.HotCredential = &hotCredential
+			hotHash := hotKey.Credential
+			member.HotKey = &hotHash
+		}
+	}
+	for coldKey, resigned := range state.CommitteeResignations {
+		if !resigned {
+			continue
+		}
+		g.CommitteeResignations[coldKey] = true
+		delete(g.HotKeyAuthorizationsByCredential, coldKey)
+		delete(g.HotKeyAuthorizations, coldKey.Credential)
+		if member, ok := g.CommitteeMembersByCredential[coldKey]; ok {
+			member.HotCredential = nil
+			member.HotKey = nil
+			member.Resigned = true
+		}
+	}
+	g.syncLegacyHotKeyAuthorizations()
 
 	// Load DRep registrations
 	for _, drepHash := range state.DRepRegistrations {
 		g.DRepRegistrations[drepHash] = true
 	}
+	maps.Copy(
+		g.DRepRegistrationsByCredential,
+		state.DRepRegistrationsByCredential,
+	)
+	maps.Copy(g.DRepExpiries, state.DRepExpiries)
 	if len(state.DRepDelegationsByCredential) > 0 {
 		maps.Copy(
 			g.DRepDelegationsByCredential,
@@ -260,6 +374,11 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 
 	// Load pool registrations
 	maps.Copy(g.PoolRegistrations, state.PoolRegistrations)
+	maps.Copy(g.PoolRewardAccounts, state.PoolRewardAccounts)
+	maps.Copy(
+		g.PoolDelegationsByCredential,
+		state.PoolDelegationsByCredential,
+	)
 
 	// Load reward accounts
 	maps.Copy(g.RewardAccounts, state.RewardAccounts)
@@ -305,25 +424,194 @@ func (g *GovernanceState) IsPoolRegistered(hash common.Blake2b224) bool {
 	return g.PoolRegistrations[hash]
 }
 
-// GetCommitteeMember returns a committee member by cold key.
+// GetCommitteeMember returns a committee member by cold key hash. When key and
+// script credentials with the same hash are both present, it returns nil rather
+// than guessing which credential was meant.
 func (g *GovernanceState) GetCommitteeMember(
 	coldKey common.Blake2b224,
 ) *CommitteeMemberInfo {
-	return g.CommitteeMembers[coldKey]
+	keyMember := g.GetCommitteeCredentialMember(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	})
+	scriptMember := g.GetCommitteeCredentialMember(common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldKey,
+	})
+	if keyMember != nil && scriptMember != nil {
+		return nil
+	}
+	if keyMember != nil {
+		return keyMember
+	}
+	return scriptMember
 }
 
-// IsProposedCommitteeMember checks if a cold key is proposed in any pending UpdateCommittee proposal.
+// GetCommitteeCredentialMember returns a committee member by full cold
+// credential.
+func (g *GovernanceState) GetCommitteeCredentialMember(
+	coldCredential common.Credential,
+) *CommitteeMemberInfo {
+	return g.getCommitteeCredentialMemberAtEpoch(
+		coldCredential,
+		g.CurrentEpoch,
+	)
+}
+
+func (g *GovernanceState) getCommitteeCredentialMemberAtEpoch(
+	coldCredential common.Credential,
+	currentEpoch uint64,
+) *CommitteeMemberInfo {
+	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	if member := g.CommitteeMembersByCredential[coldKey]; isActiveCommitteeMember(
+		member,
+		currentEpoch,
+	) {
+		return member
+	}
+	if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
+		!hasCredentialHash(
+			g.CommitteeMembersByCredential,
+			coldCredential.Credential,
+		) {
+		if member := g.CommitteeMembers[coldCredential.Credential]; isActiveCommitteeMember(
+			member,
+			currentEpoch,
+		) {
+			return member
+		}
+	}
+	for _, proposal := range g.Proposals {
+		if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
+			continue
+		}
+		if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok &&
+			currentEpoch <= expiry {
+			return &CommitteeMemberInfo{
+				ColdCredential: coldCredential,
+				ColdKey:        coldCredential.Credential,
+				ExpiryEpoch:    expiry,
+				Resigned:       g.CommitteeResignations[coldKey],
+			}
+		}
+		if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
+			!hasCredentialHash(
+				proposal.ProposedMembersByCredential,
+				coldCredential.Credential,
+			) {
+			expiry, ok := proposal.ProposedMembers[coldCredential.Credential]
+			if !ok || currentEpoch > expiry {
+				continue
+			}
+			return &CommitteeMemberInfo{
+				ColdCredential: coldCredential,
+				ColdKey:        coldCredential.Credential,
+				ExpiryEpoch:    expiry,
+				Resigned:       g.CommitteeResignations[coldKey],
+			}
+		}
+	}
+	return nil
+}
+
+// IsProposedCommitteeMember checks whether an unambiguous cold key hash is
+// proposed in a pending UpdateCommittee proposal.
 func (g *GovernanceState) IsProposedCommitteeMember(
 	coldKey common.Blake2b224,
 ) bool {
+	keyProposed := g.IsProposedCommitteeCredentialMember(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	})
+	scriptProposed := g.IsProposedCommitteeCredentialMember(common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldKey,
+	})
+	return keyProposed || scriptProposed
+}
+
+// IsProposedCommitteeCredentialMember checks if a full cold credential is
+// proposed in any pending UpdateCommittee proposal.
+func (g *GovernanceState) IsProposedCommitteeCredentialMember(
+	coldCredential common.Credential,
+) bool {
+	coldKey := ledger.NewRewardAccountKey(coldCredential)
 	for _, proposal := range g.Proposals {
-		if proposal.ActionType == common.GovActionTypeUpdateCommittee {
-			if _, ok := proposal.ProposedMembers[coldKey]; ok {
+		if isActiveUpdateCommitteeProposal(proposal, g.CurrentEpoch) {
+			if _, ok := proposal.ProposedMembersByCredential[coldKey]; ok {
+				return true
+			}
+			if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
+				!hasCredentialHash(
+					proposal.ProposedMembersByCredential,
+					coldCredential.Credential,
+				) {
+				_, ok := proposal.ProposedMembers[coldCredential.Credential]
+				if ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isActiveCommitteeMember(
+	member *CommitteeMemberInfo,
+	currentEpoch uint64,
+) bool {
+	return member != nil && currentEpoch <= member.ExpiryEpoch
+}
+
+func (g *GovernanceState) hasActiveCommitteeMember(currentEpoch uint64) bool {
+	for _, member := range g.CommitteeMembersByCredential {
+		if isActiveCommitteeMember(member, currentEpoch) {
+			return true
+		}
+	}
+	for hash, member := range g.CommitteeMembers {
+		if hasCredentialHash(g.CommitteeMembersByCredential, hash) {
+			continue
+		}
+		if isActiveCommitteeMember(member, currentEpoch) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *GovernanceState) hasCommitteeState(currentEpoch uint64) bool {
+	if g.hasActiveCommitteeMember(currentEpoch) {
+		return true
+	}
+	for _, proposal := range g.Proposals {
+		if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
+			continue
+		}
+		for _, expiry := range proposal.ProposedMembersByCredential {
+			if currentEpoch <= expiry {
+				return true
+			}
+		}
+		for hash, expiry := range proposal.ProposedMembers {
+			if hasCredentialHash(proposal.ProposedMembersByCredential, hash) {
+				continue
+			}
+			if currentEpoch <= expiry {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func isActiveUpdateCommitteeProposal(
+	proposal *ProposalState,
+	currentEpoch uint64,
+) bool {
+	return proposal != nil &&
+		proposal.ActionType == common.GovActionTypeUpdateCommittee &&
+		currentEpoch <= proposal.ExpiresAfter
 }
 
 // GetProposal returns a proposal by its GovActionId.
@@ -445,6 +733,10 @@ func (g *GovernanceState) DeregisterStakeCredential(
 		g.DRepDelegationsByCredential,
 		ledger.NewRewardAccountKey(credential),
 	)
+	delete(
+		g.PoolDelegationsByCredential,
+		ledger.NewRewardAccountKey(credential),
+	)
 	g.DRepDelegations = drepDelegationsByHash(
 		g.DRepDelegationsByCredential,
 	)
@@ -480,11 +772,118 @@ func drepDelegationsByHash(
 // RegisterDRep registers a DRep.
 func (g *GovernanceState) RegisterDRep(hash common.Blake2b224) {
 	g.DRepRegistrations[hash] = true
+	g.DRepRegistrationsByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}] = true
+}
+
+func (g *GovernanceState) RegisterDRepCredentialUntil(
+	credential common.Credential,
+	expiry uint64,
+) {
+	key := ledger.NewRewardAccountKey(credential)
+	g.DRepRegistrationsByCredential[key] = true
+	g.DRepExpiries[key] = expiry
+	g.DRepRegistrations[credential.Credential] = true
+}
+
+// refreshDRepCredentialUntil updates the activity expiry for one registered
+// DRep credential. Typed registrations remain independent when key and script
+// credentials share a hash. Hash-only legacy registrations retain their
+// compatibility shape while receiving an expiry for the observed credential.
+func (g *GovernanceState) refreshDRepCredentialUntil(
+	credential common.Credential,
+	expiry uint64,
+) {
+	key := ledger.NewRewardAccountKey(credential)
+	if registered, exists := g.DRepRegistrationsByCredential[key]; exists {
+		if !registered {
+			return
+		}
+		g.DRepExpiries[key] = expiry
+		return
+	}
+	if hasCredentialHash(
+		g.DRepRegistrationsByCredential,
+		credential.Credential,
+	) || !g.DRepRegistrations[credential.Credential] {
+		return
+	}
+	g.DRepExpiries[key] = expiry
+}
+
+// IsDRepCredentialRegistered checks registration by full credential identity.
+// The hash-only map is used only for legacy state without a typed entry sharing
+// the hash.
+func (g *GovernanceState) IsDRepCredentialRegistered(
+	credential common.Credential,
+) bool {
+	key := ledger.NewRewardAccountKey(credential)
+	if registered, exists := g.DRepRegistrationsByCredential[key]; exists {
+		return registered
+	}
+	if hasCredentialHash(
+		g.DRepRegistrationsByCredential,
+		credential.Credential,
+	) {
+		return false
+	}
+	return g.DRepRegistrations[credential.Credential]
+}
+
+func (g *GovernanceState) IsDRepCredentialActive(
+	credential common.Credential,
+	currentEpoch uint64,
+) bool {
+	key := ledger.NewRewardAccountKey(credential)
+	if !g.IsDRepCredentialRegistered(credential) {
+		return false
+	}
+	expiry, known := g.DRepExpiries[key]
+	return !known || currentEpoch <= expiry
+}
+
+// DeregisterDRepCredential deregisters one full DRep credential without
+// deleting a different credential type that carries the same hash.
+func (g *GovernanceState) DeregisterDRepCredential(
+	credential common.Credential,
+) {
+	key := ledger.NewRewardAccountKey(credential)
+	delete(g.DRepRegistrationsByCredential, key)
+	delete(g.DRepExpiries, key)
+	for other, registered := range g.DRepRegistrationsByCredential {
+		if registered && other.Credential == credential.Credential {
+			g.DRepRegistrations[credential.Credential] = true
+			return
+		}
+	}
+	delete(g.DRepRegistrations, credential.Credential)
 }
 
 // DeregisterDRep deregisters a DRep.
 func (g *GovernanceState) DeregisterDRep(hash common.Blake2b224) {
 	delete(g.DRepRegistrations, hash)
+	for credential := range g.DRepRegistrationsByCredential {
+		if credential.Credential == hash {
+			delete(g.DRepRegistrationsByCredential, credential)
+			delete(g.DRepExpiries, credential)
+		}
+	}
+}
+
+func (g *GovernanceState) SetPoolDelegation(
+	credential common.Credential,
+	pool common.PoolKeyHash,
+) {
+	g.PoolDelegationsByCredential[ledger.NewRewardAccountKey(credential)] = pool
+}
+
+func (g *GovernanceState) SetPoolRewardAccount(
+	pool common.PoolKeyHash,
+	account ledger.RewardAccountKey,
+) {
+	g.PoolRewardAccounts[pool] = account
 }
 
 // RegisterPool registers a pool.
@@ -514,22 +913,176 @@ func (g *GovernanceState) ProcessPoolRetirements(epoch uint64) {
 	}
 }
 
-// AuthorizeHotKey authorizes a hot key for a committee member.
-func (g *GovernanceState) AuthorizeHotKey(coldKey, hotKey common.Blake2b224) {
-	g.HotKeyAuthorizations[coldKey] = hotKey
-	if member, ok := g.CommitteeMembers[coldKey]; ok {
-		hk := hotKey
-		member.HotKey = &hk
-		member.Resigned = false
+// AuthorizeHotCredential authorizes a hot credential for a committee member.
+func (g *GovernanceState) AuthorizeHotCredential(
+	coldCredential common.Credential,
+	hotCredential common.Credential,
+) {
+	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	if g.CommitteeResignations[coldKey] {
+		return
+	}
+	if member := g.CommitteeMembersByCredential[coldKey]; member != nil &&
+		member.Resigned {
+		return
+	}
+	if coldCredential.CredType == common.CredentialTypeAddrKeyHash {
+		if member := g.CommitteeMembers[coldCredential.Credential]; member != nil &&
+			member.Resigned {
+			return
+		}
+	}
+	if !hasCredentialHash(
+		g.HotKeyAuthorizationsByCredential,
+		coldCredential.Credential,
+	) {
+		if legacyHotKey, ok := g.HotKeyAuthorizations[coldCredential.Credential]; ok {
+			g.HotKeyAuthorizationsByCredential[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: coldCredential.Credential,
+			}] = common.Credential{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: legacyHotKey,
+			}
+		}
+	}
+	g.HotKeyAuthorizationsByCredential[coldKey] = hotCredential
+	g.syncLegacyHotKeyAuthorizations()
+	if member, ok := g.CommitteeMembersByCredential[coldKey]; ok {
+		hotCredentialCopy := hotCredential
+		member.HotCredential = &hotCredentialCopy
+		hotHash := hotCredential.Credential
+		member.HotKey = &hotHash
 	}
 }
 
-// ResignCommitteeMember marks a committee member as resigned.
-func (g *GovernanceState) ResignCommitteeMember(coldKey common.Blake2b224) {
-	delete(g.HotKeyAuthorizations, coldKey)
-	if member, ok := g.CommitteeMembers[coldKey]; ok {
+// AuthorizeHotKey authorizes a legacy key-hash hot credential for a legacy
+// key-hash cold credential.
+func (g *GovernanceState) AuthorizeHotKey(
+	coldKey,
+	hotKey common.Blake2b224,
+) {
+	g.AuthorizeHotCredential(
+		common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		},
+		common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hotKey,
+		},
+	)
+	if g.CommitteeResignations[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	}] {
+		return
+	}
+	if member := g.legacyKeyCommitteeMember(coldKey); member != nil {
+		if member.Resigned {
+			return
+		}
+		hotKeyCopy := hotKey
+		member.HotKey = &hotKeyCopy
+	}
+}
+
+// ResignCommitteeCredential marks a committee member as resigned.
+func (g *GovernanceState) ResignCommitteeCredential(
+	coldCredential common.Credential,
+) {
+	coldKey := ledger.NewRewardAccountKey(coldCredential)
+	delete(g.HotKeyAuthorizationsByCredential, coldKey)
+	delete(g.HotKeyAuthorizations, coldCredential.Credential)
+	g.syncLegacyHotKeyAuthorizations()
+	g.CommitteeResignations[coldKey] = true
+	if member, ok := g.CommitteeMembersByCredential[coldKey]; ok {
+		member.HotCredential = nil
 		member.HotKey = nil
 		member.Resigned = true
+	}
+}
+
+// ResignCommitteeMember resigns a legacy key-hash cold credential.
+func (g *GovernanceState) ResignCommitteeMember(coldKey common.Blake2b224) {
+	g.ResignCommitteeCredential(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: coldKey,
+	})
+	if member := g.legacyKeyCommitteeMember(coldKey); member != nil {
+		member.HotKey = nil
+		member.Resigned = true
+	}
+}
+
+// legacyKeyCommitteeMember returns a member stored through the legacy
+// hash-only view unless that entry is known to represent a script credential.
+func (g *GovernanceState) legacyKeyCommitteeMember(
+	coldKey common.Blake2b224,
+) *CommitteeMemberInfo {
+	member := g.CommitteeMembers[coldKey]
+	if member == nil {
+		return nil
+	}
+	scriptMember := g.CommitteeMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: coldKey,
+	}]
+	if member == scriptMember {
+		return nil
+	}
+	return member
+}
+
+func (g *GovernanceState) syncLegacyCommitteeMembers() {
+	legacyMembers := maps.Clone(g.CommitteeMembers)
+	clear(g.CommitteeMembers)
+	ambiguous := make(map[common.Blake2b224]bool)
+	typedHashes := make(map[common.Blake2b224]bool)
+	for credential, member := range g.CommitteeMembersByCredential {
+		hash := credential.Credential
+		typedHashes[hash] = true
+		if ambiguous[hash] {
+			continue
+		}
+		if _, exists := g.CommitteeMembers[hash]; exists {
+			delete(g.CommitteeMembers, hash)
+			ambiguous[hash] = true
+			continue
+		}
+		g.CommitteeMembers[hash] = member
+	}
+	for coldKey, member := range legacyMembers {
+		if typedHashes[coldKey] {
+			continue
+		}
+		g.CommitteeMembers[coldKey] = member
+	}
+}
+
+func (g *GovernanceState) syncLegacyHotKeyAuthorizations() {
+	legacyAuthorizations := maps.Clone(g.HotKeyAuthorizations)
+	clear(g.HotKeyAuthorizations)
+	ambiguous := make(map[common.Blake2b224]bool)
+	typedHashes := make(map[common.Blake2b224]bool)
+	for credential, hotCredential := range g.HotKeyAuthorizationsByCredential {
+		hash := credential.Credential
+		typedHashes[hash] = true
+		if ambiguous[hash] {
+			continue
+		}
+		if _, exists := g.HotKeyAuthorizations[hash]; exists {
+			delete(g.HotKeyAuthorizations, hash)
+			ambiguous[hash] = true
+			continue
+		}
+		g.HotKeyAuthorizations[hash] = hotCredential.Credential
+	}
+	for coldKey, hotKey := range legacyAuthorizations {
+		if typedHashes[coldKey] {
+			continue
+		}
+		g.HotKeyAuthorizations[coldKey] = hotKey
 	}
 }
 

@@ -17,6 +17,7 @@ package conformance
 import (
 	"encoding/hex"
 	"fmt"
+	"maps"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
@@ -58,7 +59,7 @@ func (v *Validator) ValidateTransaction(
 	}
 
 	// Validate certificates
-	if err := v.validateCertificates(tx, govState); err != nil {
+	if err := v.validateCertificates(tx, epoch, govState); err != nil {
 		return fmt.Errorf("certificate validation failed: %w", err)
 	}
 
@@ -118,7 +119,11 @@ func (v *Validator) validateVotingProcedures(
 			}
 
 			// Validate voter exists based on type
-			if err := v.validateVoterExists(voter.Type, voterHash, govState); err != nil {
+			if err := v.validateVoterExists(
+				voter.Type,
+				voterHash,
+				govState,
+			); err != nil {
 				return err
 			}
 		}
@@ -138,10 +143,26 @@ func (v *Validator) validateVoterExists(
 		common.VoterTypeConstitutionalCommitteeHotScriptHash:
 		// For CC voters, we need to find a member with this hot key
 		found := false
-		for _, hotKey := range govState.HotKeyAuthorizations {
-			if hotKey == voterHash {
+		for _, hotKey := range govState.HotKeyAuthorizationsByCredential {
+			expectedType := uint(common.CredentialTypeAddrKeyHash)
+			if voterType == common.VoterTypeConstitutionalCommitteeHotScriptHash {
+				expectedType = common.CredentialTypeScriptHash
+			}
+			if hotKey.CredType == expectedType &&
+				hotKey.Credential == voterHash {
 				found = true
 				break
+			}
+		}
+		// Hash-only legacy authorizations represent key credentials. Preserve
+		// them for key voters without allowing a script voter with the same hash.
+		if !found &&
+			voterType == common.VoterTypeConstitutionalCommitteeHotKeyHash {
+			for _, hotKey := range govState.HotKeyAuthorizations {
+				if hotKey == voterHash {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {
@@ -149,8 +170,15 @@ func (v *Validator) validateVoterExists(
 		}
 
 	case common.VoterTypeDRepKeyHash, common.VoterTypeDRepScriptHash:
-		// Check if DRep is registered
-		if !govState.IsDRepRegistered(voterHash) {
+		credentialType := uint(common.CredentialTypeAddrKeyHash)
+		if voterType == common.VoterTypeDRepScriptHash {
+			credentialType = common.CredentialTypeScriptHash
+		}
+		credential := common.Credential{
+			CredType:   credentialType,
+			Credential: voterHash,
+		}
+		if !govState.IsDRepCredentialRegistered(credential) {
 			return fmt.Errorf("DRep voter %x not registered", voterHash)
 		}
 
@@ -240,6 +268,7 @@ func (v *Validator) validateWithdrawals(
 // validateCertificates validates certificates in the transaction.
 func (v *Validator) validateCertificates(
 	tx common.Transaction,
+	epoch uint64,
 	govState *GovernanceState,
 ) error {
 	certs := tx.Certificates()
@@ -259,9 +288,58 @@ func (v *Validator) validateCertificates(
 		}
 	}
 
+	resignedCredentials := make(map[ledger.RewardAccountKey]bool)
+	certificateState := *govState
+	certificateState.DRepRegistrations = maps.Clone(govState.DRepRegistrations)
+	certificateState.DRepRegistrationsByCredential = maps.Clone(
+		govState.DRepRegistrationsByCredential,
+	)
+	certificateState.DRepExpiries = maps.Clone(govState.DRepExpiries)
+	if certificateState.DRepRegistrations == nil {
+		certificateState.DRepRegistrations = make(map[common.Blake2b224]bool)
+	}
+	if certificateState.DRepRegistrationsByCredential == nil {
+		certificateState.DRepRegistrationsByCredential = make(
+			map[ledger.RewardAccountKey]bool,
+		)
+	}
+	if certificateState.DRepExpiries == nil {
+		certificateState.DRepExpiries = make(
+			map[ledger.RewardAccountKey]uint64,
+		)
+	}
 	for _, cert := range certs {
-		if err := v.validateCertificate(cert, govState, withdrawnCreds); err != nil {
+		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
+			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
+			if resignedCredentials[coldKey] {
+				return fmt.Errorf(
+					"cannot authorize hot key for resigned CC member %x",
+					authCert.ColdCredential.Credential,
+				)
+			}
+		}
+		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
+			coldKey := ledger.NewRewardAccountKey(resignCert.ColdCredential)
+			if resignedCredentials[coldKey] {
+				return fmt.Errorf(
+					"cannot resign already resigned CC member %x",
+					resignCert.ColdCredential.Credential,
+				)
+			}
+		}
+		if err := v.validateCertificate(
+			cert,
+			epoch,
+			&certificateState,
+			withdrawnCreds,
+		); err != nil {
 			return err
+		}
+		applyDRepCertificateValidationTransition(&certificateState, cert)
+		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
+			resignedCredentials[ledger.NewRewardAccountKey(
+				resignCert.ColdCredential,
+			)] = true
 		}
 	}
 
@@ -272,6 +350,7 @@ func (v *Validator) validateCertificates(
 // withdrawnCreds contains credentials being withdrawn in the same transaction.
 func (v *Validator) validateCertificate(
 	cert common.Certificate,
+	epoch uint64,
 	govState *GovernanceState,
 	withdrawnCreds map[ledger.RewardAccountKey]bool,
 ) error {
@@ -331,20 +410,76 @@ func (v *Validator) validateCertificate(
 
 	case common.CertificateTypeRegistrationDrep:
 		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential.Credential
-			if govState.IsDRepRegistered(credential) {
-				return fmt.Errorf("DRep %x already registered", credential)
+			credential := drepCert.DrepCredential
+			if govState.IsDRepCredentialRegistered(credential) {
+				return fmt.Errorf(
+					"DRep %x already registered",
+					credential.Credential,
+				)
 			}
+		}
+
+	case common.CertificateTypeDeregistrationDrep:
+		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
+			credential := drepCert.DrepCredential
+			if !govState.IsDRepCredentialRegistered(credential) {
+				return fmt.Errorf(
+					"DRep credential %d:%x not registered",
+					credential.CredType,
+					credential.Credential,
+				)
+			}
+		}
+
+	case common.CertificateTypeUpdateDrep:
+		if drepCert, ok := cert.(*common.UpdateDrepCertificate); ok {
+			credential := drepCert.DrepCredential
+			if !govState.IsDRepCredentialRegistered(credential) {
+				return fmt.Errorf(
+					"DRep credential %d:%x not registered",
+					credential.CredType,
+					credential.Credential,
+				)
+			}
+		}
+
+	case common.CertificateTypeVoteDelegation:
+		if delegationCert, ok := cert.(*common.VoteDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
+	case common.CertificateTypeStakeVoteDelegation:
+		if delegationCert, ok := cert.(*common.StakeVoteDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
+	case common.CertificateTypeVoteRegistrationDelegation:
+		if delegationCert, ok := cert.(*common.VoteRegistrationDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
+		}
+
+	case common.CertificateTypeStakeVoteRegistrationDelegation:
+		if delegationCert, ok := cert.(*common.StakeVoteRegistrationDelegationCertificate); ok {
+			return validateDRepDelegationTarget(delegationCert.Drep, govState)
 		}
 
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
-			coldCredential := authCert.ColdCredential.Credential
-			member := govState.GetCommitteeMember(coldCredential)
+			coldCredential := authCert.ColdCredential
+			member := govState.getCommitteeCredentialMemberAtEpoch(
+				coldCredential,
+				epoch,
+			)
+			if member == nil && govState.hasCommitteeState(epoch) {
+				return fmt.Errorf(
+					"cannot authorize hot key for non-member %x",
+					coldCredential.Credential,
+				)
+			}
 			if member != nil && member.Resigned {
 				return fmt.Errorf(
 					"cannot authorize hot key for resigned CC member %x",
-					coldCredential,
+					coldCredential.Credential,
 				)
 			}
 		}
@@ -356,15 +491,21 @@ func (v *Validator) validateCertificate(
 		// - "Resigning proposed CC key" should succeed (proposed but not yet enacted)
 		if govState != nil {
 			if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
-				coldHash := resignCert.ColdCredential.Credential
-				// Check if this cold key is a current committee member
-				_, isMember := govState.CommitteeMembers[coldHash]
-				// Also check if this cold key is proposed in any pending UpdateCommittee proposal
-				isProposed := govState.IsProposedCommitteeMember(coldHash)
-				if !isMember && !isProposed {
+				coldCredential := resignCert.ColdCredential
+				member := govState.getCommitteeCredentialMemberAtEpoch(
+					coldCredential,
+					epoch,
+				)
+				if member != nil && member.Resigned {
+					return fmt.Errorf(
+						"cannot resign already resigned CC member %x",
+						coldCredential.Credential,
+					)
+				}
+				if member == nil && govState.hasCommitteeState(epoch) {
 					return fmt.Errorf(
 						"cannot resign non-member %x",
-						coldHash[:],
+						coldCredential.Credential[:],
 					)
 				}
 			}
@@ -375,6 +516,57 @@ func (v *Validator) validateCertificate(
 	}
 
 	return nil
+}
+
+func validateDRepDelegationTarget(
+	drep common.Drep,
+	govState *GovernanceState,
+) error {
+	var credentialType uint
+	switch drep.Type {
+	case common.DrepTypeAbstain, common.DrepTypeNoConfidence:
+		return nil
+	case common.DrepTypeAddrKeyHash:
+		credentialType = common.CredentialTypeAddrKeyHash
+	case common.DrepTypeScriptHash:
+		credentialType = common.CredentialTypeScriptHash
+	default:
+		return fmt.Errorf(
+			"DRep delegation target has invalid type %d",
+			drep.Type,
+		)
+	}
+	if len(drep.Credential) != len(common.Blake2b224{}) {
+		return fmt.Errorf(
+			"DRep delegation target %d has invalid credential length %d",
+			drep.Type,
+			len(drep.Credential),
+		)
+	}
+	credential := common.Credential{
+		CredType:   credentialType,
+		Credential: common.NewBlake2b224(drep.Credential),
+	}
+	if govState == nil || !govState.IsDRepCredentialRegistered(credential) {
+		return fmt.Errorf(
+			"DRep delegation target %d:%x not registered",
+			credential.CredType,
+			credential.Credential,
+		)
+	}
+	return nil
+}
+
+func applyDRepCertificateValidationTransition(
+	govState *GovernanceState,
+	cert common.Certificate,
+) {
+	switch drepCert := cert.(type) {
+	case *common.RegistrationDrepCertificate:
+		govState.RegisterDRepCredentialUntil(drepCert.DrepCredential, 0)
+	case *common.DeregistrationDrepCertificate:
+		govState.DeregisterDRepCredential(drepCert.DrepCredential)
+	}
 }
 
 // validateProposalProcedures validates proposal procedures in the transaction.
@@ -539,12 +731,12 @@ func (v *Validator) validateUpdateCommittee(
 	govState *GovernanceState,
 ) error {
 	// ConflictingCommitteeUpdate: no credential should be both added and removed
-	removedCreds := make(map[common.Blake2b224]bool)
+	removedCreds := make(map[ledger.RewardAccountKey]bool)
 	for _, cred := range ga.Credentials {
-		removedCreds[cred.Credential] = true
+		removedCreds[ledger.NewRewardAccountKey(cred)] = true
 	}
 	for cred := range ga.CredEpochs {
-		if cred != nil && removedCreds[cred.Credential] {
+		if cred != nil && removedCreds[ledger.NewRewardAccountKey(*cred)] {
 			return fmt.Errorf(
 				"conflicting committee update: credential %x is both added and removed",
 				cred.Credential,
