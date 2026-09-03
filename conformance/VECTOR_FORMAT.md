@@ -1,8 +1,13 @@
 # Test Vector Format Reference
 
-This document describes the CBOR binary format of the Amaru conformance test vectors consumed by this package. It is intended for implementors who need to parse vectors directly or understand how the harness extracts state.
+This document describes the legacy CBOR envelope and the Cardano Blueprint
+JSON records consumed by this package. See [CORPUS.md](CORPUS.md) for the
+pinned source and refresh procedure.
 
-Vectors are stored in `testdata/eras/conway/impl/dump/Conway/Imp/` (binary CBOR, no extension). Protocol parameter files are in `testdata/eras/conway/impl/dump/pparams-by-hash/` (one file per hash, named by hex-encoded hash).
+Vectors are generated under `testdata/eras/conway/impl/dump/`. Blueprint
+records are JSON files with hex-encoded `cbor`, `oldLedgerState`, and
+`newLedgerState` fields, plus `success` and `testState`. Protocol parameter
+files are in `testdata/eras/conway/impl/dump/pparams-by-hash/`.
 
 ---
 

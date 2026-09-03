@@ -486,7 +486,7 @@ func (v *Validator) validateCertificate(
 
 	case common.CertificateTypeResignCommitteeCold:
 		// The Cardano spec requires the credential to be a current OR proposed CC member.
-		// Per Amaru test vectors:
+		// Per Cardano Blueprint vectors:
 		// - "resigning a non-CC key" should fail (not a member or proposed)
 		// - "Resigning proposed CC key" should succeed (proposed but not yet enacted)
 		if govState != nil {

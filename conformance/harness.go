@@ -131,7 +131,7 @@ func NewHarness(stateManager StateManager, config HarnessConfig) *Harness {
 	}
 }
 
-// collectAllVectors walks both the Amaru-derived eras/ corpus and the
+// collectAllVectors walks both the Cardano Blueprint-derived eras/ corpus and the
 // repo-local synthetic/ corpus under testdataRoot. The eras/ root is
 // required; a missing synthetic/ root is silently skipped.
 func (h *Harness) collectAllVectors() ([]string, error) {

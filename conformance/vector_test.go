@@ -34,9 +34,9 @@ func TestCollectVectorFiles(t *testing.T) {
 		t.Fatal("expected to find test vectors, got 0")
 	}
 
-	// Verify we found a reasonable number of vectors (~320 expected)
-	if len(vectors) < 100 {
-		t.Errorf("expected at least 100 vectors, got %d", len(vectors))
+	// The pinned Blueprint archive currently contains more than 2,500 records.
+	if len(vectors) < 2000 {
+		t.Errorf("expected at least 2000 vectors, got %d", len(vectors))
 	}
 
 	// Verify no pparams files are included

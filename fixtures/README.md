@@ -35,7 +35,8 @@ Current sources:
 
 Intentional exclusions:
 
-- Amaru conformance vectors remain under `conformance/testdata/`
+- Cardano Blueprint conformance vectors are imported into `conformance/testdata/`
+  from the pinned `cardano-blueprint` submodule; see `conformance/CORPUS.md`.
 - Plutus conformance data is managed separately in `plutigo`
 - `SerialisedBlock_*` and `SerialisedHeader_*` placeholder files from
   `ouroboros-consensus` are not imported
