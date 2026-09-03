@@ -11,9 +11,9 @@ files are in `testdata/eras/conway/impl/dump/pparams-by-hash/`.
 
 ---
 
-## Top-Level Structure
+## Legacy CBOR envelope
 
-Each vector file decodes to a 5-element CBOR array:
+The legacy CBOR files decode to a 5-element array:
 
 ```
 vector = [
@@ -25,7 +25,20 @@ vector = [
 ]
 ```
 
-The `title` field identifies the Haskell test that generated this vector (e.g. `"Conway/Imp/GOV/vote on committee member"`). It is also used to detect "No cost model" vectors (see [Protocol Parameters](#protocol-parameters)).
+The `title` field identifies the source test. This envelope remains supported
+for locally authored synthetic fixtures.
+
+## Cardano Blueprint JSON records
+
+The pinned Blueprint archive is the primary ledger corpus. Each record contains
+hex-encoded `cbor`, `oldLedgerState`, and `newLedgerState` fields, a boolean
+`success`, and a `testState` title. The adapter wraps each pair of ledger states
+in the legacy `NewEpochState` shape while preserving the source CBOR bytes.
+
+Blueprint UTxO maps use the ledger's compact binary representation. The parser
+decodes its tagged, length-prefixed address and variable-length coin directly;
+it must not materialize the complete state as `cbor.Value`, because reference
+script vectors can exceed the Go stack's recursive decoding limit.
 
 ---
 

@@ -15,18 +15,20 @@
 package conformance
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
-	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	mockledger "github.com/blinklabs-io/ouroboros-mock/ledger"
 )
@@ -173,14 +175,25 @@ type stakeCredential struct {
 
 // ParseInitialState extracts state from a test vector's InitialState field.
 func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
-	var v cbor.Value
-	if _, err := cbor.Decode(raw, &v); err != nil {
+	var initialState []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &initialState); err != nil {
 		return nil, fmt.Errorf("failed to decode initial_state: %w", err)
 	}
-
-	stateArr, ok := v.Value().([]any)
-	if !ok || len(stateArr) < 4 {
+	if len(initialState) < 4 {
 		return nil, errors.New("unexpected initial_state shape")
+	}
+	isBlueprint := bytes.Equal(initialState[1], blueprintConfig)
+	var stateArr []any
+	if !isBlueprint {
+		var v cbor.Value
+		if _, err := cbor.Decode(raw, &v); err != nil {
+			return nil, fmt.Errorf("failed to decode initial_state: %w", err)
+		}
+		var ok bool
+		stateArr, ok = v.Value().([]any)
+		if !ok || len(stateArr) < 4 {
+			return nil, errors.New("unexpected initial_state shape")
+		}
 	}
 
 	state := &ParsedInitialState{
@@ -221,30 +234,35 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		CostModels: make(map[uint][]int64),
 	}
 
-	// Extract current epoch from stateArr[0]
-	if epoch, ok := stateArr[0].(uint64); ok {
-		state.CurrentEpoch = epoch
+	// Extract current epoch without materializing the complete state. Blueprint
+	// vectors can contain very large reference-script outputs.
+	if _, err := cbor.Decode(initialState[0], &state.CurrentEpoch); err != nil {
+		return nil, fmt.Errorf("failed to decode current epoch: %w", err)
+	}
+	if !isBlueprint {
+		bes, ok := stateArr[3].([]any)
+		if !ok || len(bes) < 2 {
+			return nil, errors.New("unexpected begin_epoch_state shape")
+		}
+		ls, ok := bes[1].([]any)
+		if !ok || len(ls) < 2 {
+			return nil, errors.New("unexpected ledger_state shape")
+		}
+		if err := parseCertState(state, ls[0]); err != nil {
+			return nil, fmt.Errorf("failed to parse cert_state: %w", err)
+		}
+		if err := parseUtxoState(state, ls[1]); err != nil {
+			return nil, fmt.Errorf("failed to parse utxo_state: %w", err)
+		}
+		state.PParamsHash = extractPParamsHash(ls)
 	}
 
-	// Navigate to begin_epoch_state[1] (ledger_state)
-	bes, ok := stateArr[3].([]any)
-	if !ok || len(bes) < 2 {
-		return nil, errors.New("unexpected begin_epoch_state shape")
-	}
-
-	ls, ok := bes[1].([]any)
-	if !ok || len(ls) < 2 {
-		return nil, errors.New("unexpected ledger_state shape")
-	}
-
-	// Parse cert_state (ls[0])
-	if err := parseCertState(state, ls[0]); err != nil {
-		return nil, fmt.Errorf("failed to parse cert_state: %w", err)
-	}
-
-	// Parse utxo_state (ls[1]) for governance and cost models
-	if err := parseUtxoState(state, ls[1]); err != nil {
-		return nil, fmt.Errorf("failed to parse utxo_state: %w", err)
+	// Parse the structural fields through raw CBOR slices. Decoding the full
+	// state into cbor.Value recurses through reference scripts and can overflow
+	// the Go stack on otherwise valid Blueprint vectors.
+	ls, err := rawLedgerState(raw)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse UTxOs from raw CBOR using typed decoders (like gouroboros)
@@ -268,7 +286,9 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	_ = parseProposalsFromRawCBOR(state, raw)
 
 	// Extract pparams hash from gov_state (search in ledger_state)
-	state.PParamsHash = extractPParamsHash(ls)
+	if hash := extractPParamsHashFromRawCBOR(ls); len(hash) > 0 {
+		state.PParamsHash = hash
+	}
 
 	return state, nil
 }
@@ -592,6 +612,32 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 
 	// Try to decode UTxOs from each element in utxoState
 	for _, utxoData := range utxoState {
+		// Blueprint ledger states encode the Shelley-era UTxO map as packed
+		// byte-string keys and CBOR byte-string values. Keep this path typed so
+		// reference scripts are never materialized as cbor.Value trees.
+		var packedUtxos map[cbor.ByteString]cbor.ByteString
+		if _, err := cbor.Decode(utxoData, &packedUtxos); err == nil &&
+			len(packedUtxos) > 0 {
+			for packedID, outputCBOR := range packedUtxos {
+				id := packedID.Bytes()
+				if len(id) != 34 {
+					continue
+				}
+				output, ok := decodeCompactTransactionOutput(outputCBOR.Bytes())
+				if !ok {
+					continue
+				}
+				txHashCopy := append([]byte(nil), id[:32]...)
+				index := binary.LittleEndian.Uint16(id[32:])
+				result[fmt.Sprintf("%x#%d", txHashCopy, index)] = ParsedUtxo{
+					TxHash: txHashCopy,
+					Index:  uint32(index),
+					Output: output,
+				}
+			}
+			continue
+		}
+
 		// Try direct map[UtxoId]BabbageTransactionOutput format
 		var utxosMapDirect map[localstatequery.UtxoId]babbage.BabbageTransactionOutput
 		if _, err := cbor.Decode(utxoData, &utxosMapDirect); err == nil &&
@@ -669,72 +715,52 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 			continue
 		}
 
-		// Try using cbor.Value for complex key structures
-		var val cbor.Value
-		if _, err := cbor.Decode(utxoData, &val); err == nil {
-			if m, ok := val.Value().(map[any]any); ok && len(m) > 0 {
-				for k, v := range m {
-					// Dereference pointer if needed
-					var key any
-					if ptr, ok := k.(*any); ok && ptr != nil {
-						key = *ptr
-					} else {
-						key = k
-					}
-
-					// Extract hash and index from key
-					var hash gledger.Blake2b256
-					var index uint32
-					keyOk := false
-
-					if arr, ok := key.([]any); ok && len(arr) == 2 {
-						if h, ok := arr[0].([]byte); ok {
-							copy(hash[:], h)
-							keyOk = true
-						}
-						if i, ok := arr[1].(uint64); ok {
-							//nolint:gosec // idx from trusted CBOR test data
-							index = uint32(i)
-						}
-					} else {
-						// Try encoding key and decoding as UtxoId
-						if keyData, err := cbor.Encode(key); err == nil {
-							var utxoId localstatequery.UtxoId
-							if _, err := cbor.Decode(keyData, &utxoId); err == nil {
-								hash = utxoId.Hash
-								//nolint:gosec // idx from trusted CBOR test data
-								index = uint32(utxoId.Idx)
-								keyOk = true
-							}
-						}
-					}
-
-					if !keyOk {
-						continue
-					}
-
-					// Decode output
-					var output babbage.BabbageTransactionOutput
-					if outData, err := cbor.Encode(v); err == nil {
-						if _, err := cbor.Decode(outData, &output); err == nil {
-							utxoKey := fmt.Sprintf("%x#%d", hash[:], index)
-							// Copy hash to avoid aliasing the underlying array
-							txHashCopy := append([]byte(nil), hash[:]...)
-							// Copy output to avoid pointer aliasing across iterations
-							outputCopy := output
-							result[utxoKey] = ParsedUtxo{
-								TxHash: txHashCopy,
-								Index:  index,
-								Output: &outputCopy,
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 
 	return result, nil
+}
+
+// decodeCompactTransactionOutput decodes the MemPack representation used for
+// the Blueprint UTxO map: a compact address followed by a tagged variable
+// length coin. The address is self-delimiting, so try prefixes rather than
+// assuming a fixed Shelley address size (Byron addresses are variable-sized).
+func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool) {
+	if len(raw) < 3 || raw[0] != 0 {
+		return nil, false
+	}
+	addressLen := int(raw[1])
+	if addressLen == 0 || 2+addressLen >= len(raw) {
+		return nil, false
+	}
+	address, err := common.NewAddressFromBytes(raw[2 : 2+addressLen])
+	if err != nil {
+		return nil, false
+	}
+	coin, ok := decodeCompactCoin(raw[2+addressLen:])
+	if !ok {
+		return nil, false
+	}
+	return &shelley.ShelleyTransactionOutput{
+		OutputAddress: address,
+		OutputAmount:  coin,
+	}, true
+}
+
+func decodeCompactCoin(raw []byte) (uint64, bool) {
+	if len(raw) < 2 || raw[0] != 0 {
+		return 0, false
+	}
+	var coin uint64
+	for _, b := range raw[1:] {
+		if coin > (math.MaxUint64 >> 7) {
+			return 0, false
+		}
+		coin = coin<<7 | uint64(b&0x7f)
+		if b&0x80 == 0 {
+			return coin, true
+		}
+	}
+	return 0, false
 }
 
 // parseCertState extracts voting, pool, and delegation state.
@@ -1734,6 +1760,31 @@ func extractPParamsHash(ls []any) []byte {
 					}
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// extractPParamsHashFromRawCBOR extracts the protocol-parameter hash without
+// decoding the complete ledger state into interface values.
+func extractPParamsHashFromRawCBOR(ls []cbor.RawMessage) []byte {
+	for _, itemRaw := range ls {
+		var item []cbor.RawMessage
+		if _, err := cbor.Decode(itemRaw, &item); err != nil || len(item) <= 3 {
+			continue
+		}
+
+		var hash []byte
+		if _, err := cbor.Decode(item[3], &hash); err == nil && len(hash) > 0 {
+			return hash
+		}
+
+		var nested []cbor.RawMessage
+		if _, err := cbor.Decode(item[3], &nested); err != nil || len(nested) <= 3 {
+			continue
+		}
+		if _, err := cbor.Decode(nested[3], &hash); err == nil && len(hash) > 0 {
+			return hash
 		}
 	}
 	return nil

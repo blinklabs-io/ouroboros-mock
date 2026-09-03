@@ -62,11 +62,11 @@ prepare-blueprint-testdata:
 # Regenerate the locally-authored synthetic conformance vectors. These
 # splice rollback events into existing Cardano Blueprint-derived bases to exercise
 # harness code paths the upstream corpus does not cover. Re-run this
-# target after `make download-amaru-testdata` so the synthetic vectors
+# target after `make prepare-blueprint-testdata` so the synthetic vectors
 # track the refreshed bases. The output lives under
 # conformance/testdata/synthetic/ (outside conformance/testdata/eras/)
 # so it is preserved across Blueprint-corpus refreshes.
-SYNTHETIC_ROLLBACK_BASE=conformance/testdata/eras/conway/impl/dump/Conway.Imp.ConwayImpSpec_-_Version_10.UTXOS.Conway_features_fail_in_Plutusdescribe_v1_and_v2.Unsupported_Fields.CurrentTreasuryValue.V1
+SYNTHETIC_ROLLBACK_BASE=conformance/testdata/eras/conway/impl/dump/Conway.Imp.ConwayImpSpec_-_Version_10.UTXOS.Conway_features_fail_in_Plutusdescribe_v1_and_v2.Unsupported_Fields.CurrentTreasuryValue.V1/0
 SYNTHETIC_ROLLBACK_OUT=conformance/testdata/synthetic/rollback/CurrentTreasuryValue_V1
 
 gen-synthetic-vectors: prepare-blueprint-testdata gen-rollback-vector

@@ -69,6 +69,9 @@ func generate(basePath, outPath, titleOverride string) error {
 	if err != nil {
 		return fmt.Errorf("read base: %w", err)
 	}
+	if len(baseData) > 0 && baseData[0] == '{' {
+		return generateBlueprintRollback(basePath, outPath, titleOverride)
+	}
 
 	var items []cbor.RawMessage
 	if _, err := cbor.Decode(baseData, &items); err != nil {
@@ -147,6 +150,55 @@ func generate(basePath, outPath, titleOverride string) error {
 		"wrote %s\n  base: %s\n  events: tx1@%d, tx2@%d, rollback@%d, tx2@%d\n",
 		outPath, basePath, tx1.Slot, tx2.Slot, target, tx2.Slot,
 	)
+	return nil
+}
+
+func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
+	vec, err := conformance.DecodeTestVector(basePath)
+	if err != nil {
+		return fmt.Errorf("decode Blueprint vector: %w", err)
+	}
+	var tx conformance.VectorEvent
+	for _, event := range vec.Events {
+		if event.Type == conformance.EventTypeTransaction && event.Success {
+			tx = event
+			break
+		}
+	}
+	if tx.TxBytes == nil {
+		return errors.New("Blueprint vector has no successful transaction")
+	}
+
+	eventsCBOR, err := cbor.Encode([]any{
+		txEvent(tx.TxBytes, true, 2),
+		rollbackEvent(1),
+		txEvent(tx.TxBytes, true, 2),
+	})
+	if err != nil {
+		return fmt.Errorf("encode Blueprint events: %w", err)
+	}
+	title := titleOverride
+	if title == "" {
+		title = deriveTitle(outPath)
+	}
+	vector := []any{
+		vec.Config,
+		vec.InitialState,
+		vec.FinalState,
+		cbor.RawMessage(eventsCBOR),
+		title,
+	}
+	outBytes, err := cbor.Encode(vector)
+	if err != nil {
+		return fmt.Errorf("encode Blueprint vector: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(outPath, outBytes, 0o600); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s from Blueprint base %s\n", outPath, basePath)
 	return nil
 }
 
