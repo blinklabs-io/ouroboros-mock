@@ -51,6 +51,10 @@ type Harness struct {
 	// validator performs pre-validation checks.
 	validator *Validator
 
+	// validationRules is selected from the era named by the vector title.
+	// Blueprint stores cross-era records below a Conway archive root.
+	validationRules []common.UtxoValidationRuleFunc
+
 	// debug enables verbose logging.
 	debug bool
 
@@ -210,6 +214,7 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 		t.Fatalf("failed to load protocol parameters: %v", err)
 	}
 	h.protocolParams = pp
+	h.validationRules = ValidationRulesForVector(vector.Title)
 
 	// Initialize state manager with initial state
 	if err := h.stateManager.LoadInitialState(initialState, pp); err != nil {
@@ -410,7 +415,7 @@ func (h *Harness) executeTransaction(
 		slot,
 		stateProvider,
 		h.protocolParams,
-		ConformanceValidationRules,
+		h.validationRules,
 	)
 	if err != nil {
 		return false, err

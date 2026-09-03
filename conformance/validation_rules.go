@@ -15,9 +15,51 @@
 package conformance
 
 import (
+	"strings"
+
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 )
+
+// ValidationRulesForVector selects rules applicable to the era named in a
+// Blueprint record. The protocol-parameter loader intentionally returns the
+// Conway representation, so pre-Conway records use the common Conway rule
+// implementations with Conway-only rules omitted.
+func ValidationRulesForVector(title string) []common.UtxoValidationRuleFunc {
+	if strings.Contains(title, "AlonzoImpSpec") {
+		return AlonzoConformanceValidationRules
+	}
+	return ConformanceValidationRules
+}
+
+var AlonzoConformanceValidationRules = []common.UtxoValidationRuleFunc{
+	conway.UtxoValidateMetadata,
+	conway.UtxoValidateIsValidFlag,
+	conway.UtxoValidateRequiredVKeyWitnesses,
+	conway.UtxoValidateCollateralVKeyWitnesses,
+	conway.UtxoValidateRedeemerAndScriptWitnesses,
+	conway.UtxoValidateSignatures,
+	conway.UtxoValidateCostModelsPresent,
+	conway.UtxoValidateScriptDataHash,
+	conway.UtxoValidateOutsideValidityIntervalUtxo,
+	conway.UtxoValidateInputSetEmptyUtxo,
+	conway.UtxoValidateInsufficientCollateral,
+	conway.UtxoValidateCollateralContainsNonAda,
+	conway.UtxoValidateCollateralEqBalance,
+	conway.UtxoValidateNoCollateralInputs,
+	conway.UtxoValidateBadInputsUtxo,
+	conway.UtxoValidateScriptWitnesses,
+	conway.UtxoValidateValueNotConservedUtxo,
+	conway.UtxoValidateOutputTooSmallUtxo,
+	conway.UtxoValidateOutputTooBigUtxo,
+	conway.UtxoValidateWrongNetwork,
+	conway.UtxoValidateExUnitsTooBigUtxo,
+	conway.UtxoValidateExtraneousRedeemers,
+	conway.UtxoValidatePlutusScripts,
+	conway.UtxoValidateNativeScripts,
+	conway.UtxoValidateDelegation,
+	conway.UtxoValidateWithdrawals,
+}
 
 // ConformanceValidationRules is a custom validation rule set for conformance tests.
 // It excludes fee validation (UtxoValidateFeeTooSmallUtxo) because test vectors

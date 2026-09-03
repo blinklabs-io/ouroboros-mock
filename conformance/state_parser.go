@@ -821,9 +821,9 @@ func decodeCompactAdaOnlyOutput(raw []byte) (common.TransactionOutput, bool) {
 	addressHash := make([]byte, 28)
 	copy(addressHash[0:24], extra[0:24])
 	copy(addressHash[24:], extra[28:32])
-	addrType := uint8(0)
-	if d&1 != 0 { // payment credential is a script hash
-		addrType = 1
+	addrType := uint8(1)
+	if d&1 != 0 { // payment credential is a key hash
+		addrType = 0
 	}
 	if cred[0] == common.CredentialTypeScriptHash { // stake credential
 		addrType += 2
