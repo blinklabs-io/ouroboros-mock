@@ -422,6 +422,53 @@ func parseProposalsFromRawCBOR(
 		len(proposalsState) == 0 {
 		return nil
 	}
+	// Current Blueprint vectors encode proposals as a canonical list of complete
+	// proposal records inside the proposal state. The older map-shaped
+	// representation is retained below for compatibility.
+	for _, candidate := range proposalsState {
+		var pairs [][]cbor.RawMessage
+		if _, err := cbor.Decode(candidate, &pairs); err != nil {
+			continue
+		}
+		for _, pair := range pairs {
+			if len(pair) != 2 && len(pair) < 7 {
+				continue
+			}
+			proposalRaw := pair[1]
+			idRaw := pair[0]
+			if len(pair) >= 7 {
+				idRaw = pair[0]
+				proposalRaw = cbor.RawMessage(nil)
+				// The canonical proposal-list form stores the complete proposal
+				// record, whose first field is its governance action ID.
+				var encoded []cbor.RawMessage
+				encoded = append(encoded, pair...)
+				proposalRaw, _ = cbor.Encode(encoded)
+			}
+			var id rawGovActionID
+			if _, err := cbor.Decode(idRaw, &id); err != nil {
+				var idParts []cbor.RawMessage
+				if _, err := cbor.Decode(idRaw, &idParts); err != nil || len(idParts) != 2 {
+					continue
+				}
+				var hash []byte
+				if _, err := cbor.Decode(idParts[0], &hash); err != nil || len(hash) != len(id.TxID) {
+					continue
+				}
+				copy(id.TxID[:], hash)
+				if _, err := cbor.Decode(idParts[1], &id.Index); err != nil {
+					continue
+				}
+			}
+			if info, ok := parseProposalInfoFromRawCBOR(proposalRaw); ok {
+				state.Proposals[fmt.Sprintf(
+					"%s#%d",
+					hex.EncodeToString(id.TxID[:]),
+					id.Index,
+				)] = info
+			}
+		}
+	}
 	proposalsRaw := proposalsState[0]
 	var nested []cbor.RawMessage
 	if _, err := cbor.Decode(proposalsRaw, &nested); err == nil &&
@@ -725,7 +772,17 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 // length coin. The address is self-delimiting, so try prefixes rather than
 // assuming a fixed Shelley address size (Byron addresses are variable-sized).
 func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool) {
-	if len(raw) < 3 || raw[0] != 0 {
+	// Tags 0 and 1 are the compact-address forms (without and with a datum
+	// hash). The trailing datum hash is not needed for UTxO identity or the
+	// current state-provider contract, so the shared address/value decoder can
+	// safely ignore it after decoding the compact coin.
+	if len(raw) < 3 {
+		return nil, false
+	}
+	if raw[0] == 2 || raw[0] == 3 {
+		return decodeCompactAdaOnlyOutput(raw)
+	}
+	if raw[0] != 0 && raw[0] != 1 {
 		return nil, false
 	}
 	addressLen := int(raw[1])
@@ -737,6 +794,50 @@ func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool)
 		return nil, false
 	}
 	coin, ok := decodeCompactCoin(raw[2+addressLen:])
+	if !ok {
+		return nil, false
+	}
+	return &shelley.ShelleyTransactionOutput{
+		OutputAddress: address,
+		OutputAmount:  coin,
+	}, true
+}
+
+// decodeCompactAdaOnlyOutput handles the optimized Alonzo/Babbage form. It
+// stores a packed payment credential, a packed 28-byte address payload plus
+// network/type bits, and a compact coin instead of a full address.
+func decodeCompactAdaOnlyOutput(raw []byte) (common.TransactionOutput, bool) {
+	// tag + credential (tag/hash) + Addr28Extra (four words) + coin
+	if len(raw) < 1+29+32+2 {
+		return nil, false
+	}
+	cred := raw[1:30]
+	if (cred[0] != common.CredentialTypeAddrKeyHash &&
+		cred[0] != common.CredentialTypeScriptHash) || len(cred[1:]) != 28 {
+		return nil, false
+	}
+	extra := raw[30:62]
+	d := binary.LittleEndian.Uint64(extra[24:32])
+	addressHash := make([]byte, 28)
+	copy(addressHash[0:24], extra[0:24])
+	copy(addressHash[24:], extra[28:32])
+	addrType := uint8(0)
+	if d&1 != 0 { // payment credential is a script hash
+		addrType = 1
+	}
+	if cred[0] == common.CredentialTypeScriptHash { // stake credential
+		addrType += 2
+	}
+	address, err := common.NewAddressFromParts(
+		addrType,
+		uint8((d>>1)&1),
+		addressHash,
+		cred[1:],
+	)
+	if err != nil {
+		return nil, false
+	}
+	coin, ok := decodeCompactCoin(raw[62:])
 	if !ok {
 		return nil, false
 	}
