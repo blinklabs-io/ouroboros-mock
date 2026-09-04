@@ -15,6 +15,7 @@
 package conformance
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
@@ -337,18 +338,116 @@ func governanceMismatches(got, want *GovernanceState) []string {
 			mismatches = append(mismatches, check.name)
 		}
 	}
-	if !proposalIDsEqual(got.Proposals, want.Proposals) {
+	if !committeeMembersEqual(got.CommitteeMembersByCredential, want.CommitteeMembersByCredential) {
+		mismatches = append(mismatches, "committee")
+	}
+	if !hotKeysEqual(got.HotKeyAuthorizationsByCredential, want.HotKeyAuthorizationsByCredential) {
+		mismatches = append(mismatches, "hot keys")
+	}
+	if !sameKeySet(got.DRepExpiries, want.DRepExpiries) {
+		mismatches = append(mismatches, "drep expiries")
+	}
+	if !proposalStatesEqual(got.Proposals, want.Proposals) {
 		mismatches = append(mismatches, "proposals")
 	}
 	return mismatches
 }
 
-func proposalIDsEqual(got, want map[string]*ProposalState) bool {
+func proposalStatesEqual(got, want map[string]*ProposalState) bool {
 	if len(got) != len(want) {
 		return false
 	}
-	for id := range got {
-		if _, ok := want[id]; !ok {
+	for id, proposal := range got {
+		wantProposal, ok := want[id]
+		if !ok || proposal == nil || wantProposal == nil {
+			return false
+		}
+		gotInfo := proposal.GovActionInfo
+		wantInfo := wantProposal.GovActionInfo
+		normalizeGovActionInfo(&gotInfo)
+		normalizeGovActionInfo(&wantInfo)
+		// SubmittedEpoch and ExpiresAfter are derived from the epoch at which
+		// the proposal is observed in the simplified provider. Blueprint's
+		// final-state encoding does not preserve those source epochs. Votes,
+		// parent links, and action-specific payloads that are not represented
+		// consistently in the final-state projection are likewise validated by
+		// their dedicated harness/governance tests; compare the stable proposal
+		// payload and lifecycle result here.
+		gotInfo.SubmittedEpoch = 0
+		gotInfo.ExpiresAfter = 0
+		wantInfo.SubmittedEpoch = 0
+		wantInfo.ExpiresAfter = 0
+		if gotInfo.ActionType != wantInfo.ActionType ||
+			!reflect.DeepEqual(gotInfo.RatifiedEpoch, wantInfo.RatifiedEpoch) ||
+			gotInfo.Deposit != wantInfo.Deposit ||
+			!reflect.DeepEqual(gotInfo.ReturnAccount, wantInfo.ReturnAccount) ||
+			!reflect.DeepEqual(gotInfo.RemovedMembers, wantInfo.RemovedMembers) ||
+			!reflect.DeepEqual(gotInfo.ProposedMembers, wantInfo.ProposedMembers) ||
+			!reflect.DeepEqual(gotInfo.ProposedMembersByCredential, wantInfo.ProposedMembersByCredential) ||
+			!reflect.DeepEqual(gotInfo.ProtocolVersion, wantInfo.ProtocolVersion) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeGovActionInfo(info *GovActionInfo) {
+	if info.Votes == nil {
+		info.Votes = map[string]uint8{}
+	}
+	if info.RemovedMembers == nil {
+		info.RemovedMembers = map[ledger.RewardAccountKey]bool{}
+	}
+	if info.ProposedMembers == nil {
+		info.ProposedMembers = map[common.Blake2b224]uint64{}
+	}
+	if info.ProposedMembersByCredential == nil {
+		info.ProposedMembersByCredential = map[ledger.RewardAccountKey]uint64{}
+	}
+}
+
+func committeeMembersEqual(
+	got, want map[ledger.RewardAccountKey]*CommitteeMemberInfo,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, gotMember := range got {
+		wantMember, ok := want[key]
+		if !ok || gotMember == nil || wantMember == nil ||
+			gotMember.ExpiryEpoch != wantMember.ExpiryEpoch ||
+			gotMember.Resigned != wantMember.Resigned {
+			return false
+		}
+	}
+	return true
+}
+
+func hotKeysEqual(
+	got, want map[ledger.RewardAccountKey]common.Credential,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, gotCredential := range got {
+		wantCredential, ok := want[key]
+		if !ok || gotCredential.CredType != wantCredential.CredType ||
+			!bytes.Equal(gotCredential.Credential[:], wantCredential.Credential[:]) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameKeySet[T comparable, V1 any, V2 any](
+	got map[T]V1,
+	want map[T]V2,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key := range got {
+		if _, ok := want[key]; !ok {
 			return false
 		}
 	}
@@ -356,6 +455,10 @@ func proposalIDsEqual(got, want map[string]*ProposalState) bool {
 }
 
 func snapshotSummary(snapshot *StateSnapshot) string {
+	proposalCount := 0
+	if snapshot.Governance != nil {
+		proposalCount = len(snapshot.Governance.Proposals)
+	}
 	return fmt.Sprintf(
 		"epoch=%d utxos=%d stakes=%d rewards=%d pools=%d proposals=%d",
 		snapshot.CurrentEpoch,
@@ -363,7 +466,7 @@ func snapshotSummary(snapshot *StateSnapshot) string {
 		len(snapshot.StakeRegistrationsByCredential),
 		len(snapshot.RewardAccountBalances),
 		len(snapshot.PoolRegistrations),
-		len(snapshot.Governance.Proposals),
+		proposalCount,
 	)
 }
 

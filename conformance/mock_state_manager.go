@@ -657,6 +657,9 @@ func (m *MockStateManager) deregisterStakeCredential(
 }
 
 func keyDepositAmount(pp common.ProtocolParameters) uint64 {
+	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok && conwayPP != nil {
+		return uint64(conwayPP.KeyDeposit)
+	}
 	provider, ok := pp.(interface{ KeyDepositAmount() *big.Int })
 	if !ok || provider.KeyDepositAmount() == nil || !provider.KeyDepositAmount().IsUint64() {
 		return 0

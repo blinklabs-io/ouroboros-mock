@@ -901,13 +901,6 @@ func (g *GovernanceState) DeregisterDRepCredential(
 	key := ledger.NewRewardAccountKey(credential)
 	delete(g.DRepRegistrationsByCredential, key)
 	delete(g.DRepExpiries, key)
-	for other, registered := range g.DRepRegistrationsByCredential {
-		if registered && other.Credential == credential.Credential {
-			g.DRepRegistrations[credential.Credential] = true
-			return
-		}
-	}
-	delete(g.DRepRegistrations, credential.Credential)
 	for stake, delegation := range g.DRepDelegationsByCredential {
 		if delegation.Type == int(credential.CredType) &&
 			bytes.Equal(delegation.Credential, credential.Credential[:]) {
@@ -915,6 +908,13 @@ func (g *GovernanceState) DeregisterDRepCredential(
 		}
 	}
 	g.DRepDelegations = drepDelegationsByHash(g.DRepDelegationsByCredential)
+	for other, registered := range g.DRepRegistrationsByCredential {
+		if registered && other.Credential == credential.Credential {
+			g.DRepRegistrations[credential.Credential] = true
+			return
+		}
+	}
+	delete(g.DRepRegistrations, credential.Credential)
 }
 
 // DeregisterDRep deregisters a DRep.

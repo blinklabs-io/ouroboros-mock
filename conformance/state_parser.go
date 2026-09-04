@@ -1279,9 +1279,7 @@ func parseDelegationState(
 					if len(vArr) <= idx {
 						continue
 					}
-					if drep := extractDRepDelegation(
-						unwrapSingleton(unwrapPointer(vArr[idx])),
-					); drep != nil {
+					if drep := extractDRepDelegation(unwrapPointer(vArr[idx])); drep != nil {
 						if state.DRepDelegationsByCredential == nil {
 							state.DRepDelegationsByCredential = make(
 								map[mockledger.RewardAccountKey]common.Drep,
@@ -1362,14 +1360,23 @@ func extractDRepDelegation(raw any) *common.Drep {
 		}
 	}
 	items, ok := raw.([]any)
-	if !ok || len(items) != 1 {
+	if !ok {
 		return nil
 	}
-	if wrapped, ok := items[0].([]any); ok {
-		items = wrapped
+	if len(items) == 2 {
+		if credential := extractCredentialHash(items); credential != nil {
+			return &common.Drep{
+				Type:       int(credential.CredType),
+				Credential: append([]byte(nil), credential.Credential[:]...),
+			}
+		}
+		return nil
 	}
 	if len(items) != 1 {
 		return nil
+	}
+	if wrapped, ok := items[0].([]any); ok {
+		return extractDRepDelegation(wrapped)
 	}
 	drepType, ok := items[0].(uint64)
 	if !ok || (drepType != common.DrepTypeAbstain &&

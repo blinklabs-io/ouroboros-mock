@@ -246,7 +246,6 @@ func TestVectorStructure(t *testing.T) {
 		}
 		if len(vector.FinalState) == 0 {
 			// Invalid transaction vectors may intentionally omit a final state.
-			continue
 		}
 		if vector.FilePath != path {
 			t.Errorf("%s: FilePath mismatch: %s", path, vector.FilePath)
