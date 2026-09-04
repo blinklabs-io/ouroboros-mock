@@ -25,9 +25,11 @@ import (
 	"strings"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/gouroboros/ledger/mary"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	mockledger "github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -782,7 +784,7 @@ func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool)
 	if raw[0] == 2 || raw[0] == 3 {
 		return decodeCompactAdaOnlyOutput(raw)
 	}
-	if raw[0] != 0 && raw[0] != 1 {
+	if raw[0] != 0 && raw[0] != 1 && raw[0] != 4 && raw[0] != 5 {
 		return nil, false
 	}
 	addressLen := int(raw[1])
@@ -793,14 +795,111 @@ func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool)
 	if err != nil {
 		return nil, false
 	}
-	coin, ok := decodeCompactCoin(raw[2+addressLen:])
+	coin, valueEnd, ok := decodeCompactValueCoinWithEnd(raw[2+addressLen:])
 	if !ok {
 		return nil, false
+	}
+	if raw[0] == 5 {
+		// Tag 5 carries the full MemPack Datum and AlonzoScript values.
+		// Preserve the reference script as a typed ScriptRef: validation uses
+		// its hash to match reference-script witnesses.
+		offset := 2 + addressLen + valueEnd
+		_, datumEnd, ok := decodeMempackDatumBytes(raw[offset:])
+		if !ok {
+			return nil, false
+		}
+		script, scriptType, scriptEnd, ok := decodeMempackScriptBytes(
+			raw[offset+datumEnd:],
+		)
+		if !ok || offset+datumEnd+scriptEnd != len(raw) {
+			return nil, false
+		}
+		return &babbage.BabbageTransactionOutput{
+			OutputAddress:  address,
+			OutputAmount:   mary.MaryTransactionOutputValue{Amount: coin},
+			TxOutScriptRef: &common.ScriptRef{Type: scriptType, Script: script},
+		}, true
+	}
+	if raw[0] == 1 && valueEnd+32 <= len(raw)-(2+addressLen) {
+		datumHash := common.Blake2b256(raw[2+addressLen+valueEnd : 2+addressLen+valueEnd+32])
+		return &alonzo.AlonzoTransactionOutput{
+			OutputAddress:   address,
+			OutputAmount:    mary.MaryTransactionOutputValue{Amount: coin},
+			OutputDatumHash: &datumHash,
+		}, true
 	}
 	return &shelley.ShelleyTransactionOutput{
 		OutputAddress: address,
 		OutputAmount:  coin,
 	}, true
+}
+
+func decodeMempackDatumBytes(raw []byte) ([]byte, int, bool) {
+	if len(raw) < 1 {
+		return nil, 0, false
+	}
+	switch raw[0] {
+	case 0:
+		return nil, 1, true
+	case 1:
+		if len(raw) < 33 {
+			return nil, 0, false
+		}
+		return raw[1:33], 33, true
+	case 2:
+		length, consumed, ok := decodeMempackVarLen(raw[1:])
+		if !ok || length > uint64(len(raw)-1-consumed) {
+			return nil, 0, false
+		}
+		return raw[1+consumed : 1+consumed+int(length)],
+			1 + consumed + int(length), true
+	default:
+		return nil, 0, false
+	}
+}
+
+func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
+	if len(raw) < 1 {
+		return nil, 0, 0, false
+	}
+	if raw[0] == 0 {
+		length, consumed, ok := decodeMempackVarLen(raw[1:])
+		if !ok || length > uint64(len(raw)-1-consumed) {
+			return nil, 0, 0, false
+		}
+		var script common.NativeScript
+		scriptBytes := raw[1+consumed : 1+consumed+int(length)]
+		if _, err := cbor.Decode(scriptBytes, &script); err != nil {
+			return nil, 0, 0, false
+		}
+		return script, common.ScriptRefTypeNativeScript,
+			1 + consumed + int(length), true
+	}
+	if raw[0] != 1 || len(raw) < 2 {
+		return nil, 0, 0, false
+	}
+	version, versionBytes, ok := decodeMempackVarLen(raw[1:])
+	if !ok || version > 3 {
+		return nil, 0, 0, false
+	}
+	length, lengthBytes, ok := decodeMempackVarLen(raw[1+versionBytes:])
+	if !ok || length > uint64(len(raw)-1-versionBytes-lengthBytes) {
+		return nil, 0, 0, false
+	}
+	scriptBytes := raw[1+versionBytes+lengthBytes : 1+versionBytes+lengthBytes+int(length)]
+	var script common.Script
+	switch version {
+	case 0:
+		script = common.PlutusV1Script(scriptBytes)
+	case 1:
+		script = common.PlutusV2Script(scriptBytes)
+	case 2:
+		script = common.PlutusV3Script(scriptBytes)
+	case 3:
+		script = common.PlutusV4Script(scriptBytes)
+	}
+	return script, uint(version) + 1,
+		1 + versionBytes + lengthBytes + int(length), true
 }
 
 // decodeCompactAdaOnlyOutput handles the optimized Alonzo/Babbage form. It
@@ -812,25 +911,31 @@ func decodeCompactAdaOnlyOutput(raw []byte) (common.TransactionOutput, bool) {
 		return nil, false
 	}
 	cred := raw[1:30]
-	if (cred[0] != common.CredentialTypeAddrKeyHash &&
-		cred[0] != common.CredentialTypeScriptHash) || len(cred[1:]) != 28 {
+	if cred[0] > 1 || len(cred[1:]) != 28 {
 		return nil, false
 	}
 	extra := raw[30:62]
-	d := binary.LittleEndian.Uint64(extra[24:32])
+	w0 := binary.LittleEndian.Uint64(extra[0:8])
+	w1 := binary.LittleEndian.Uint64(extra[8:16])
+	w2 := binary.LittleEndian.Uint64(extra[16:24])
+	w3 := binary.LittleEndian.Uint64(extra[24:32])
 	addressHash := make([]byte, 28)
-	copy(addressHash[0:24], extra[0:24])
-	copy(addressHash[24:], extra[28:32])
+	binary.BigEndian.PutUint64(addressHash[0:8], w0)
+	binary.BigEndian.PutUint64(addressHash[8:16], w1)
+	binary.BigEndian.PutUint64(addressHash[16:24], w2)
+	binary.BigEndian.PutUint32(addressHash[24:28], uint32(w3>>32))
 	addrType := uint8(1)
-	if d&1 != 0 { // payment credential is a key hash
+	if w3&1 != 0 { // payment credential is a key hash
 		addrType = 0
 	}
-	if cred[0] == common.CredentialTypeScriptHash { // stake credential
+	if cred[0] == 1 { // MemPack staking credential tag: 1 is key hash
+		// no type bit for a key staking credential
+	} else { // script staking credential
 		addrType += 2
 	}
 	address, err := common.NewAddressFromParts(
 		addrType,
-		uint8((d>>1)&1),
+		uint8((w3>>1)&1),
 		addressHash,
 		cred[1:],
 	)
@@ -862,6 +967,63 @@ func decodeCompactCoin(raw []byte) (uint64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// decodeCompactValueCoin reads the coin from CompactForm (Value). Unlike the
+// standalone CompactForm Coin used by the optimized address form, CompactValue
+// starts with its own constructor tag: 0 for Ada-only and 1 for multi-asset.
+// The multi-asset payload is intentionally skipped here; the state-provider
+// contract currently exposes the address and lovelace needed by validation,
+// while the length framing must still be honored so valid outputs are not
+// silently dropped.
+func decodeCompactValueCoin(raw []byte) (uint64, bool) {
+	coin, _, ok := decodeCompactValueCoinWithEnd(raw)
+	return coin, ok
+}
+
+func decodeCompactValueCoinWithEnd(raw []byte) (uint64, int, bool) {
+	if len(raw) < 2 || (raw[0] != 0 && raw[0] != 1) {
+		return 0, 0, false
+	}
+	coin, consumed, ok := decodeMempackVarLen(raw[1:])
+	if !ok {
+		return 0, 0, false
+	}
+	if raw[0] == 0 {
+		return coin, 1 + consumed, true
+	}
+	_, countBytes, ok := decodeMempackVarLen(raw[1+consumed:])
+	if !ok {
+		return 0, 0, false
+	}
+	length, lengthBytes, ok := decodeMempackVarLen(
+		raw[1+consumed+countBytes:],
+	)
+	if !ok {
+		return 0, 0, false
+	}
+	end := 1 + consumed + countBytes + lengthBytes + int(length)
+	if length > uint64(len(raw)) || end > len(raw) {
+		return 0, 0, false
+	}
+	return coin, end, true
+}
+
+func decodeMempackVarLen(raw []byte) (uint64, int, bool) {
+	var value uint64
+	for i, b := range raw {
+		if value > (math.MaxUint64 >> 7) {
+			return 0, 0, false
+		}
+		value = value<<7 | uint64(b&0x7f)
+		if b&0x80 == 0 {
+			return value, i + 1, true
+		}
+		if i == 9 {
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
 }
 
 // parseCertState extracts voting, pool, and delegation state.

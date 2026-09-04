@@ -678,7 +678,7 @@ func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
 	require.Equal(t, uint64(45000000000000000), shelleyOutput.OutputAmount)
 	require.Equal(t, "addr_test1vzyq9ppc89y5vfulnmvdvmt3seumstexkaferjmdlqg8ercx8lee2", shelleyOutput.OutputAddress.String())
 
-	_, ok = decodeCompactTransactionOutput(append([]byte{4}, raw[1:]...))
+	_, ok = decodeCompactTransactionOutput(append([]byte{6}, raw[1:]...))
 	require.False(t, ok)
 
 	// The datum-hash and optimized Ada-only constructors are also emitted by
