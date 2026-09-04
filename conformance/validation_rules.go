@@ -29,10 +29,12 @@ func ValidationRulesForVector(title string) []common.UtxoValidationRuleFunc {
 	// Blueprint keeps pre-Conway specifications under the Conway corpus tree,
 	// so select them from the specification name rather than the directory.
 	if strings.Contains(title, "AlonzoImpSpec") ||
-		strings.Contains(title, "BabbageImpSpec") ||
 		strings.Contains(title, "ShelleyImpSpec") ||
 		strings.Contains(title, "MaryImpSpec") {
 		return AlonzoConformanceValidationRules
+	}
+	if strings.Contains(title, "BabbageImpSpec") {
+		return BabbageConformanceValidationRules
 	}
 	return ConformanceValidationRules
 }
@@ -47,6 +49,42 @@ var AlonzoConformanceValidationRules = []common.UtxoValidationRuleFunc{
 	conway.UtxoValidateCostModelsPresent,
 	conway.UtxoValidateScriptDataHash,
 	conway.UtxoValidateOutsideValidityIntervalUtxo,
+	conway.UtxoValidateConwayFeaturesWithPlutusV1V2,
+	conway.UtxoValidateInputSetEmptyUtxo,
+	conway.UtxoValidateInsufficientCollateral,
+	conway.UtxoValidateCollateralContainsNonAda,
+	conway.UtxoValidateCollateralEqBalance,
+	conway.UtxoValidateNoCollateralInputs,
+	conway.UtxoValidateTooManyCollateralInputs,
+	conway.UtxoValidateBadInputsUtxo,
+	conway.UtxoValidateScriptWitnesses,
+	conway.UtxoValidateValueNotConservedUtxo,
+	conway.UtxoValidateOutputTooSmallUtxo,
+	conway.UtxoValidateOutputTooBigUtxo,
+	conway.UtxoValidateWrongNetwork,
+	conway.UtxoValidateTransactionNetworkId,
+	conway.UtxoValidateExUnitsTooBigUtxo,
+	conway.UtxoValidateExtraneousRedeemers,
+	conway.UtxoValidateSupplementalDatums,
+	conway.UtxoValidatePlutusScripts,
+	conway.UtxoValidateNativeScripts,
+	conway.UtxoValidateDelegation,
+	conway.UtxoValidateWithdrawals,
+	conway.UtxoValidateMalformedReferenceScripts,
+}
+
+// BabbageConformanceValidationRules adds Babbage's Plutus V1 inline-datum
+// rule to the pre-Conway rule set.
+var BabbageConformanceValidationRules = []common.UtxoValidationRuleFunc{
+	conway.UtxoValidateMetadata,
+	conway.UtxoValidateIsValidFlag,
+	conway.UtxoValidateRequiredVKeyWitnesses,
+	conway.UtxoValidateCollateralVKeyWitnesses,
+	conway.UtxoValidateRedeemerAndScriptWitnesses,
+	conway.UtxoValidateSignatures,
+	conway.UtxoValidateCostModelsPresent,
+	conway.UtxoValidateScriptDataHash,
+	conway.UtxoValidateInlineDatumsWithPlutusV1,
 	conway.UtxoValidateConwayFeaturesWithPlutusV1V2,
 	conway.UtxoValidateInputSetEmptyUtxo,
 	conway.UtxoValidateInsufficientCollateral,

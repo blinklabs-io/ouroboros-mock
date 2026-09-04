@@ -161,8 +161,14 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 	}
 	var tx conformance.VectorEvent
 	for _, event := range vec.Events {
-		if event.Type == conformance.EventTypeTransaction && event.Success &&
-			!transactionHasWithdrawals(event.TxBytes) {
+		if event.Type != conformance.EventTypeTransaction || !event.Success {
+			continue
+		}
+		usable, err := transactionUsableAt(event.TxBytes, 2)
+		if err != nil {
+			return fmt.Errorf("inspect Blueprint transaction at slot 2: %w", err)
+		}
+		if usable {
 			tx = event
 			break
 		}
@@ -204,12 +210,18 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 	return nil
 }
 
-func transactionHasWithdrawals(raw []byte) bool {
+func transactionUsableAt(raw []byte, slot uint64) (bool, error) {
 	tx := &conway.ConwayTransaction{}
 	if _, err := cbor.Decode(raw, tx); err != nil {
-		return true
+		return false, fmt.Errorf("decode transaction: %w", err)
 	}
-	return len(tx.Withdrawals()) > 0
+	if !tx.IsValid() || tx.ValidityIntervalStart() > slot {
+		return false, nil
+	}
+	if ttl := tx.TTL(); ttl != 0 && slot > ttl {
+		return false, nil
+	}
+	return len(tx.Withdrawals()) == 0, nil
 }
 
 // selectSplicePair returns the first two successful transaction events
