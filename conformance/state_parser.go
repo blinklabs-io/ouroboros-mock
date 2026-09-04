@@ -879,7 +879,7 @@ func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
 		return nil, 0, 0, false
 	}
 	version, versionBytes, ok := decodeMempackVarLen(raw[1:])
-	if !ok || version > 3 {
+	if !ok || version > 2 {
 		return nil, 0, 0, false
 	}
 	length, lengthBytes, ok := decodeMempackVarLen(raw[1+versionBytes:])
@@ -895,8 +895,6 @@ func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
 		script = common.PlutusV2Script(scriptBytes)
 	case 2:
 		script = common.PlutusV3Script(scriptBytes)
-	case 3:
-		script = common.PlutusV4Script(scriptBytes)
 	}
 	return script, uint(version) + 1,
 		1 + versionBytes + lengthBytes + int(length), true
