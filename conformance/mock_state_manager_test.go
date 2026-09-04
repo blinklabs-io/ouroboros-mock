@@ -804,7 +804,7 @@ func TestCommitteeCertificateValidationIgnoresExpiredOnlyCurrentState(
 		stateManager.govState,
 		nil,
 	))
-	require.NoError(t, conway.UtxoValidateCommitteeCertificates(
+	require.Error(t, conway.UtxoValidateCommitteeCertificates(
 		tx,
 		0,
 		stateManager.buildLedgerState(),
