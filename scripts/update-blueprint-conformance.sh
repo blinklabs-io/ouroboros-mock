@@ -23,7 +23,14 @@ if [[ "${actual_revision}" != "${EXPECTED_BLUEPRINT_REVISION}" ]]; then
 	exit 1
 fi
 
-actual_sha256=$(sha256sum "${ARCHIVE}" | awk '{print $1}')
+if command -v shasum >/dev/null 2>&1; then
+	actual_sha256=$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')
+elif command -v sha256sum >/dev/null 2>&1; then
+	actual_sha256=$(sha256sum "${ARCHIVE}" | awk '{print $1}')
+else
+	echo "neither shasum nor sha256sum is available" >&2
+	exit 1
+fi
 if [[ "${actual_sha256}" != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
 	echo "unexpected Cardano Blueprint archive checksum: ${actual_sha256}" >&2
 	echo "expected: ${EXPECTED_ARCHIVE_SHA256}" >&2
@@ -39,6 +46,10 @@ tar --strip-components=1 -xzf "${ARCHIVE}" -C "${DEST_DIR}"
 find "${DEST_DIR}" -depth -execdir bash -c '
 	name="${1#./}"
 	safe=$(printf "%s" "${name}" | tr -c "[:alnum:]._-" "_" | sed "s/__*/_/g; s/_$//")
+	if [[ -z "${safe}" || ( "${name}" != "${safe}" && -e "${safe}" ) ]]; then
+		echo "refusing unsafe or colliding normalized path: ${name} -> ${safe}" >&2
+		exit 1
+	fi
 	if [[ "${name}" != "${safe}" ]]; then
 		mv -- "${name}" "${safe}"
 	fi

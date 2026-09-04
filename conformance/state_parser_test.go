@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -683,13 +684,18 @@ func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
 
 	// The datum-hash and optimized Ada-only constructors are also emitted by
 	// the Blueprint corpus and must remain visible to the state provider.
-	for _, encoded := range []string{
+	for i, encoded := range []string{
 		"011d706ba8f502e9f994ed5518d3007f705452969a10b01901259a1141405600bce21ae88bd757ad5b9bedf372d8d3f0cf6c962a469db61a265f6418e1ffed86da29ec",
 		"020100adf84fd242cd66edf5d9c60026a50a521408eaf8a7fcfe833180779fb4faeb54dda0db6c564d59d7d9c4c909d5b698a681cbf0010000006a92d36a00cff7e8afa897db1e",
 	} {
 		compact, err := hex.DecodeString(encoded)
 		require.NoError(t, err)
-		_, ok := decodeCompactTransactionOutput(compact)
+		output, ok := decodeCompactTransactionOutput(compact)
 		require.True(t, ok)
+		if i == 0 {
+			datummed, ok := output.(*alonzo.AlonzoTransactionOutput)
+			require.True(t, ok)
+			require.NotNil(t, datummed.OutputDatumHash)
+		}
 	}
 }

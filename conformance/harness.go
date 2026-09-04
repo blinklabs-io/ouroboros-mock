@@ -498,6 +498,7 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 		return result
 	}
 	h.protocolParams = pp
+	h.validationRules = ValidationRulesForVector(vector.Title)
 
 	// Initialize state manager
 	if err := h.stateManager.LoadInitialState(initialState, pp); err != nil {

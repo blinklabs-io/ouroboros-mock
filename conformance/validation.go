@@ -746,12 +746,6 @@ func (v *Validator) validateUpdateCommittee(
 
 	// ExpirationEpochTooSmall: expiration must be > current epoch
 	for cred, epoch := range ga.CredEpochs {
-		if len(ga.Credentials) > 0 {
-			// Replacement updates retain the existing boundary behavior; the
-			// stricter add-only check below models the ledger predicate used by
-			// the Blueprint expiration vector.
-			continue
-		}
 		if uint64(epoch) <= govState.CurrentEpoch {
 			credHash := common.Blake2b224{}
 			if cred != nil {

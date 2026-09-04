@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
+	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/conformance"
 )
 
@@ -160,7 +161,8 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 	}
 	var tx conformance.VectorEvent
 	for _, event := range vec.Events {
-		if event.Type == conformance.EventTypeTransaction && event.Success {
+		if event.Type == conformance.EventTypeTransaction && event.Success &&
+			!transactionHasWithdrawals(event.TxBytes) {
 			tx = event
 			break
 		}
@@ -200,6 +202,14 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 	}
 	fmt.Fprintf(os.Stderr, "wrote %s from Blueprint base %s\n", outPath, basePath)
 	return nil
+}
+
+func transactionHasWithdrawals(raw []byte) bool {
+	tx := &conway.ConwayTransaction{}
+	if _, err := cbor.Decode(raw, tx); err != nil {
+		return true
+	}
+	return len(tx.Withdrawals()) > 0
 }
 
 // selectSplicePair returns the first two successful transaction events

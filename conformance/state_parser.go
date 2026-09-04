@@ -184,7 +184,13 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	if len(initialState) < 4 {
 		return nil, errors.New("unexpected initial_state shape")
 	}
-	isBlueprint := bytes.Equal(initialState[1], blueprintConfig)
+	// Blueprint states are LedgerState values wrapped by vector.go into the
+	// seven-field NewEpochState shape. Legacy vectors carry a configuration
+	// value in this position, while the Blueprint wrapper carries the empty
+	// blocks-made map.
+	isBlueprint := len(initialState) == 7 && bytes.Equal(
+		initialState[1], cbor.RawMessage{0x80},
+	)
 	stateArr := make([]any, 0)
 	if !isBlueprint {
 		var v cbor.Value
@@ -265,6 +271,38 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	ls, err := rawLedgerState(raw)
 	if err != nil {
 		return nil, err
+	}
+	// The non-UTxO portions of the Blueprint ledger state are small enough to
+	// decode into cbor.Value. Keep this separate from the UTxO map: reference
+	// scripts in that map are what make whole-state decoding unsafe.
+	var certState []cbor.RawMessage
+	if _, err := cbor.Decode(ls[0], &certState); err == nil && len(certState) > 1 {
+		var poolState cbor.Value
+		if _, err := cbor.Decode(certState[1], &poolState); err == nil {
+			_ = parsePoolState(state, poolState.Value())
+		}
+	}
+	var utxoState []cbor.RawMessage
+	if _, err := cbor.Decode(ls[1], &utxoState); err == nil {
+		if len(utxoState) > 1 {
+			var pparams cbor.Value
+			if _, err := cbor.Decode(utxoState[1], &pparams); err == nil {
+				_ = parseCostModels(state, pparams.Value())
+			}
+		}
+		if len(utxoState) > 3 {
+			var govState []cbor.RawMessage
+			if _, err := cbor.Decode(utxoState[3], &govState); err == nil && len(govState) > 2 {
+				var proposals cbor.Value
+				if _, err := cbor.Decode(govState[0], &proposals); err == nil {
+					_ = parseProposals(state, proposals.Value())
+				}
+				var constitution cbor.Value
+				if _, err := cbor.Decode(govState[2], &constitution); err == nil {
+					_ = parseConstitution(state, constitution.Value())
+				}
+			}
+		}
 	}
 
 	// Parse UTxOs from raw CBOR using typed decoders (like gouroboros)
@@ -1571,7 +1609,21 @@ func parseProposals(state *ParsedInitialState, proposalsRaw any) error {
 	// Current Conway encodes Proposals as [roots, omap]. The roots are a
 	// four-element StrictMaybe relation in purpose order, and the OMap is a
 	// flat sequence of complete GovActionState records.
+	canonical := false
 	if len(proposalsArr) == 2 {
+		if records, ok := proposalsArr[1].([]any); ok {
+			canonical = len(records) == 0
+			for _, proposal := range records {
+				record, ok := proposal.([]any)
+				if !ok || len(record) < 7 {
+					canonical = false
+					break
+				}
+				canonical = true
+			}
+		}
+	}
+	if canonical {
 		if roots, ok := proposalsArr[0].([]any); ok && len(roots) >= 4 {
 			state.ProposalRoots.ProtocolParameters = extractWrappedEnactedRoot(roots[0])
 			state.ProposalRoots.HardFork = extractWrappedEnactedRoot(roots[1])
