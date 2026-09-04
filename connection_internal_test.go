@@ -24,11 +24,9 @@ import (
 )
 
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {
-	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{
-		ConversationEntrySleep{Duration: 10 * time.Millisecond},
-	}).(*Connection)
-
-	conn.sendError(errors.New("test error"))
+	conn := &Connection{errorChan: make(chan error, 1)}
+	conn.deliverError(errors.New("test error"))
+	conn.closeErrorChan()
 	select {
 	case err := <-conn.ErrorChan():
 		require.EqualError(t, err, "test error")

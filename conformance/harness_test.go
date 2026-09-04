@@ -466,7 +466,8 @@ func TestMockStateManager(t *testing.T) {
 		Debug:        false,
 	})
 
-	// Run a subset of vectors to verify the harness works
+	// Run every collected vector to verify the harness and aggregate failure
+	// reporting.
 	results, err := harness.RunAllVectorsWithResults()
 	if err != nil {
 		t.Fatalf("failed to run vectors: %v", err)
