@@ -32,8 +32,12 @@ for locally authored synthetic fixtures.
 
 The pinned Blueprint archive is the primary ledger corpus. Each record contains
 hex-encoded `cbor`, `oldLedgerState`, and `newLedgerState` fields, a boolean
-`success`, and a `testState` title. The adapter wraps each pair of ledger states
-in the legacy `NewEpochState` shape while preserving the source CBOR bytes.
+`success`, and a `testState` title. Blueprint exports `LedgerState`, not
+`NewEpochState`, so the adapter wraps each state in the legacy shape while
+preserving the source CBOR bytes. The export does not contain
+`NewEpochState.epoch_no`; the adapter therefore uses epoch zero and cannot
+faithfully evaluate tests whose expected result depends on an omitted current
+epoch. Such vectors remain visible as failures rather than being skipped.
 
 Blueprint UTxO maps use the ledger's compact binary representation. The parser
 decodes its tagged, length-prefixed address and variable-length coin directly;
@@ -190,12 +194,18 @@ gov_state = [
 
 ```
 proposals_container = [
-    proposals_tree,     ; [0] map GovActionId -> ProposalState
-    root_params,        ; [1] GovActionId | null — last enacted ParameterChange
-    root_hard_fork,     ; [2] GovActionId | null — last enacted HardForkInitiation
-    root_cc,            ; [3] GovActionId | null — last enacted NoConfidence/UpdateCommittee
-    root_constitution,  ; [4] GovActionId | null — last enacted NewConstitution
+    roots,               ; [0] StrictMaybe [PParam, HardFork, Committee, Constitution]
+    proposal_sequence,   ; [1] flat OMap sequence of ProposalState records
 ]
+
+roots = [
+    root_params,         ; [] or [[GovActionId]]
+    root_hard_fork,      ; [] or [[GovActionId]]
+    root_cc,             ; [] or [[GovActionId]]
+    root_constitution,   ; [] or [[GovActionId]]
+]
+
+proposal_sequence = [ ProposalState, ... ]
 ```
 
 Roots are used for parent-chain validation when new proposals are submitted. A `null` root means no proposal of that type has ever been enacted (genesis state).
