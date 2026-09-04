@@ -205,15 +205,118 @@ func runConsensusVector(
 	// switch event carries only endpoints, and verifying the canonical
 	// rollback target needs block bodies the header-only trace omits.
 	if capture.ExpectedOutput.ExpectedRollback != nil {
+		switches := r.DrainSwitchEvents()
 		if err := assertSwitchedToWinner(
-			r.DrainSwitchEvents(),
+			switches,
 			capture.Peers,
 			capture.ExpectedOutput.FinalTip,
 		); err != nil {
 			return fmt.Errorf("%s: switch decision: %w", title, err)
 		}
+		if err := assertRollbackPoint(
+			switches,
+			capture.ExpectedOutput.FinalTip,
+			capture.ExpectedOutput.ExpectedRollback.Point,
+		); err != nil {
+			return fmt.Errorf("%s: rollback point: %w", title, err)
+		}
+	}
+	if expected := capture.ExpectedOutput.DownstreamChainSync; len(expected) > 0 {
+		observer, ok := r.(interface {
+			DrainDownstreamChainSync() []format.ServedMessage
+		})
+		if !ok {
+			return fmt.Errorf(
+				"%s: replayer does not expose downstream ChainSync output",
+				title,
+			)
+		}
+		if got := observer.DrainDownstreamChainSync(); !servedMessagesEqual(got, expected) {
+			return fmt.Errorf(
+				"%s: downstream ChainSync mismatch: got %d messages, want %d",
+				title, len(got), len(expected),
+			)
+		}
 	}
 	return nil
+}
+
+func assertRollbackPoint(
+	switches []format.SwitchEvent,
+	finalTip format.Tip,
+	want format.Point,
+) error {
+	for _, sw := range switches {
+		if !tipsEqual(sw.NewTip, finalTip) {
+			continue
+		}
+		if sw.RollbackPoint == nil {
+			return errors.New("winning switch did not report a rollback point")
+		}
+		if sw.RollbackPoint.Slot != want.Slot ||
+			!bytes.Equal(sw.RollbackPoint.Hash, want.Hash) {
+			return fmt.Errorf(
+				"got slot %d hash %x, want slot %d hash %x",
+				sw.RollbackPoint.Slot, []byte(sw.RollbackPoint.Hash),
+				want.Slot, []byte(want.Hash),
+			)
+		}
+		return nil
+	}
+	return errors.New("no switch event reached the expected final tip")
+}
+
+func servedMessagesEqual(got, want []format.ServedMessage) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i].Protocol != want[i].Protocol || got[i].MsgType != want[i].MsgType ||
+			!bytes.Equal(got[i].HeaderCbor, want[i].HeaderCbor) ||
+			!bytes.Equal(got[i].BlockCbor, want[i].BlockCbor) ||
+			!pointsEqual(got[i].Point, want[i].Point) ||
+			!pointsEqual(got[i].Start, want[i].Start) ||
+			!pointsEqual(got[i].End, want[i].End) ||
+			!tipsEqualPointers(got[i].Tip, want[i].Tip) ||
+			!uintPointersEqual(got[i].Era, want[i].Era) ||
+			!pointsSliceEqual(got[i].Points, want[i].Points) {
+			return false
+		}
+	}
+	return true
+}
+
+func pointsEqual(got, want *format.Point) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return got.Slot == want.Slot && bytes.Equal(got.Hash, want.Hash)
+}
+
+func tipsEqualPointers(got, want *format.Tip) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return tipsEqual(*got, *want)
+}
+
+func uintPointersEqual(got, want *uint) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return *got == *want
+}
+
+func pointsSliceEqual(got, want []format.Point) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i].Slot != want[i].Slot || !bytes.Equal(got[i].Hash, want[i].Hash) {
+			return false
+		}
+	}
+	return true
 }
 
 // assertSwitchedToWinner verifies the SUT emitted a fork switch onto the

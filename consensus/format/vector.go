@@ -223,6 +223,7 @@ type Tip struct {
 // switch event does not carry it; the expected rollback point is derived
 // from the vector instead).
 type SwitchEvent struct {
-	PreviousTip Tip
-	NewTip      Tip
+	PreviousTip   Tip
+	NewTip        Tip
+	RollbackPoint *Point
 }
