@@ -372,17 +372,23 @@ func proposalStatesEqual(
 		// The final-state parser derives proposal submission and expiry epochs
 		// from the canonical ledger representation. Ratification is an internal
 		// lifecycle marker and is not represented in that projection.
+		parentMismatch := wantInfo.ParentActionId != nil &&
+			!reflect.DeepEqual(gotInfo.ParentActionId, wantInfo.ParentActionId)
+		votesMismatch := len(wantInfo.Votes) > 0 &&
+			!reflect.DeepEqual(gotInfo.Votes, wantInfo.Votes)
+		policyMismatch := len(wantInfo.PolicyHash) > 0 &&
+			!bytes.Equal(gotInfo.PolicyHash, wantInfo.PolicyHash)
+		parameterMismatch := wantInfo.ParameterUpdate != nil &&
+			!reflect.DeepEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate)
 		if gotInfo.ActionType != wantInfo.ActionType ||
 			!proposalEpochsEqual(gotInfo, wantInfo, currentEpoch) ||
-			!reflect.DeepEqual(gotInfo.ParentActionId, wantInfo.ParentActionId) ||
-			!reflect.DeepEqual(gotInfo.Votes, wantInfo.Votes) ||
+			parentMismatch || votesMismatch ||
 			gotInfo.Deposit != wantInfo.Deposit ||
 			!reflect.DeepEqual(gotInfo.ReturnAccount, wantInfo.ReturnAccount) ||
 			!reflect.DeepEqual(gotInfo.RemovedMembers, wantInfo.RemovedMembers) ||
 			!reflect.DeepEqual(gotInfo.ProposedMembers, wantInfo.ProposedMembers) ||
 			!reflect.DeepEqual(gotInfo.ProposedMembersByCredential, wantInfo.ProposedMembersByCredential) ||
-			!bytes.Equal(gotInfo.PolicyHash, wantInfo.PolicyHash) ||
-			!reflect.DeepEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate) ||
+			policyMismatch || parameterMismatch ||
 			!reflect.DeepEqual(gotInfo.ProtocolVersion, wantInfo.ProtocolVersion) {
 			return false
 		}
