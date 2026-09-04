@@ -793,6 +793,7 @@ func (v *Validator) validateHardFork(
 	baseMajor := uint(10)
 	baseMinor := uint(0)
 	parentVersionKnown := false
+	parentPresent := false
 	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok {
 		baseMajor = conwayPP.ProtocolVersion.Major
 		baseMinor = conwayPP.ProtocolVersion.Minor
@@ -802,6 +803,7 @@ func (v *Validator) validateHardFork(
 		// Use parent proposal's version if it exists in active proposals
 		parentKey := formatGovActionIdFromPtr(ga.ActionId)
 		if parent, ok := govState.Proposals[parentKey]; ok {
+			parentPresent = true
 			if parent.ProtocolVersion != nil {
 				parentVersionKnown = true
 				baseMajor = parent.ProtocolVersion.Major
@@ -818,7 +820,7 @@ func (v *Validator) validateHardFork(
 	// Valid increments: (major+1, 0) or (major, minor+1)
 	majorIncrement := newMajor == baseMajor+1 && newMinor == 0
 	minorIncrement := newMajor == baseMajor && newMinor == baseMinor+1
-	if !minorIncrement && !parentVersionKnown && ga.ActionId != nil && newMajor == baseMajor &&
+	if !minorIncrement && !parentPresent && !parentVersionKnown && ga.ActionId != nil && newMajor == baseMajor &&
 		newMinor == baseMinor+2 {
 		// A Blueprint state snapshot can retain the enacted root ID without
 		// retaining that root proposal's protocol-version payload. In that

@@ -37,3 +37,18 @@ func TestTransactionUsableAtReportsDecodeErrors(t *testing.T) {
 		t.Fatal("expected malformed transaction error")
 	}
 }
+
+func TestTransactionUsableAtAllowsAbsentUpperBound(t *testing.T) {
+	tx := &conway.ConwayTransaction{TxIsValid: true}
+	raw, err := cbor.Encode(tx)
+	if err != nil {
+		t.Fatalf("encode transaction: %v", err)
+	}
+	usable, err := transactionUsableAt(raw, 2)
+	if err != nil {
+		t.Fatalf("inspect transaction without upper bound: %v", err)
+	}
+	if !usable {
+		t.Fatal("transaction without an upper bound should be usable")
+	}
+}
