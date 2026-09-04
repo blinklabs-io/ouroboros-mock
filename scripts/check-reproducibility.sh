@@ -12,7 +12,7 @@ while IFS= read -r action_line; do
 		echo "workflow action is not pinned to an immutable commit: ${action_line}" >&2
 		exit 1
 	fi
-done < <(find "${workflow_dir}" -type f -print0 | xargs -0 grep -hE '^[[:space:]]+(-[[:space:]]+)?uses:')
+done < <(find "${workflow_dir}" -type f -print0 | xargs -0 grep -hE '^[[:space:]]*(-[[:space:]]+)?uses:')
 
 readonly expected_revisions=(
 	OUROBOROS_CONSENSUS_REVISION
