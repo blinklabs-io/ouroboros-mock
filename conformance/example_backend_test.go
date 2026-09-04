@@ -310,6 +310,10 @@ func (m *customStateManager) GetGovernanceState() *conformance.GovernanceState {
 	return m.inner.GetGovernanceState()
 }
 
+func (m *customStateManager) GetStateSnapshot() *conformance.StateSnapshot {
+	return m.inner.GetStateSnapshot()
+}
+
 func (m *customStateManager) SetRewardBalances(
 	balances map[common.Blake2b224]uint64,
 ) {

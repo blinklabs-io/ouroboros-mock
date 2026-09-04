@@ -20,6 +20,8 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -258,6 +260,111 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 			t.Errorf("event %d failed: %v", i, err)
 		}
 	}
+	if err := h.compareFinalState(vector.FinalState); err != nil {
+		t.Errorf("final state comparison failed: %v", err)
+	}
+}
+
+func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
+	if len(raw) < 2 {
+		return nil
+	}
+	finalState, err := ParseInitialState(raw)
+	if err != nil {
+		return fmt.Errorf("parse final_state: %w", err)
+	}
+	want := SnapshotFromParsedState(finalState)
+	got := h.stateManager.GetStateSnapshot()
+	if got == nil {
+		return errors.New("state manager returned a nil snapshot")
+	}
+	var mismatches []string
+	if got.CurrentEpoch != want.CurrentEpoch {
+		mismatches = append(mismatches, "epoch")
+	}
+	if !reflect.DeepEqual(got.UtxoIDs, want.UtxoIDs) {
+		mismatches = append(mismatches, "utxo ids")
+	}
+	if !reflect.DeepEqual(
+		got.StakeRegistrationsByCredential,
+		want.StakeRegistrationsByCredential,
+	) {
+		mismatches = append(mismatches, "stake registrations")
+	}
+	if !reflect.DeepEqual(got.RewardAccountBalances, want.RewardAccountBalances) {
+		mismatches = append(mismatches, "reward balances")
+	}
+	if !reflect.DeepEqual(got.PoolRegistrations, want.PoolRegistrations) {
+		mismatches = append(mismatches, "pool registrations")
+	}
+	if governance := governanceMismatches(got.Governance, want.Governance); len(governance) > 0 {
+		mismatches = append(mismatches, "governance: "+strings.Join(governance, ", "))
+	}
+	if len(mismatches) > 0 {
+		return fmt.Errorf(
+			"observable state differs from final_state in %s (got %s, want %s)",
+			strings.Join(mismatches, ", "), snapshotSummary(got),
+			snapshotSummary(want),
+		)
+	}
+	return nil
+}
+
+func governanceMismatches(got, want *GovernanceState) []string {
+	if got == nil || want == nil {
+		return []string{"presence"}
+	}
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"epoch", got.CurrentEpoch, want.CurrentEpoch},
+		{"drep registrations", got.DRepRegistrationsByCredential, want.DRepRegistrationsByCredential},
+		{"drep delegations", got.DRepDelegationsByCredential, want.DRepDelegationsByCredential},
+		{"resignations", got.CommitteeResignations, want.CommitteeResignations},
+		{"stakes", got.StakeRegistrationsByCredential, want.StakeRegistrationsByCredential},
+		{"pools", got.PoolRegistrations, want.PoolRegistrations},
+		{"pool rewards", got.PoolRewardAccounts, want.PoolRewardAccounts},
+		{"pool delegations", got.PoolDelegationsByCredential, want.PoolDelegationsByCredential},
+		{"enacted", got.EnactedProposals, want.EnactedProposals},
+		{"roots", got.Roots, want.Roots},
+		{"constitution", got.Constitution, want.Constitution},
+	}
+	var mismatches []string
+	for _, check := range checks {
+		if !reflect.DeepEqual(check.got, check.want) {
+			mismatches = append(mismatches, check.name)
+		}
+	}
+	if !proposalIDsEqual(got.Proposals, want.Proposals) {
+		mismatches = append(mismatches, "proposals")
+	}
+	return mismatches
+}
+
+func proposalIDsEqual(got, want map[string]*ProposalState) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for id := range got {
+		if _, ok := want[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func snapshotSummary(snapshot *StateSnapshot) string {
+	return fmt.Sprintf(
+		"epoch=%d utxos=%d stakes=%d rewards=%d pools=%d proposals=%d",
+		snapshot.CurrentEpoch,
+		len(snapshot.UtxoIDs),
+		len(snapshot.StakeRegistrationsByCredential),
+		len(snapshot.RewardAccountBalances),
+		len(snapshot.PoolRegistrations),
+		len(snapshot.Governance.Proposals),
+	)
 }
 
 // processEvent processes a single event from a test vector.
@@ -547,6 +654,10 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 		}
 	}
 
+	if err := h.compareFinalState(vector.FinalState); err != nil {
+		result.Error = fmt.Errorf("final state comparison failed: %w", err)
+		return result
+	}
 	result.Success = true
 	return result
 }

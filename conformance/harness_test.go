@@ -453,8 +453,8 @@ func bytesToHex(b []byte) string {
 //   - Runs all vectors and collects pass/fail statistics
 //   - Logs the first few failures for debugging
 //
-// This test documents the current implementation status. Failures are expected
-// until the MockStateManager fully implements UTxO and governance state loading.
+// This test verifies that MockStateManager reaches the canonical final state
+// for every conformance vector.
 func TestMockStateManager(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	// Create a MockStateManager
@@ -496,7 +496,30 @@ func TestMockStateManager(t *testing.T) {
 		}
 	}
 
-	// This test documents current state; we expect failures until full implementation
+	require.Zero(t, failures, "MockStateManager conformance vectors failed")
+}
+
+type noOpStateManager struct {
+	*MockStateManager
+}
+
+func (m *noOpStateManager) ApplyTransaction(common.Transaction, uint64) error {
+	return nil
+}
+
+func TestFinalStateComparisonRejectsNoOpStateManager(t *testing.T) {
+	sm := &noOpStateManager{MockStateManager: NewMockStateManager()}
+	harness := NewHarness(sm, HarnessConfig{TestdataRoot: "testdata"})
+	results, err := harness.RunAllVectorsWithResults()
+	require.NoError(t, err)
+
+	failed := 0
+	for _, result := range results {
+		if !result.Success {
+			failed++
+		}
+	}
+	require.Positive(t, failed, "no-op StateManager must fail mutation vectors")
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering

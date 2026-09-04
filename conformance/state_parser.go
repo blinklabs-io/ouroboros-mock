@@ -1265,7 +1265,9 @@ func parseDelegationState(
 
 			// Current AccountState values place stake-pool delegation third.
 			if vArr, ok := v.([]any); ok && len(vArr) > 2 {
-				if pool := extractBlake2b224(unwrapPointer(vArr[2])); pool != nil {
+				if pool := extractBlake2b224(
+					unwrapSingleton(unwrapPointer(vArr[2])),
+				); pool != nil {
 					state.PoolDelegationsByCredential[accountKey] = *pool
 				}
 			}
@@ -1277,7 +1279,9 @@ func parseDelegationState(
 					if len(vArr) <= idx {
 						continue
 					}
-					if drep := extractDRepDelegation(vArr[idx]); drep != nil {
+					if drep := extractDRepDelegation(
+						unwrapSingleton(unwrapPointer(vArr[idx])),
+					); drep != nil {
 						if state.DRepDelegationsByCredential == nil {
 							state.DRepDelegationsByCredential = make(
 								map[mockledger.RewardAccountKey]common.Drep,
@@ -2152,6 +2156,13 @@ func unwrapPointer(v any) any {
 	// If it's a pointer to any, dereference once
 	if ptr, ok := v.(*any); ok && ptr != nil {
 		return *ptr
+	}
+	return v
+}
+
+func unwrapSingleton(v any) any {
+	if items, ok := v.([]any); ok && len(items) == 1 {
+		return items[0]
 	}
 	return v
 }

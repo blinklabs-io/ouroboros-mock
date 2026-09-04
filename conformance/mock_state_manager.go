@@ -1333,6 +1333,27 @@ func (m *MockStateManager) GetGovernanceState() *GovernanceState {
 	return m.govState
 }
 
+// GetStateSnapshot implements StateSnapshotProvider.
+func (m *MockStateManager) GetStateSnapshot() *StateSnapshot {
+	utxoIDs := make([]string, 0, len(m.utxos))
+	for id := range m.utxos {
+		utxoIDs = append(utxoIDs, id)
+	}
+	sort.Strings(utxoIDs)
+	registrations := make(map[ledger.RewardAccountKey]bool, len(m.stakeRegistrations))
+	for credential := range m.stakeRegistrations {
+		registrations[credential] = true
+	}
+	return &StateSnapshot{
+		CurrentEpoch:                   m.currentEpoch,
+		UtxoIDs:                        utxoIDs,
+		StakeRegistrationsByCredential: registrations,
+		RewardAccountBalances:          maps.Clone(m.rewardAccounts),
+		PoolRegistrations:              maps.Clone(m.poolRegistrations),
+		Governance:                     cloneGovernanceState(m.govState),
+	}
+}
+
 // SetRewardBalances implements StateManager.SetRewardBalances.
 func (m *MockStateManager) SetRewardBalances(
 	balances map[common.Blake2b224]uint64,

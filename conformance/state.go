@@ -16,7 +16,9 @@
 package conformance
 
 import (
+	"bytes"
 	"maps"
+	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -73,6 +75,53 @@ type StateManager interface {
 
 	// Reset clears all state for the next test vector.
 	Reset() error
+
+	// GetStateSnapshot returns the canonical observable state after event
+	// processing. The harness compares it with the vector's final_state.
+	GetStateSnapshot() *StateSnapshot
+}
+
+// StateSnapshot is the canonical observable state used to compare a
+// StateManager's result with a vector's final_state. It intentionally contains
+// only state that the conformance manager must expose to validation and
+// downstream consumers; opaque ledger implementation details are excluded.
+type StateSnapshot struct {
+	CurrentEpoch                   uint64
+	UtxoIDs                        []string
+	StakeRegistrationsByCredential map[ledger.RewardAccountKey]bool
+	RewardAccountBalances          map[ledger.RewardAccountKey]uint64
+	PoolRegistrations              map[common.Blake2b224]bool
+	Governance                     *GovernanceState
+}
+
+// SnapshotFromParsedState converts the parser's canonical state projection
+// into the comparable snapshot contract.
+func SnapshotFromParsedState(state *ParsedInitialState) *StateSnapshot {
+	ids := make([]string, 0, len(state.Utxos))
+	for id := range state.Utxos {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	registrations := maps.Clone(state.StakeRegistrationsByCredential)
+	if len(registrations) == 0 {
+		registrations = make(map[ledger.RewardAccountKey]bool)
+		for hash, registered := range state.StakeRegistrations {
+			registrations[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: hash,
+			}] = registered
+		}
+	}
+	governance := NewGovernanceState()
+	governance.LoadFromParsedState(state)
+	return &StateSnapshot{
+		CurrentEpoch:                   state.CurrentEpoch,
+		UtxoIDs:                        ids,
+		StakeRegistrationsByCredential: registrations,
+		RewardAccountBalances:          maps.Clone(state.RewardAccountBalances),
+		PoolRegistrations:              maps.Clone(state.PoolRegistrations),
+		Governance:                     governance,
+	}
 }
 
 // GovernanceState tracks governance-related state during test execution.
@@ -859,6 +908,13 @@ func (g *GovernanceState) DeregisterDRepCredential(
 		}
 	}
 	delete(g.DRepRegistrations, credential.Credential)
+	for stake, delegation := range g.DRepDelegationsByCredential {
+		if delegation.Type == int(credential.CredType) &&
+			bytes.Equal(delegation.Credential, credential.Credential[:]) {
+			delete(g.DRepDelegationsByCredential, stake)
+		}
+	}
+	g.DRepDelegations = drepDelegationsByHash(g.DRepDelegationsByCredential)
 }
 
 // DeregisterDRep deregisters a DRep.
