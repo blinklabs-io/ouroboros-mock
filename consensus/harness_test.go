@@ -70,6 +70,10 @@ func (s *firstPeerStub) DrainSwitchEvents() []format.SwitchEvent {
 	return nil
 }
 
+func (s *firstPeerStub) DrainDownstreamChainSync() []format.ServedMessage {
+	return nil
+}
+
 // TestHarnessFailsBadReplayer is the load-bearing "can the harness bite?"
 // test: a Replayer that ignores chain selection must FAIL at least one
 // committed vector. Without this, every real adapter could pass
@@ -194,6 +198,10 @@ func (s *maxTipNoSwitchStub) DrainSwitchEvents() []format.SwitchEvent {
 	return nil
 }
 
+func (s *maxTipNoSwitchStub) DrainDownstreamChainSync() []format.ServedMessage {
+	return nil
+}
+
 // TestHarnessRequiresSwitchDecision proves the switch assertion bites
 // independently of final_tip: a Replayer that reaches final_tip but emits
 // no switch must fail any vector carrying expected_rollback.
@@ -232,11 +240,13 @@ func TestHarnessRequiresSwitchDecision(t *testing.T) {
 func TestHarnessRejectsWrongRollbackAndDownstreamObservations(t *testing.T) {
 	vectors, err := consensus.CapturedVectors()
 	require.NoError(t, err)
+	checked := 0
 	for _, cv := range vectors {
 		capture := cv.Vector.Capture
 		if capture == nil || capture.ExpectedOutput.ExpectedRollback == nil {
 			continue
 		}
+		checked++
 		var previous format.Tip
 		for _, peer := range capture.Peers {
 			tip, ok := lastPeerTip(peer)
@@ -261,9 +271,10 @@ func TestHarnessRejectsWrongRollbackAndDownstreamObservations(t *testing.T) {
 		stub.downstream = nil
 		err = consensus.RunConsensusVector(t, cv.Vector, stub)
 		require.ErrorContains(t, err, "downstream ChainSync mismatch")
-		return
 	}
-	t.Skip("no captured vector carries expected rollback")
+	if checked == 0 {
+		t.Skip("no captured vector carries expected rollback")
+	}
 }
 
 func tipsEqualForTest(a, b format.Tip) bool {

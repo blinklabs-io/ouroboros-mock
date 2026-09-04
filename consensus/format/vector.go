@@ -217,11 +217,8 @@ type Tip struct {
 
 // SwitchEvent is a SUT fork-choice decision the replay harness reads back
 // from the Replayer: PreviousTip is the chain the SUT was following, NewTip
-// the chain it switched to. It is a runtime projection of the node-internal
-// switch event — NOT a serialized vector field — so it carries only the
-// switch endpoints. The rollback point is deliberately absent (the SUT's
-// switch event does not carry it; the expected rollback point is derived
-// from the vector instead).
+// the chain it switched to and the canonical rollback point asserted by the
+// harness. It is a runtime projection, not a serialized vector field.
 type SwitchEvent struct {
 	PreviousTip   Tip
 	NewTip        Tip

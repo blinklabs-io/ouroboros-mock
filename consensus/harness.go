@@ -71,6 +71,11 @@ type Replayer interface {
 	// endpoints; the switch-decision assertion that consumes them lives in
 	// the harness (assertSwitchedToWinner).
 	DrainSwitchEvents() []format.SwitchEvent
+
+	// DrainDownstreamChainSync returns messages served to downstream consumers
+	// during replay, oldest first. The harness compares this sequence with the
+	// vector's expected downstream trace, including an empty sequence.
+	DrainDownstreamChainSync() []format.ServedMessage
 }
 
 // LoadVector reads a JSON test vector from disk and decodes it.
@@ -202,8 +207,7 @@ func runConsensusVector(
 	// have *switched* onto it off a shorter chain. This catches a SUT that
 	// adopts the longest tip from the start without ever considering the
 	// competing chain. The rollback *point* is not checked here: the
-	// switch event carries only endpoints, and verifying the canonical
-	// rollback target needs block bodies the header-only trace omits.
+	// switch event also carries the canonical rollback point for assertion.
 	if capture.ExpectedOutput.ExpectedRollback != nil {
 		switches := r.DrainSwitchEvents()
 		if err := assertSwitchedToWinner(
@@ -221,22 +225,13 @@ func runConsensusVector(
 			return fmt.Errorf("%s: rollback point: %w", title, err)
 		}
 	}
-	if expected := capture.ExpectedOutput.DownstreamChainSync; len(expected) > 0 {
-		observer, ok := r.(interface {
-			DrainDownstreamChainSync() []format.ServedMessage
-		})
-		if !ok {
-			return fmt.Errorf(
-				"%s: replayer does not expose downstream ChainSync output",
-				title,
-			)
-		}
-		if got := observer.DrainDownstreamChainSync(); !servedMessagesEqual(got, expected) {
-			return fmt.Errorf(
-				"%s: downstream ChainSync mismatch: got %d messages, want %d",
-				title, len(got), len(expected),
-			)
-		}
+	if got := r.DrainDownstreamChainSync(); !servedMessagesEqual(
+		got, capture.ExpectedOutput.DownstreamChainSync,
+	) {
+		return fmt.Errorf(
+			"%s: downstream ChainSync mismatch: got %d messages, want %d",
+			title, len(got), len(capture.ExpectedOutput.DownstreamChainSync),
+		)
 	}
 	return nil
 }
