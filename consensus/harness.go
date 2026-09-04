@@ -69,7 +69,7 @@ type Replayer interface {
 	// DrainSwitchEvents returns the SUT's fork-choice decisions emitted
 	// during the replay, oldest first. The method surfaces the SUT's switch
 	// endpoints; the switch-decision assertion that consumes them lives in
-	// the harness (assertSwitchedToWinner).
+	// the harness.
 	DrainSwitchEvents() []format.SwitchEvent
 
 	// DrainDownstreamChainSync returns messages served to downstream consumers
@@ -305,31 +305,6 @@ func pointsSliceEqual(got, want []format.Point) bool {
 		}
 	}
 	return true
-}
-
-// assertSwitchedToWinner verifies the SUT emitted a fork switch onto the
-// winning chain (final_tip) from a different, shorter-or-equal-length peer —
-// i.e. it adopted a competing chain first and then switched up to (a strictly
-// longer fork) or across to (an equal-length VRF-tie winner) final_tip.
-// Returns an error when no such switch is present among the drained events.
-//
-// The PreviousTip must belong to a non-winning peer whose block_number is <=
-// final_tip's: a "switch" from a longer chain down to a shorter winner is
-// nonsensical under longest-chain selection and is not accepted as evidence.
-//
-// Feed-order contract: the harness replays peers in slice order, so the winner
-// must be fed AFTER the chain it displaces for a switch to be observable — a
-// SUT fed the winner first adopts it outright and never switches. The capture
-// pipeline assigns the winner the last peer slot for exactly this reason; a
-// vector that expects a switch but lists the winner first would fail here
-// despite a correct selector.
-func assertSwitchedToWinner(
-	switches []format.SwitchEvent,
-	peers []format.PeerInput,
-	finalTip format.Tip,
-) error {
-	_, err := findWinningSwitch(switches, peers, finalTip)
-	return err
 }
 
 func findWinningSwitch(
