@@ -1,4 +1,5 @@
-FROM ghcr.io/blinklabs-io/go:1.26.1-1 AS build
+# Blink Labs does not publish a 1.26.5 image; use the patched official image.
+FROM golang:1.26.5 AS build
 
 WORKDIR /code
 COPY . .
