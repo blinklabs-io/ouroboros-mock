@@ -1562,6 +1562,29 @@ func parseProposals(state *ParsedInitialState, proposalsRaw any) error {
 		return nil
 	}
 
+	// Current Conway encodes Proposals as [roots, omap]. The roots are a
+	// four-element StrictMaybe relation in purpose order, and the OMap is a
+	// flat sequence of complete GovActionState records.
+	if len(proposalsArr) == 2 {
+		if roots, ok := proposalsArr[0].([]any); ok && len(roots) >= 4 {
+			state.ProposalRoots.ProtocolParameters = extractWrappedEnactedRoot(roots[0])
+			state.ProposalRoots.HardFork = extractWrappedEnactedRoot(roots[1])
+			state.ProposalRoots.ConstitutionalCommittee = extractWrappedEnactedRoot(roots[2])
+			state.ProposalRoots.Constitution = extractWrappedEnactedRoot(roots[3])
+		}
+		if proposals, ok := proposalsArr[1].([]any); ok {
+			for _, proposal := range proposals {
+				if record, ok := proposal.([]any); ok && len(record) >= 7 {
+					id := extractGovActionId(record[0])
+					if id != "" {
+						state.Proposals[id] = extractProposalInfo(record)
+					}
+				}
+			}
+		}
+		return nil
+	}
+
 	var proposalsTree any
 	var rootParams, rootHF, rootCC, rootConstitution any
 
@@ -1604,6 +1627,19 @@ func parseProposals(state *ParsedInitialState, proposalsRaw any) error {
 	}
 
 	return nil
+}
+
+// extractWrappedEnactedRoot decodes a StrictMaybe GovActionId: [] means
+// Nothing and [[txHash,index]] means Just.
+func extractWrappedEnactedRoot(raw any) *string {
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	if len(items) == 1 {
+		return extractEnactedRoot(items[0])
+	}
+	return extractEnactedRoot(items)
 }
 
 // extractEnactedRoot extracts a GovActionId from a root structure.
