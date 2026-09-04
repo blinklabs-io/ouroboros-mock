@@ -28,6 +28,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	manager := NewMockStateManager()
+	manager.protocolParams = &conway.ConwayProtocolParameters{KeyDeposit: 2}
+	manager.processCertificate(&common.RegistrationCertificate{
+		CertType:        uint(common.CertificateTypeRegistration),
+		StakeCredential: credential,
+		Amount:          7,
+	})
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(7), *deposit)
+
+	manager.deregisterStakeCredential(credential)
+	deposit, err = manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	assert.Nil(t, deposit)
+}
+
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
 	coldCredential := common.Credential{
