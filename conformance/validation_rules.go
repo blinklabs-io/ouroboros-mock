@@ -84,6 +84,7 @@ var BabbageConformanceValidationRules = []common.UtxoValidationRuleFunc{
 	conway.UtxoValidateSignatures,
 	conway.UtxoValidateCostModelsPresent,
 	conway.UtxoValidateScriptDataHash,
+	conway.UtxoValidateOutsideValidityIntervalUtxo,
 	conway.UtxoValidateInlineDatumsWithPlutusV1,
 	conway.UtxoValidateConwayFeaturesWithPlutusV1V2,
 	conway.UtxoValidateInputSetEmptyUtxo,

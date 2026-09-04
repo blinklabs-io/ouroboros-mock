@@ -218,7 +218,7 @@ func transactionUsableAt(raw []byte, slot uint64) (bool, error) {
 	if !tx.IsValid() || tx.ValidityIntervalStart() > slot {
 		return false, nil
 	}
-	if ttl := tx.TTL(); ttl != 0 && slot > ttl {
+	if end, present := tx.ValidityIntervalUpperBound(); present && slot >= end {
 		return false, nil
 	}
 	return len(tx.Withdrawals()) == 0, nil
