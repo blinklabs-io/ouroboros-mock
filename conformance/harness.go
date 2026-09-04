@@ -410,9 +410,15 @@ func drepExpiriesEqual(
 }
 
 func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
+	if want.ExpiresAfter < want.SubmittedEpoch || got.ExpiresAfter < got.SubmittedEpoch {
+		return false
+	}
 	if want.SubmittedEpoch <= currentEpoch {
 		return got.SubmittedEpoch == want.SubmittedEpoch &&
 			got.ExpiresAfter == want.ExpiresAfter
+	}
+	if got.SubmittedEpoch != want.SubmittedEpoch {
+		return false
 	}
 	return got.ExpiresAfter-got.SubmittedEpoch ==
 		want.ExpiresAfter-want.SubmittedEpoch
