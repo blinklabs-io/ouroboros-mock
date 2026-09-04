@@ -206,20 +206,20 @@ func runConsensusVector(
 	// switch, the SUT must not merely *end* on the winning chain — it must
 	// have *switched* onto it off a shorter chain. This catches a SUT that
 	// adopts the longest tip from the start without ever considering the
-	// competing chain. The rollback *point* is not checked here: the
-	// switch event also carries the canonical rollback point for assertion.
+	// competing chain. The selected switch event also carries the canonical
+	// rollback point for assertion.
 	if capture.ExpectedOutput.ExpectedRollback != nil {
 		switches := r.DrainSwitchEvents()
-		if err := assertSwitchedToWinner(
+		winningSwitch, err := findWinningSwitch(
 			switches,
 			capture.Peers,
 			capture.ExpectedOutput.FinalTip,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("%s: switch decision: %w", title, err)
 		}
 		if err := assertRollbackPoint(
-			switches,
-			capture.ExpectedOutput.FinalTip,
+			winningSwitch,
 			capture.ExpectedOutput.ExpectedRollback.Point,
 		); err != nil {
 			return fmt.Errorf("%s: rollback point: %w", title, err)
@@ -237,28 +237,21 @@ func runConsensusVector(
 }
 
 func assertRollbackPoint(
-	switches []format.SwitchEvent,
-	finalTip format.Tip,
+	switchEvent format.SwitchEvent,
 	want format.Point,
 ) error {
-	for _, sw := range switches {
-		if !tipsEqual(sw.NewTip, finalTip) {
-			continue
-		}
-		if sw.RollbackPoint == nil {
-			return errors.New("winning switch did not report a rollback point")
-		}
-		if sw.RollbackPoint.Slot != want.Slot ||
-			!bytes.Equal(sw.RollbackPoint.Hash, want.Hash) {
-			return fmt.Errorf(
-				"got slot %d hash %x, want slot %d hash %x",
-				sw.RollbackPoint.Slot, []byte(sw.RollbackPoint.Hash),
-				want.Slot, []byte(want.Hash),
-			)
-		}
-		return nil
+	if switchEvent.RollbackPoint == nil {
+		return errors.New("winning switch did not report a rollback point")
 	}
-	return errors.New("no switch event reached the expected final tip")
+	if switchEvent.RollbackPoint.Slot != want.Slot ||
+		!bytes.Equal(switchEvent.RollbackPoint.Hash, want.Hash) {
+		return fmt.Errorf(
+			"got slot %d hash %x, want slot %d hash %x",
+			switchEvent.RollbackPoint.Slot, []byte(switchEvent.RollbackPoint.Hash),
+			want.Slot, []byte(want.Hash),
+		)
+	}
+	return nil
 }
 
 func servedMessagesEqual(got, want []format.ServedMessage) bool {
@@ -335,6 +328,15 @@ func assertSwitchedToWinner(
 	peers []format.PeerInput,
 	finalTip format.Tip,
 ) error {
+	_, err := findWinningSwitch(switches, peers, finalTip)
+	return err
+}
+
+func findWinningSwitch(
+	switches []format.SwitchEvent,
+	peers []format.PeerInput,
+	finalTip format.Tip,
+) (format.SwitchEvent, error) {
 	for _, sw := range switches {
 		if !tipsEqual(sw.NewTip, finalTip) {
 			continue
@@ -345,11 +347,11 @@ func assertSwitchedToWinner(
 			pt := lastRollForwardTip(p.Served)
 			if tipsEqual(pt, sw.PreviousTip) && !tipsEqual(pt, finalTip) &&
 				pt.BlockNumber <= finalTip.BlockNumber {
-				return nil
+				return sw, nil
 			}
 		}
 	}
-	return errors.New(
+	return format.SwitchEvent{}, errors.New(
 		"SUT never switched onto the winning chain off a shorter or " +
 			"equal-length peer (no ChainSwitchEvent with new_tip==final_tip " +
 			"from a non-winning peer of block_number <= final_tip)",

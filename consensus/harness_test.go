@@ -128,6 +128,7 @@ type observableStub struct {
 	previousTip   format.Tip
 	rollbackPoint *format.Point
 	downstream    []format.ServedMessage
+	switches      []format.SwitchEvent
 }
 
 func (s *observableStub) RollForward(
@@ -149,6 +150,9 @@ func (s *observableStub) BestTip() (format.Tip, bool) {
 }
 
 func (s *observableStub) DrainSwitchEvents() []format.SwitchEvent {
+	if s.switches != nil {
+		return s.switches
+	}
 	return []format.SwitchEvent{{
 		PreviousTip:   s.previousTip,
 		NewTip:        s.finalTip,
@@ -264,10 +268,15 @@ func TestHarnessRejectsWrongRollbackAndDownstreamObservations(t *testing.T) {
 			rollbackPoint: &wrongPoint,
 			downstream:    capture.ExpectedOutput.DownstreamChainSync,
 		}
+		stub.switches = []format.SwitchEvent{
+			{NewTip: capture.ExpectedOutput.FinalTip, RollbackPoint: &wantPoint},
+			{PreviousTip: previous, NewTip: capture.ExpectedOutput.FinalTip, RollbackPoint: &wrongPoint},
+		}
 		err = consensus.RunConsensusVector(t, cv.Vector, stub)
 		require.ErrorContains(t, err, "rollback point")
 
 		stub.rollbackPoint = &wantPoint
+		stub.switches[1].RollbackPoint = &wantPoint
 		stub.downstream = nil
 		err = consensus.RunConsensusVector(t, cv.Vector, stub)
 		require.ErrorContains(t, err, "downstream ChainSync mismatch")
