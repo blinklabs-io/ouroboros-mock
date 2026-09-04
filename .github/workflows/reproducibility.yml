@@ -15,5 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: verify immutable sources
-        run: scripts/check-reproducibility.sh
+        run: |
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          if git cat-file -e origin/main:scripts/check-reproducibility.sh 2>/dev/null; then
+            git diff --exit-code origin/main -- scripts/check-reproducibility.sh
+            git show origin/main:scripts/check-reproducibility.sh > "$RUNNER_TEMP/check-reproducibility.sh"
+            chmod +x "$RUNNER_TEMP/check-reproducibility.sh"
+            "$RUNNER_TEMP/check-reproducibility.sh" "$GITHUB_WORKSPACE"
+          else
+            scripts/check-reproducibility.sh "$GITHUB_WORKSPACE"
+          fi

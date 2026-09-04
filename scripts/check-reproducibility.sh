@@ -2,16 +2,17 @@
 
 set -euo pipefail
 
-readonly workflow_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.github/workflows" && pwd)"
-readonly fixture_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/update-upstream-fixtures.sh"
-readonly action_pattern='^[[:space:]]*-[[:space:]]+uses:[[:space:]]+[^@]+@([0-9a-f]{40})([[:space:]]+#.*)?$'
+readonly repo_root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+readonly workflow_dir="${repo_root}/.github/workflows"
+readonly fixture_script="${repo_root}/scripts/update-upstream-fixtures.sh"
+readonly action_pattern='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^@]+@([0-9a-f]{40})([[:space:]]+#.*)?$'
 
 while IFS= read -r action_line; do
 	if [[ ! "${action_line}" =~ ${action_pattern} ]]; then
 		echo "workflow action is not pinned to an immutable commit: ${action_line}" >&2
 		exit 1
 	fi
-done < <(find "${workflow_dir}" -type f -print0 | xargs -0 grep -hE '^[[:space:]]*-[[:space:]]+uses:')
+done < <(find "${workflow_dir}" -type f -print0 | xargs -0 grep -hE '^[[:space:]]+(-[[:space:]]+)?uses:')
 
 readonly expected_revisions=(
 	OUROBOROS_CONSENSUS_REVISION
