@@ -524,12 +524,21 @@ func parseProposalInfoFromRawCBOR(
 	}
 	var action []cbor.RawMessage
 	if _, err := cbor.Decode(procedure[2], &action); err != nil ||
-		len(action) < 4 {
+		len(action) < 2 {
 		return info, true
 	}
 	var actionType uint64
-	if _, err := cbor.Decode(action[0], &actionType); err != nil ||
-		actionType != uint64(common.GovActionTypeUpdateCommittee) {
+	if _, err := cbor.Decode(action[0], &actionType); err != nil {
+		return info, true
+	}
+	if actionType == uint64(common.GovActionTypeHardForkInitiation) && len(action) >= 3 {
+		var version []uint64
+		if _, err := cbor.Decode(action[2], &version); err == nil && len(version) >= 2 {
+			info.ProtocolVersion = &ProtocolVersionInfo{Major: uint(version[0]), Minor: uint(version[1])}
+		}
+		return info, true
+	}
+	if actionType != uint64(common.GovActionTypeUpdateCommittee) || len(action) < 4 {
 		return info, true
 	}
 	var members map[stakeCredential]uint64
