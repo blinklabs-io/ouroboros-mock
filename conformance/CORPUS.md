@@ -25,6 +25,11 @@ fields without rewriting the encoded ledger or transaction bytes. Consensus,
 wire-protocol, and synthetic rollback fixtures remain separate from this ledger
 corpus.
 
+Blueprint JSON omits the legacy event timeline, including execution epochs.
+The adapter uses epoch 899 for this pinned corpus and carries the one known
+timeline-derived exception in `conformance/vector.go`; update that metadata
+from the legacy event envelope when changing the Blueprint pin.
+
 The Blueprint corpus is a ledger-rule corpus, not a complete Cardano
 conformance claim. Coverage and failures must be reported by era and rule
 family; passing this package's mock backend does not prove a downstream ledger

@@ -60,6 +60,15 @@ func TestCollectVectorFiles(t *testing.T) {
 	t.Logf("found %d test vectors", len(vectors))
 }
 
+func TestBlueprintExecutionEpoch(t *testing.T) {
+	if got := blueprintExecutionEpoch("testdata/eras/conway/impl/dump/Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5"); got != 902 {
+		t.Fatalf("expired governance vector epoch = %d, want 902", got)
+	}
+	if got := blueprintExecutionEpoch("testdata/eras/conway/impl/dump/other/0"); got != 899 {
+		t.Fatalf("default Blueprint epoch = %d, want 899", got)
+	}
+}
+
 func TestDecodeTestVector(t *testing.T) {
 	root := filepath.Join("testdata", "eras")
 	vectors, err := CollectVectorFiles(root)

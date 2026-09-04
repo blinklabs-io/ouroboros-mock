@@ -35,9 +35,11 @@ hex-encoded `cbor`, `oldLedgerState`, and `newLedgerState` fields, a boolean
 `success`, and a `testState` title. Blueprint exports `LedgerState`, not
 `NewEpochState`, so the adapter wraps each state in the legacy shape while
 preserving the source CBOR bytes. The export does not contain
-`NewEpochState.epoch_no`; the adapter therefore uses epoch zero and cannot
-faithfully evaluate tests whose expected result depends on an omitted current
-epoch. Such vectors remain visible as failures rather than being skipped.
+`NewEpochState.epoch_no` or its event timeline. The adapter restores the
+imported corpus's default execution epoch (899) and records the known
+timeline-derived exception for `GOV.Voting.expired_gov-actions/5` (epoch 902).
+These values are adapter metadata, not changes to the Blueprint bytes; refresh
+them from the legacy event envelope when the pinned Blueprint revision changes.
 
 Blueprint UTxO maps use the ledger's compact binary representation. The parser
 decodes its tagged, length-prefixed address and variable-length coin directly;

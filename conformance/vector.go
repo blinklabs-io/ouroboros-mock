@@ -238,8 +238,9 @@ func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
 	if err != nil {
 		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
 	}
-	oldState = wrapBlueprintLedgerState(oldState)
-	newState = wrapBlueprintLedgerState(newState)
+	epoch := blueprintExecutionEpoch(path)
+	oldState = wrapBlueprintLedgerStateAtEpoch(oldState, epoch)
+	newState = wrapBlueprintLedgerStateAtEpoch(newState, epoch)
 
 	return &TestVector{
 		Title:        source.TestState,
@@ -254,6 +255,20 @@ func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
 		}},
 		FilePath: path,
 	}, nil
+}
+
+// Blueprint's JSON export omits the legacy event timeline. The default epoch
+// is the epoch used by the imported Conway corpus; this override preserves
+// the one exported transaction whose legacy vector advanced three epochs
+// before executing record 5. Keep these values tied to source paths and update
+// them from the legacy event envelope when the Blueprint pin changes.
+func blueprintExecutionEpoch(path string) uint64 {
+	const defaultEpoch = 899
+	if strings.HasSuffix(filepath.ToSlash(path),
+		"Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5") {
+		return 902
+	}
+	return defaultEpoch
 }
 
 // decodeEvents decodes the events array from a test vector.
@@ -304,10 +319,21 @@ func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 // Supply the non-ledger fields that the format omits and retain the exported
 // LedgerState bytes verbatim at NewEpochState[3][1].
 func wrapBlueprintLedgerState(ledgerState []byte) []byte {
+	return wrapBlueprintLedgerStateAtEpoch(ledgerState, 0)
+}
+
+func wrapBlueprintLedgerStateAtEpoch(ledgerState []byte, epoch uint64) []byte {
 	wrapped := make([]byte, 0, len(ledgerState)+12)
+	wrapped = append(wrapped, 0x87) // NewEpochState
+	if epoch < 24 {
+		wrapped = append(wrapped, byte(epoch))
+	} else if epoch <= 0xffff {
+		wrapped = append(wrapped, 0x19, byte(epoch>>8), byte(epoch))
+	} else {
+		panic("temporary epoch encoder only supports uint16")
+	}
 	wrapped = append(wrapped,
-		0x87,             // NewEpochState
-		0x00, 0x80, 0x80, // epoch, blocks made, last epoch
+		0x80, 0x80, // blocks made, last epoch
 		0x82, 0x82, 0x00, 0x00, // begin epoch account state
 	)
 	wrapped = append(wrapped, ledgerState...)

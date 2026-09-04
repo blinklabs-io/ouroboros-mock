@@ -752,7 +752,7 @@ func (v *Validator) validateUpdateCommittee(
 			// the Blueprint expiration vector.
 			continue
 		}
-		if uint64(epoch) <= govState.CurrentEpoch+1 {
+		if uint64(epoch) <= govState.CurrentEpoch {
 			credHash := common.Blake2b224{}
 			if cred != nil {
 				credHash = cred.Credential
