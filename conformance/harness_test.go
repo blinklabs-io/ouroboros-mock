@@ -453,8 +453,8 @@ func bytesToHex(b []byte) string {
 //   - Runs all vectors and collects pass/fail statistics
 //   - Logs the first few failures for debugging
 //
-// This test documents the current implementation status. Failures are expected
-// until the MockStateManager fully implements UTxO and governance state loading.
+// This test verifies that MockStateManager processes every conformance vector
+// successfully.
 func TestMockStateManager(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	// Create a MockStateManager

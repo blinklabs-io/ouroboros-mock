@@ -153,14 +153,13 @@ func (c *Connection) SetWriteDeadline(t time.Time) error {
 
 func (c *Connection) sendError(err error) {
 	c.errorMu.Lock()
-	defer c.errorMu.Unlock()
-	if c.errorClosed {
-		return
+	if !c.errorClosed {
+		select {
+		case c.errorChan <- err:
+		default:
+		}
 	}
-	select {
-	case c.errorChan <- err:
-	default:
-	}
+	c.errorMu.Unlock()
 	_ = c.Close()
 }
 

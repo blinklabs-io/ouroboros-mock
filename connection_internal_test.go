@@ -18,7 +18,30 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 )
+
+func TestConnectionErrorDeliveryAndClosure(t *testing.T) {
+	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{
+		ConversationEntrySleep{Duration: 10 * time.Millisecond},
+	}).(*Connection)
+
+	conn.sendError(errors.New("test error"))
+	select {
+	case err := <-conn.ErrorChan():
+		require.EqualError(t, err, "test error")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for connection error")
+	}
+	select {
+	case _, ok := <-conn.ErrorChan():
+		require.False(t, ok, "error channel should be closed")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for error channel closure")
+	}
+}
 
 func TestConnectionErrorDeliverySurvivesConcurrentClose(t *testing.T) {
 	for range 100 {
