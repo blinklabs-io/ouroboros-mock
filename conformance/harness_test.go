@@ -522,6 +522,50 @@ func TestFinalStateComparisonRejectsNoOpStateManager(t *testing.T) {
 	require.Positive(t, failed, "no-op StateManager must fail mutation vectors")
 }
 
+func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
+	parent := "parent#0"
+	base := GovActionInfo{
+		ActionType:     common.GovActionTypeNoConfidence,
+		SubmittedEpoch: 1,
+		ExpiresAfter:   5,
+		ParentActionId: &parent,
+		Votes:          map[string]uint8{"drep:key": 1},
+		PolicyHash:     []byte{1, 2, 3},
+	}
+
+	for name, mutate := range map[string]func(*GovActionInfo){
+		"parent": func(info *GovActionInfo) {
+			other := "other#0"
+			info.ParentActionId = &other
+		},
+		"votes": func(info *GovActionInfo) {
+			info.Votes["drep:key"] = 2
+		},
+		"policy hash": func(info *GovActionInfo) {
+			info.PolicyHash = []byte{4, 5, 6}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gotInfo := base
+			gotInfo.Votes = maps.Clone(base.Votes)
+			mutate(&gotInfo)
+			got := map[string]*ProposalState{"proposal#0": {GovActionInfo: gotInfo}}
+			want := map[string]*ProposalState{"proposal#0": {GovActionInfo: base}}
+			require.False(t, proposalStatesEqual(got, want, 1))
+		})
+	}
+}
+
+func TestDRepExpiriesEqualComparesExpiredValues(t *testing.T) {
+	key := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{1},
+	})
+	got := map[ledger.RewardAccountKey]uint64{key: 3}
+	want := map[ledger.RewardAccountKey]uint64{key: 5}
+	require.False(t, drepExpiriesEqual(got, want, 4))
+}
+
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering
 // logic without going through a CBOR-encoded test vector. We seed the
 // harness's applied-event journal with a sequence of PassTick events

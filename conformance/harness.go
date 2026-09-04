@@ -374,11 +374,15 @@ func proposalStatesEqual(
 		// lifecycle marker and is not represented in that projection.
 		if gotInfo.ActionType != wantInfo.ActionType ||
 			!proposalEpochsEqual(gotInfo, wantInfo, currentEpoch) ||
+			!reflect.DeepEqual(gotInfo.ParentActionId, wantInfo.ParentActionId) ||
+			!reflect.DeepEqual(gotInfo.Votes, wantInfo.Votes) ||
 			gotInfo.Deposit != wantInfo.Deposit ||
 			!reflect.DeepEqual(gotInfo.ReturnAccount, wantInfo.ReturnAccount) ||
 			!reflect.DeepEqual(gotInfo.RemovedMembers, wantInfo.RemovedMembers) ||
 			!reflect.DeepEqual(gotInfo.ProposedMembers, wantInfo.ProposedMembers) ||
 			!reflect.DeepEqual(gotInfo.ProposedMembersByCredential, wantInfo.ProposedMembersByCredential) ||
+			!bytes.Equal(gotInfo.PolicyHash, wantInfo.PolicyHash) ||
+			!reflect.DeepEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate) ||
 			!reflect.DeepEqual(gotInfo.ProtocolVersion, wantInfo.ProtocolVersion) {
 			return false
 		}
@@ -402,7 +406,8 @@ func drepExpiriesEqual(
 		// epochs from its source execution. Future expiries therefore cannot be
 		// compared as absolute values in that projection. Once an expiry is
 		// observable at or before the snapshot epoch, compare its value exactly.
-		if wantExpiry <= currentEpoch && gotExpiry != wantExpiry {
+		if (wantExpiry <= currentEpoch || gotExpiry <= currentEpoch) &&
+			gotExpiry != wantExpiry {
 			return false
 		}
 	}
