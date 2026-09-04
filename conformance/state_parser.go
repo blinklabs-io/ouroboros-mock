@@ -845,12 +845,12 @@ func decodeMempackDatumBytes(raw []byte) ([]byte, int, bool) {
 		}
 		return raw[1:33], 33, true
 	case 2:
-		length, consumed, ok := decodeMempackVarLen(raw[1:])
-		if !ok || length > uint64(len(raw)-1-consumed) {
+		length, consumed, parseOK := decodeMempackVarLen(raw[1:])
+		end, ok := compactSliceEnd(1+consumed, length, len(raw))
+		if !parseOK || !ok {
 			return nil, 0, false
 		}
-		return raw[1+consumed : 1+consumed+int(length)],
-			1 + consumed + int(length), true
+		return raw[1+consumed : end], end, true
 	default:
 		return nil, 0, false
 	}
@@ -862,17 +862,17 @@ func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
 		return nil, 0, 0, false
 	}
 	if raw[0] == 0 {
-		length, consumed, ok := decodeMempackVarLen(raw[1:])
-		if !ok || length > uint64(len(raw)-1-consumed) {
+		length, consumed, parseOK := decodeMempackVarLen(raw[1:])
+		end, ok := compactSliceEnd(1+consumed, length, len(raw))
+		if !parseOK || !ok {
 			return nil, 0, 0, false
 		}
 		var script common.NativeScript
-		scriptBytes := raw[1+consumed : 1+consumed+int(length)]
+		scriptBytes := raw[1+consumed : end]
 		if _, err := cbor.Decode(scriptBytes, &script); err != nil {
 			return nil, 0, 0, false
 		}
-		return script, common.ScriptRefTypeNativeScript,
-			1 + consumed + int(length), true
+		return script, common.ScriptRefTypeNativeScript, end, true
 	}
 	if raw[0] != 1 || len(raw) < 2 {
 		return nil, 0, 0, false
@@ -881,11 +881,12 @@ func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
 	if !ok || version > 2 {
 		return nil, 0, 0, false
 	}
-	length, lengthBytes, ok := decodeMempackVarLen(raw[1+versionBytes:])
-	if !ok || length > uint64(len(raw)-1-versionBytes-lengthBytes) {
+	length, lengthBytes, parseOK := decodeMempackVarLen(raw[1+versionBytes:])
+	end, ok := compactSliceEnd(1+versionBytes+lengthBytes, length, len(raw))
+	if !parseOK || !ok {
 		return nil, 0, 0, false
 	}
-	scriptBytes := raw[1+versionBytes+lengthBytes : 1+versionBytes+lengthBytes+int(length)]
+	scriptBytes := raw[1+versionBytes+lengthBytes : end]
 	var script common.Script
 	switch version {
 	case 0:
@@ -895,8 +896,16 @@ func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
 	case 2:
 		script = common.PlutusV3Script(scriptBytes)
 	}
-	return script, uint(version) + 1,
-		1 + versionBytes + lengthBytes + int(length), true
+	return script, uint(version) + 1, end, true
+}
+
+//nolint:gosec // this helper checks the uint64 length against the slice limit.
+func compactSliceEnd(offset int, length uint64, limit int) (int, bool) {
+	if offset < 0 || offset > limit || length > uint64(limit-offset) {
+		return 0, false
+	}
+	end := offset + int(length) //nolint:gosec // bounded by limit above
+	return end, end <= limit
 }
 
 // decodeCompactAdaOnlyOutput handles the optimized Alonzo/Babbage form. It
@@ -988,8 +997,8 @@ func decodeCompactValueCoinWithEnd(raw []byte) (uint64, int, bool) {
 	if !ok {
 		return 0, 0, false
 	}
-	end := 1 + consumed + countBytes + lengthBytes + int(length)
-	if length > uint64(len(raw)) || end > len(raw) {
+	end, ok := compactSliceEnd(1+consumed+countBytes+lengthBytes, length, len(raw))
+	if !ok {
 		return 0, 0, false
 	}
 	return coin, end, true
