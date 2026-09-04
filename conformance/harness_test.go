@@ -495,8 +495,7 @@ func TestMockStateManager(t *testing.T) {
 			failCount++
 		}
 	}
-
-	// This test documents current state; we expect failures until full implementation
+	require.Zero(t, failures, "MockStateManager conformance vectors failed")
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering
