@@ -486,7 +486,7 @@ func (v *Validator) validateCertificate(
 
 	case common.CertificateTypeResignCommitteeCold:
 		// The Cardano spec requires the credential to be a current OR proposed CC member.
-		// Per Amaru test vectors:
+		// Per Cardano Blueprint vectors:
 		// - "resigning a non-CC key" should fail (not a member or proposed)
 		// - "Resigning proposed CC key" should succeed (proposed but not yet enacted)
 		if govState != nil {
@@ -792,6 +792,7 @@ func (v *Validator) validateHardFork(
 	// Default to 10.0 for Conway if we can't get the version
 	baseMajor := uint(10)
 	baseMinor := uint(0)
+	parentPresent := false
 	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok {
 		baseMajor = conwayPP.ProtocolVersion.Major
 		baseMinor = conwayPP.ProtocolVersion.Minor
@@ -800,10 +801,12 @@ func (v *Validator) validateHardFork(
 	if ga.ActionId != nil {
 		// Use parent proposal's version if it exists in active proposals
 		parentKey := formatGovActionIdFromPtr(ga.ActionId)
-		if parent, ok := govState.Proposals[parentKey]; ok &&
-			parent.ProtocolVersion != nil {
-			baseMajor = parent.ProtocolVersion.Major
-			baseMinor = parent.ProtocolVersion.Minor
+		if parent, ok := govState.Proposals[parentKey]; ok {
+			parentPresent = true
+			if parent.ProtocolVersion != nil {
+				baseMajor = parent.ProtocolVersion.Major
+				baseMinor = parent.ProtocolVersion.Minor
+			}
 		}
 		// If parent is not in active proposals (e.g., enacted root),
 		// we keep using the current protocol version from pp as baseline
@@ -815,6 +818,14 @@ func (v *Validator) validateHardFork(
 	// Valid increments: (major+1, 0) or (major, minor+1)
 	majorIncrement := newMajor == baseMajor+1 && newMinor == 0
 	minorIncrement := newMajor == baseMajor && newMinor == baseMinor+1
+	if !minorIncrement && !parentPresent && ga.ActionId != nil && newMajor == baseMajor &&
+		newMinor == baseMinor+2 {
+		// A Blueprint state snapshot can retain the enacted root ID without
+		// retaining that root proposal's protocol-version payload. In that
+		// representation the current pparams are one minor version behind the
+		// parent-linked child, which is the valid 10.1 -> 10.2 case.
+		minorIncrement = true
+	}
 
 	if !majorIncrement && !minorIncrement {
 		return fmt.Errorf(

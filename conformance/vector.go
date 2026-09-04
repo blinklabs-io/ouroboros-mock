@@ -13,10 +13,12 @@
 // limitations under the License.
 
 // Package conformance provides a shared test harness for Cardano ledger
-// conformance tests using Amaru test vectors.
+// conformance tests using Cardano Blueprint vectors.
 package conformance
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -26,6 +28,14 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 )
+
+// blueprintConfig supplies the network timing fields absent from Blueprint's
+// per-transaction JSON format. The ledger states and transaction bytes remain
+// the authoritative values from the Blueprint artifact.
+var blueprintConfig = cbor.RawMessage{
+	0x8d, 0x00, 0x01, 0x1a, 0x00, 0x06, 0x97, 0x80,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+}
 
 // EventType represents the type of event in a test vector.
 type EventType int
@@ -148,6 +158,9 @@ func DecodeTestVector(vectorPath string) (*TestVector, error) {
 			Err:     err,
 		}
 	}
+	if len(data) > 0 && data[0] == '{' {
+		return decodeBlueprintVector(vectorPath, data)
+	}
 
 	var items []cbor.RawMessage
 	if _, err := cbor.Decode(data, &items); err != nil {
@@ -193,6 +206,71 @@ func DecodeTestVector(vectorPath string) (*TestVector, error) {
 	}, nil
 }
 
+type blueprintVector struct {
+	CBOR           string `json:"cbor"`
+	OldLedgerState string `json:"oldLedgerState"`
+	NewLedgerState string `json:"newLedgerState"`
+	Success        bool   `json:"success"`
+	TestState      string `json:"testState"`
+}
+
+func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
+	var source blueprintVector
+	if err := json.Unmarshal(data, &source); err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint JSON", Err: err}
+	}
+	decode := func(name, value string) ([]byte, error) {
+		decoded, err := hex.DecodeString(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s hex: %w", name, err)
+		}
+		return decoded, nil
+	}
+	tx, err := decode("cbor", source.CBOR)
+	if err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+	}
+	oldState, err := decode("oldLedgerState", source.OldLedgerState)
+	if err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+	}
+	newState, err := decode("newLedgerState", source.NewLedgerState)
+	if err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+	}
+	epoch := blueprintExecutionEpoch(path)
+	oldState = wrapBlueprintLedgerStateAtEpoch(oldState, epoch)
+	newState = wrapBlueprintLedgerStateAtEpoch(newState, epoch)
+
+	return &TestVector{
+		Title:        source.TestState,
+		Config:       blueprintConfig,
+		InitialState: oldState,
+		FinalState:   newState,
+		Events: []VectorEvent{{
+			Type:    EventTypeTransaction,
+			TxBytes: tx,
+			Success: source.Success,
+			Slot:    0,
+		}},
+		FilePath: path,
+	}, nil
+}
+
+// Blueprint's JSON export omits the legacy event timeline. The default epoch
+// is the epoch used by the imported Conway corpus; this override preserves
+// the one exported transaction whose legacy vector advanced three epochs
+// before executing record 5. Keep these values tied to source paths and update
+// them from the legacy event envelope when the Blueprint pin changes.
+func blueprintExecutionEpoch(path string) uint64 {
+	const defaultEpoch = 899
+	if strings.HasSuffix(filepath.ToSlash(path),
+		"Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5") {
+		return 902
+	}
+	return defaultEpoch
+}
+
 // decodeEvents decodes the events array from a test vector.
 func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 	var encodedEvents []cbor.RawMessage
@@ -202,7 +280,6 @@ func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 			Err:     err,
 		}
 	}
-
 	events := make([]VectorEvent, 0, len(encodedEvents))
 	for i, rawEvent := range encodedEvents {
 		var payload []any
@@ -236,6 +313,30 @@ func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+// Blueprint exports LedgerState, while the harness consumes NewEpochState.
+// Supply the non-ledger fields that the format omits and retain the exported
+// LedgerState bytes verbatim at NewEpochState[3][1].
+//
+//nolint:gosec // epoch is bounded to uint16 before the CBOR byte conversion.
+func wrapBlueprintLedgerStateAtEpoch(ledgerState []byte, epoch uint64) []byte {
+	wrapped := make([]byte, 0, len(ledgerState)+12)
+	wrapped = append(wrapped, 0x87) // NewEpochState
+	if epoch < 24 {
+		wrapped = append(wrapped, byte(epoch))
+	} else if epoch <= 0xffff {
+		wrapped = append(wrapped, 0x19, byte(epoch>>8), byte(epoch))
+	} else {
+		panic("temporary epoch encoder only supports uint16")
+	}
+	wrapped = append(wrapped,
+		0x80, 0x80, // blocks made, last epoch
+		0x82, 0x82, 0x00, 0x00, // begin epoch account state
+	)
+	wrapped = append(wrapped, ledgerState...)
+	wrapped = append(wrapped, 0x80, 0x80, 0x80) // snapshots, pool distribution, non-myopic
+	return wrapped
 }
 
 // decodeEvent decodes a single event from its payload.

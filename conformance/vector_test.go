@@ -34,9 +34,9 @@ func TestCollectVectorFiles(t *testing.T) {
 		t.Fatal("expected to find test vectors, got 0")
 	}
 
-	// Verify we found a reasonable number of vectors (~320 expected)
-	if len(vectors) < 100 {
-		t.Errorf("expected at least 100 vectors, got %d", len(vectors))
+	// The pinned Blueprint archive currently contains more than 2,500 records.
+	if len(vectors) < 2000 {
+		t.Errorf("expected at least 2000 vectors, got %d", len(vectors))
 	}
 
 	// Verify no pparams files are included
@@ -58,6 +58,15 @@ func TestCollectVectorFiles(t *testing.T) {
 	}
 
 	t.Logf("found %d test vectors", len(vectors))
+}
+
+func TestBlueprintExecutionEpoch(t *testing.T) {
+	if got := blueprintExecutionEpoch("testdata/eras/conway/impl/dump/Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5"); got != 902 {
+		t.Fatalf("expired governance vector epoch = %d, want 902", got)
+	}
+	if got := blueprintExecutionEpoch("testdata/eras/conway/impl/dump/other/0"); got != 899 {
+		t.Fatalf("default Blueprint epoch = %d, want 899", got)
+	}
 }
 
 func TestDecodeTestVector(t *testing.T) {

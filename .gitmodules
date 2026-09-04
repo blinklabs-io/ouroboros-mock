@@ -1,0 +1,3 @@
+[submodule "fixtures/cardano-blueprint"]
+	path = fixtures/cardano-blueprint
+	url = https://github.com/cardano-scaling/cardano-blueprint.git

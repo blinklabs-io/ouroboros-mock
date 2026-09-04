@@ -22,7 +22,9 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -662,5 +664,38 @@ func TestExtractGovActionId(t *testing.T) {
 				t.Errorf("expected %q, got %q", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
+	raw, err := hex.DecodeString(
+		"001d6088028438394946279f9ed8d66d718679b82f26b75391cb6df8107c8f00cff7e8afb7928000",
+	)
+	require.NoError(t, err)
+	output, ok := decodeCompactTransactionOutput(raw)
+	require.True(t, ok)
+	shelleyOutput, ok := output.(*shelley.ShelleyTransactionOutput)
+	require.True(t, ok)
+	require.Equal(t, uint64(45000000000000000), shelleyOutput.OutputAmount)
+	require.Equal(t, "addr_test1vzyq9ppc89y5vfulnmvdvmt3seumstexkaferjmdlqg8ercx8lee2", shelleyOutput.OutputAddress.String())
+
+	_, ok = decodeCompactTransactionOutput(append([]byte{6}, raw[1:]...))
+	require.False(t, ok)
+
+	// The datum-hash and optimized Ada-only constructors are also emitted by
+	// the Blueprint corpus and must remain visible to the state provider.
+	for i, encoded := range []string{
+		"011d706ba8f502e9f994ed5518d3007f705452969a10b01901259a1141405600bce21ae88bd757ad5b9bedf372d8d3f0cf6c962a469db61a265f6418e1ffed86da29ec",
+		"020100adf84fd242cd66edf5d9c60026a50a521408eaf8a7fcfe833180779fb4faeb54dda0db6c564d59d7d9c4c909d5b698a681cbf0010000006a92d36a00cff7e8afa897db1e",
+	} {
+		compact, err := hex.DecodeString(encoded)
+		require.NoError(t, err)
+		output, ok := decodeCompactTransactionOutput(compact)
+		require.True(t, ok)
+		if i == 0 {
+			datummed, ok := output.(*alonzo.AlonzoTransactionOutput)
+			require.True(t, ok)
+			require.NotNil(t, datummed.OutputDatumHash)
+		}
 	}
 }

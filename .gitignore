@@ -27,3 +27,6 @@ go.work
 /capture-sidecar
 /compose-consensus-vector
 /check-consensus-vector
+
+# Reproducible conformance corpus extracted from the Cardano Blueprint submodule
+/conformance/testdata/eras/

@@ -15,9 +15,61 @@
 package conformance
 
 import (
+	"strings"
+
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 )
+
+// ValidationRulesForVector selects rules applicable to the era named in a
+// Blueprint record. The protocol-parameter loader intentionally returns the
+// Conway representation, so pre-Conway records use the common Conway rule
+// implementations with Conway-only rules omitted.
+func ValidationRulesForVector(title string) []common.UtxoValidationRuleFunc {
+	// Blueprint keeps pre-Conway specifications under the Conway corpus tree,
+	// so select them from the specification name rather than the directory.
+	if strings.Contains(title, "AlonzoImpSpec") ||
+		strings.Contains(title, "BabbageImpSpec") ||
+		strings.Contains(title, "ShelleyImpSpec") ||
+		strings.Contains(title, "MaryImpSpec") {
+		return AlonzoConformanceValidationRules
+	}
+	return ConformanceValidationRules
+}
+
+var AlonzoConformanceValidationRules = []common.UtxoValidationRuleFunc{
+	conway.UtxoValidateMetadata,
+	conway.UtxoValidateIsValidFlag,
+	conway.UtxoValidateRequiredVKeyWitnesses,
+	conway.UtxoValidateCollateralVKeyWitnesses,
+	conway.UtxoValidateRedeemerAndScriptWitnesses,
+	conway.UtxoValidateSignatures,
+	conway.UtxoValidateCostModelsPresent,
+	conway.UtxoValidateScriptDataHash,
+	conway.UtxoValidateOutsideValidityIntervalUtxo,
+	conway.UtxoValidateConwayFeaturesWithPlutusV1V2,
+	conway.UtxoValidateInputSetEmptyUtxo,
+	conway.UtxoValidateInsufficientCollateral,
+	conway.UtxoValidateCollateralContainsNonAda,
+	conway.UtxoValidateCollateralEqBalance,
+	conway.UtxoValidateNoCollateralInputs,
+	conway.UtxoValidateTooManyCollateralInputs,
+	conway.UtxoValidateBadInputsUtxo,
+	conway.UtxoValidateScriptWitnesses,
+	conway.UtxoValidateValueNotConservedUtxo,
+	conway.UtxoValidateOutputTooSmallUtxo,
+	conway.UtxoValidateOutputTooBigUtxo,
+	conway.UtxoValidateWrongNetwork,
+	conway.UtxoValidateTransactionNetworkId,
+	conway.UtxoValidateExUnitsTooBigUtxo,
+	conway.UtxoValidateExtraneousRedeemers,
+	conway.UtxoValidateSupplementalDatums,
+	conway.UtxoValidatePlutusScripts,
+	conway.UtxoValidateNativeScripts,
+	conway.UtxoValidateDelegation,
+	conway.UtxoValidateWithdrawals,
+	conway.UtxoValidateMalformedReferenceScripts,
+}
 
 // ConformanceValidationRules is a custom validation rule set for conformance tests.
 // It excludes fee validation (UtxoValidateFeeTooSmallUtxo) because test vectors
