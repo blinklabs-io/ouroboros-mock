@@ -318,10 +318,8 @@ func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 // Blueprint exports LedgerState, while the harness consumes NewEpochState.
 // Supply the non-ledger fields that the format omits and retain the exported
 // LedgerState bytes verbatim at NewEpochState[3][1].
-func wrapBlueprintLedgerState(ledgerState []byte) []byte {
-	return wrapBlueprintLedgerStateAtEpoch(ledgerState, 0)
-}
-
+//
+//nolint:gosec // epoch is bounded to uint16 before the CBOR byte conversion.
 func wrapBlueprintLedgerStateAtEpoch(ledgerState []byte, epoch uint64) []byte {
 	wrapped := make([]byte, 0, len(ledgerState)+12)
 	wrapped = append(wrapped, 0x87) // NewEpochState

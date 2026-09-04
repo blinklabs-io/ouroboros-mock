@@ -166,7 +166,7 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 		}
 	}
 	if tx.TxBytes == nil {
-		return errors.New("Blueprint vector has no successful transaction")
+		return errors.New("blueprint vector has no successful transaction")
 	}
 
 	eventsCBOR, err := cbor.Encode([]any{

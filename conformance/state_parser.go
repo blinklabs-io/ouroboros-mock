@@ -185,7 +185,7 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		return nil, errors.New("unexpected initial_state shape")
 	}
 	isBlueprint := bytes.Equal(initialState[1], blueprintConfig)
-	var stateArr []any
+	stateArr := make([]any, 0)
 	if !isBlueprint {
 		var v cbor.Value
 		if _, err := cbor.Decode(raw, &v); err != nil {
@@ -440,7 +440,6 @@ func parseProposalsFromRawCBOR(
 			idRaw := pair[0]
 			if len(pair) >= 7 {
 				idRaw = pair[0]
-				proposalRaw = cbor.RawMessage(nil)
 				// The canonical proposal-list form stores the complete proposal
 				// record, whose first field is its governance action ID.
 				var encoded []cbor.RawMessage
@@ -763,9 +762,7 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 			}
 			continue
 		}
-
 	}
-
 	return result, nil
 }
 
@@ -834,6 +831,7 @@ func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool)
 	}, true
 }
 
+//nolint:gosec // bounds are checked before each compact-length conversion.
 func decodeMempackDatumBytes(raw []byte) ([]byte, int, bool) {
 	if len(raw) < 1 {
 		return nil, 0, false
@@ -858,6 +856,7 @@ func decodeMempackDatumBytes(raw []byte) ([]byte, int, bool) {
 	}
 }
 
+//nolint:gosec // bounds are checked before each compact-length conversion.
 func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
 	if len(raw) < 1 {
 		return nil, 0, 0, false
@@ -967,18 +966,7 @@ func decodeCompactCoin(raw []byte) (uint64, bool) {
 	return 0, false
 }
 
-// decodeCompactValueCoin reads the coin from CompactForm (Value). Unlike the
-// standalone CompactForm Coin used by the optimized address form, CompactValue
-// starts with its own constructor tag: 0 for Ada-only and 1 for multi-asset.
-// The multi-asset payload is intentionally skipped here; the state-provider
-// contract currently exposes the address and lovelace needed by validation,
-// while the length framing must still be honored so valid outputs are not
-// silently dropped.
-func decodeCompactValueCoin(raw []byte) (uint64, bool) {
-	coin, _, ok := decodeCompactValueCoinWithEnd(raw)
-	return coin, ok
-}
-
+//nolint:gosec // bounds are checked before each compact-length conversion.
 func decodeCompactValueCoinWithEnd(raw []byte) (uint64, int, bool) {
 	if len(raw) < 2 || (raw[0] != 0 && raw[0] != 1) {
 		return 0, 0, false
