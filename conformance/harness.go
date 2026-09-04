@@ -344,16 +344,19 @@ func governanceMismatches(got, want *GovernanceState) []string {
 	if !hotKeysEqual(got.HotKeyAuthorizationsByCredential, want.HotKeyAuthorizationsByCredential) {
 		mismatches = append(mismatches, "hot keys")
 	}
-	if !sameKeySet(got.DRepExpiries, want.DRepExpiries) {
+	if !drepExpiriesEqual(got.DRepExpiries, want.DRepExpiries, want.CurrentEpoch) {
 		mismatches = append(mismatches, "drep expiries")
 	}
-	if !proposalStatesEqual(got.Proposals, want.Proposals) {
+	if !proposalStatesEqual(got.Proposals, want.Proposals, want.CurrentEpoch) {
 		mismatches = append(mismatches, "proposals")
 	}
 	return mismatches
 }
 
-func proposalStatesEqual(got, want map[string]*ProposalState) bool {
+func proposalStatesEqual(
+	got, want map[string]*ProposalState,
+	currentEpoch uint64,
+) bool {
 	if len(got) != len(want) {
 		return false
 	}
@@ -366,19 +369,11 @@ func proposalStatesEqual(got, want map[string]*ProposalState) bool {
 		wantInfo := wantProposal.GovActionInfo
 		normalizeGovActionInfo(&gotInfo)
 		normalizeGovActionInfo(&wantInfo)
-		// SubmittedEpoch and ExpiresAfter are derived from the epoch at which
-		// the proposal is observed in the simplified provider. Blueprint's
-		// final-state encoding does not preserve those source epochs. Votes,
-		// parent links, and action-specific payloads that are not represented
-		// consistently in the final-state projection are likewise validated by
-		// their dedicated harness/governance tests; compare the stable proposal
-		// payload and lifecycle result here.
-		gotInfo.SubmittedEpoch = 0
-		gotInfo.ExpiresAfter = 0
-		wantInfo.SubmittedEpoch = 0
-		wantInfo.ExpiresAfter = 0
+		// The final-state parser derives proposal submission and expiry epochs
+		// from the canonical ledger representation. Ratification is an internal
+		// lifecycle marker and is not represented in that projection.
 		if gotInfo.ActionType != wantInfo.ActionType ||
-			!reflect.DeepEqual(gotInfo.RatifiedEpoch, wantInfo.RatifiedEpoch) ||
+			!proposalEpochsEqual(gotInfo, wantInfo, currentEpoch) ||
 			gotInfo.Deposit != wantInfo.Deposit ||
 			!reflect.DeepEqual(gotInfo.ReturnAccount, wantInfo.ReturnAccount) ||
 			!reflect.DeepEqual(gotInfo.RemovedMembers, wantInfo.RemovedMembers) ||
@@ -389,6 +384,38 @@ func proposalStatesEqual(got, want map[string]*ProposalState) bool {
 		}
 	}
 	return true
+}
+
+func drepExpiriesEqual(
+	got, want map[ledger.RewardAccountKey]uint64,
+	currentEpoch uint64,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, wantExpiry := range want {
+		gotExpiry, ok := got[key]
+		if !ok {
+			return false
+		}
+		// The Blueprint wrapper fixes the ledger epoch while retaining expiry
+		// epochs from its source execution. Future expiries therefore cannot be
+		// compared as absolute values in that projection. Once an expiry is
+		// observable at or before the snapshot epoch, compare its value exactly.
+		if wantExpiry <= currentEpoch && gotExpiry != wantExpiry {
+			return false
+		}
+	}
+	return true
+}
+
+func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
+	if want.SubmittedEpoch <= currentEpoch {
+		return got.SubmittedEpoch == want.SubmittedEpoch &&
+			got.ExpiresAfter == want.ExpiresAfter
+	}
+	return got.ExpiresAfter-got.SubmittedEpoch ==
+		want.ExpiresAfter-want.SubmittedEpoch
 }
 
 func normalizeGovActionInfo(info *GovActionInfo) {
@@ -433,21 +460,6 @@ func hotKeysEqual(
 		wantCredential, ok := want[key]
 		if !ok || gotCredential.CredType != wantCredential.CredType ||
 			!bytes.Equal(gotCredential.Credential[:], wantCredential.Credential[:]) {
-			return false
-		}
-	}
-	return true
-}
-
-func sameKeySet[T comparable, V1 any, V2 any](
-	got map[T]V1,
-	want map[T]V2,
-) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for key := range got {
-		if _, ok := want[key]; !ok {
 			return false
 		}
 	}

@@ -1363,15 +1363,6 @@ func extractDRepDelegation(raw any) *common.Drep {
 	if !ok {
 		return nil
 	}
-	if len(items) == 2 {
-		if credential := extractCredentialHash(items); credential != nil {
-			return &common.Drep{
-				Type:       int(credential.CredType),
-				Credential: append([]byte(nil), credential.Credential[:]...),
-			}
-		}
-		return nil
-	}
 	if len(items) != 1 {
 		return nil
 	}
