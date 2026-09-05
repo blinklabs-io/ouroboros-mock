@@ -30,10 +30,11 @@ import (
 const blueprintLedgerVectorFiles = 2574
 
 // blueprintCollectedVectors is how many of those files CollectVectorFiles
-// returns. It is three fewer because the collector skips any path containing
-// "scripts/", which matches the three
-// ...UTXOS.can_use_reference_scripts/ records.
-const blueprintCollectedVectors = 2571
+// returns. It equals the file count: the collector filters whole path
+// segments, so a vector directory whose name merely ends in a filter word --
+// such as the three ...UTXOS.can_use_reference_scripts/ records -- is
+// collected rather than silently dropped.
+const blueprintCollectedVectors = blueprintLedgerVectorFiles
 
 // blueprintPParamsCount is the number of protocol-parameter files under
 // eras/conway/impl/dump/pparams-by-hash in the pinned Blueprint archive.
