@@ -428,9 +428,6 @@ func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
 		return got.SubmittedEpoch == want.SubmittedEpoch &&
 			got.ExpiresAfter == want.ExpiresAfter
 	}
-	if got.SubmittedEpoch != want.SubmittedEpoch {
-		return false
-	}
 	return got.ExpiresAfter-got.SubmittedEpoch ==
 		want.ExpiresAfter-want.SubmittedEpoch
 }
