@@ -56,8 +56,15 @@ const BlueprintVectorsSHA256 = "574ff7a17857dfc1f0cf477f7eb9eba1c2a0f901453396a7
 const blueprintArchivePrefix = "eras"
 
 // EmbeddedTestdata returns the embedded testdata filesystem. It contains the
-// synthetic corpus only; the Cardano Blueprint era corpus is delivered as an
-// archive and is materialized by ExtractEmbeddedTestdata.
+// synthetic corpus only and never contains eras/: the Cardano Blueprint era
+// corpus is embedded as an archive and is materialized by
+// ExtractEmbeddedTestdata or ExtractBlueprintVectors.
+//
+// Module builds have behaved this way since the era corpus moved to the
+// submodule, because testdata/eras is not tracked. Building from a checkout
+// that has run `make prepare-blueprint-testdata` no longer differs, so the
+// returned filesystem no longer depends on the build environment.
+// Callers that need the era corpus must use ExtractEmbeddedTestdata.
 func EmbeddedTestdata() embed.FS {
 	return embeddedTestdata
 }
