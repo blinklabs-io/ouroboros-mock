@@ -55,7 +55,9 @@ $(BINARIES): mod-tidy $(GO_FILES)
 		-o $(@) \
 		./cmd/$(@)
 
-# Prepare the pinned Cardano Blueprint conformance corpus from the submodule.
+# Prepare the pinned Cardano Blueprint conformance corpus. Extracts the tracked
+# conformance/blueprint-vectors.tar.gz, and refreshes that archive from the
+# submodule when it is initialized.
 prepare-blueprint-testdata:
 	@bash $(ROOT_DIR)/scripts/update-blueprint-conformance.sh
 
