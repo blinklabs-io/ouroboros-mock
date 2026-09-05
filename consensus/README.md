@@ -149,6 +149,7 @@ func (a *myAdapter) RollBackward(peerID uint64, point format.Point, tip format.T
 func (a *myAdapter) Stabilize()                              { /* drive the selector to a quiescent decision */ }
 func (a *myAdapter) BestTip() (format.Tip, bool)             { /* ... */ }
 func (a *myAdapter) DrainSwitchEvents() []format.SwitchEvent { /* ... */ }
+func (a *myAdapter) DrainDownstreamChainSync() []format.ServedMessage { /* ... */ }
 
 // 2. Run the embedded corpus. The factory is called once per subtest with
 //    that vector's capture, so the adapter can configure k (security_param)
@@ -168,9 +169,9 @@ method — then calls `Stabilize` and asserts `BestTip` matches
 `expected_output.final_tip` (slot + hash + block_number). When the vector
 carries an `expected_rollback`, it additionally asserts the SUT emitted a
 switch onto `final_tip` off a shorter-or-equal-length peer (via
-`DrainSwitchEvents`). The rollback *point* itself is not replayed-verified, and
-`expected_output.downstream_chainsync` is recorded but not asserted during
-replay — both are checked structurally at capture/compose time only.
+`DrainSwitchEvents`). The rollback point and
+`expected_output.downstream_chainsync` are asserted against the adapter's
+observations during replay, including an empty downstream sequence.
 
 For ad-hoc iteration outside the harness's subtest loop, use
 `consensus.CapturedVectors()` to get the embedded corpus as
