@@ -106,7 +106,7 @@ type TestVector struct {
 //
 // A substring test is wrong here: the Cardano Blueprint corpus contains vector
 // directories whose names end in the filter words, such as
-// Conway.Imp.AlonzoImpSpec.UTXOS.can_use_reference_scripts, which a
+// Conway.Imp.ConwayImpSpec - Version 10.UTXOS.can use reference scripts, which a
 // strings.Contains check for "scripts/" silently excluded.
 func hasPathSegment(normalizedPath, name string) bool {
 	for _, segment := range strings.Split(normalizedPath, "/") {
