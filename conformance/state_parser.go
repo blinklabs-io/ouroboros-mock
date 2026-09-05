@@ -1835,6 +1835,10 @@ func extractVotes(votes map[string]uint8, votesRaw any, voterTypeBase uint8) {
 			// Raw bytes - assume key hash (type 0)
 			credHash = hex.EncodeToString(key.Bytes())
 			credType = 0
+		case stakeCredential:
+			credHash = hex.EncodeToString(key.Hash[:])
+			//nolint:gosec // CredType is 0 or 1
+			credType = uint8(key.Type)
 		case []any:
 			// [type, hash] credential - extract actual credential type
 			if cred := extractCredentialHash(key); cred != nil {
