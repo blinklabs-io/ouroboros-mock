@@ -453,8 +453,8 @@ func bytesToHex(b []byte) string {
 //   - Runs all vectors and collects pass/fail statistics
 //   - Logs the first few failures for debugging
 //
-// This test documents the current implementation status. Failures are expected
-// until the MockStateManager fully implements UTxO and governance state loading.
+// This test verifies that MockStateManager processes every conformance vector
+// successfully.
 func TestMockStateManager(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	// Create a MockStateManager
@@ -466,7 +466,8 @@ func TestMockStateManager(t *testing.T) {
 		Debug:        false,
 	})
 
-	// Run a subset of vectors to verify the harness works
+	// Run every collected vector to verify the harness and aggregate failure
+	// reporting.
 	results, err := harness.RunAllVectorsWithResults()
 	if err != nil {
 		t.Fatalf("failed to run vectors: %v", err)
@@ -495,8 +496,7 @@ func TestMockStateManager(t *testing.T) {
 			failCount++
 		}
 	}
-
-	// This test documents current state; we expect failures until full implementation
+	require.Zero(t, failures, "MockStateManager conformance vectors failed")
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering
