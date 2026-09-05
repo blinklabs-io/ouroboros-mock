@@ -15,11 +15,14 @@
 package conformance
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -258,6 +261,239 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 			t.Errorf("event %d failed: %v", i, err)
 		}
 	}
+	if err := h.compareFinalState(vector.FinalState); err != nil {
+		t.Errorf("final state comparison failed: %v", err)
+	}
+}
+
+func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
+	if len(raw) < 2 {
+		return nil
+	}
+	finalState, err := ParseInitialState(raw)
+	if err != nil {
+		return fmt.Errorf("parse final_state: %w", err)
+	}
+	want := SnapshotFromParsedState(finalState)
+	got := h.stateManager.GetStateSnapshot()
+	if got == nil {
+		return errors.New("state manager returned a nil snapshot")
+	}
+	var mismatches []string
+	if got.CurrentEpoch != want.CurrentEpoch {
+		mismatches = append(mismatches, "epoch")
+	}
+	if !reflect.DeepEqual(got.UtxoIDs, want.UtxoIDs) {
+		mismatches = append(mismatches, "utxo ids")
+	}
+	if !reflect.DeepEqual(
+		got.StakeRegistrationsByCredential,
+		want.StakeRegistrationsByCredential,
+	) {
+		mismatches = append(mismatches, "stake registrations")
+	}
+	// Reward balances are used as a look-ahead validation oracle during event
+	// execution (including future withdrawals), so they are intentionally not
+	// compared here. Governance and registration state remain independent.
+	if !reflect.DeepEqual(got.PoolRegistrations, want.PoolRegistrations) {
+		mismatches = append(mismatches, "pool registrations")
+	}
+	if governance := governanceMismatches(got.Governance, want.Governance); len(governance) > 0 {
+		mismatches = append(mismatches, "governance: "+strings.Join(governance, ", "))
+	}
+	if len(mismatches) > 0 {
+		return fmt.Errorf(
+			"observable state differs from final_state in %s (got %s, want %s)",
+			strings.Join(mismatches, ", "), snapshotSummary(got),
+			snapshotSummary(want),
+		)
+	}
+	return nil
+}
+
+func governanceMismatches(got, want *GovernanceState) []string {
+	if got == nil || want == nil {
+		return []string{"presence"}
+	}
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"epoch", got.CurrentEpoch, want.CurrentEpoch},
+		{"drep registrations", got.DRepRegistrationsByCredential, want.DRepRegistrationsByCredential},
+		{"drep delegations", got.DRepDelegationsByCredential, want.DRepDelegationsByCredential},
+		{"resignations", got.CommitteeResignations, want.CommitteeResignations},
+		{"stakes", got.StakeRegistrationsByCredential, want.StakeRegistrationsByCredential},
+		{"pools", got.PoolRegistrations, want.PoolRegistrations},
+		{"pool rewards", got.PoolRewardAccounts, want.PoolRewardAccounts},
+		{"pool delegations", got.PoolDelegationsByCredential, want.PoolDelegationsByCredential},
+		{"enacted", got.EnactedProposals, want.EnactedProposals},
+		{"roots", got.Roots, want.Roots},
+		{"constitution", got.Constitution, want.Constitution},
+	}
+	var mismatches []string
+	for _, check := range checks {
+		if !reflect.DeepEqual(check.got, check.want) {
+			mismatches = append(mismatches, check.name)
+		}
+	}
+	if !committeeMembersEqual(got.CommitteeMembersByCredential, want.CommitteeMembersByCredential) {
+		mismatches = append(mismatches, "committee")
+	}
+	if !hotKeysEqual(got.HotKeyAuthorizationsByCredential, want.HotKeyAuthorizationsByCredential) {
+		mismatches = append(mismatches, "hot keys")
+	}
+	if !drepExpiriesEqual(got.DRepExpiries, want.DRepExpiries, want.CurrentEpoch) {
+		mismatches = append(mismatches, "drep expiries")
+	}
+	if !proposalStatesEqual(got.Proposals, want.Proposals, want.CurrentEpoch) {
+		mismatches = append(mismatches, "proposals")
+	}
+	return mismatches
+}
+
+func proposalStatesEqual(
+	got, want map[string]*ProposalState,
+	currentEpoch uint64,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for id, proposal := range got {
+		wantProposal, ok := want[id]
+		if !ok || proposal == nil || wantProposal == nil {
+			return false
+		}
+		gotInfo := proposal.GovActionInfo
+		wantInfo := wantProposal.GovActionInfo
+		normalizeGovActionInfo(&gotInfo)
+		normalizeGovActionInfo(&wantInfo)
+		// The final-state parser derives proposal submission and expiry epochs
+		// from the canonical ledger representation. Ratification is an internal
+		// lifecycle marker and is not represented in that projection.
+		parentMismatch := wantInfo.ParentActionId != nil &&
+			!reflect.DeepEqual(gotInfo.ParentActionId, wantInfo.ParentActionId)
+		votesMismatch := len(wantInfo.Votes) > 0 &&
+			!reflect.DeepEqual(gotInfo.Votes, wantInfo.Votes)
+		policyMismatch := len(wantInfo.PolicyHash) > 0 &&
+			!bytes.Equal(gotInfo.PolicyHash, wantInfo.PolicyHash)
+		parameterMismatch := wantInfo.ParameterUpdate != nil &&
+			!reflect.DeepEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate)
+		if gotInfo.ActionType != wantInfo.ActionType ||
+			!proposalEpochsEqual(gotInfo, wantInfo, currentEpoch) ||
+			parentMismatch || votesMismatch ||
+			gotInfo.Deposit != wantInfo.Deposit ||
+			!reflect.DeepEqual(gotInfo.ReturnAccount, wantInfo.ReturnAccount) ||
+			!reflect.DeepEqual(gotInfo.RemovedMembers, wantInfo.RemovedMembers) ||
+			!reflect.DeepEqual(gotInfo.ProposedMembers, wantInfo.ProposedMembers) ||
+			!reflect.DeepEqual(gotInfo.ProposedMembersByCredential, wantInfo.ProposedMembersByCredential) ||
+			policyMismatch || parameterMismatch ||
+			!reflect.DeepEqual(gotInfo.ProtocolVersion, wantInfo.ProtocolVersion) {
+			return false
+		}
+	}
+	return true
+}
+
+func drepExpiriesEqual(
+	got, want map[ledger.RewardAccountKey]uint64,
+	currentEpoch uint64,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, wantExpiry := range want {
+		gotExpiry, ok := got[key]
+		if !ok {
+			return false
+		}
+		// The Blueprint wrapper fixes the ledger epoch while retaining expiry
+		// epochs from its source execution. Future expiries therefore cannot be
+		// compared as absolute values in that projection. Once an expiry is
+		// observable at or before the snapshot epoch, compare its value exactly.
+		if (wantExpiry <= currentEpoch || gotExpiry <= currentEpoch) &&
+			gotExpiry != wantExpiry {
+			return false
+		}
+	}
+	return true
+}
+
+func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
+	if want.ExpiresAfter < want.SubmittedEpoch || got.ExpiresAfter < got.SubmittedEpoch {
+		return false
+	}
+	if want.SubmittedEpoch <= currentEpoch {
+		return got.SubmittedEpoch == want.SubmittedEpoch &&
+			got.ExpiresAfter == want.ExpiresAfter
+	}
+	return got.ExpiresAfter-got.SubmittedEpoch ==
+		want.ExpiresAfter-want.SubmittedEpoch
+}
+
+func normalizeGovActionInfo(info *GovActionInfo) {
+	if info.Votes == nil {
+		info.Votes = map[string]uint8{}
+	}
+	if info.RemovedMembers == nil {
+		info.RemovedMembers = map[ledger.RewardAccountKey]bool{}
+	}
+	if info.ProposedMembers == nil {
+		info.ProposedMembers = map[common.Blake2b224]uint64{}
+	}
+	if info.ProposedMembersByCredential == nil {
+		info.ProposedMembersByCredential = map[ledger.RewardAccountKey]uint64{}
+	}
+}
+
+func committeeMembersEqual(
+	got, want map[ledger.RewardAccountKey]*CommitteeMemberInfo,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, gotMember := range got {
+		wantMember, ok := want[key]
+		if !ok || gotMember == nil || wantMember == nil ||
+			gotMember.ExpiryEpoch != wantMember.ExpiryEpoch ||
+			gotMember.Resigned != wantMember.Resigned {
+			return false
+		}
+	}
+	return true
+}
+
+func hotKeysEqual(
+	got, want map[ledger.RewardAccountKey]common.Credential,
+) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, gotCredential := range got {
+		wantCredential, ok := want[key]
+		if !ok || gotCredential.CredType != wantCredential.CredType ||
+			!bytes.Equal(gotCredential.Credential[:], wantCredential.Credential[:]) {
+			return false
+		}
+	}
+	return true
+}
+
+func snapshotSummary(snapshot *StateSnapshot) string {
+	proposalCount := 0
+	if snapshot.Governance != nil {
+		proposalCount = len(snapshot.Governance.Proposals)
+	}
+	return fmt.Sprintf(
+		"epoch=%d utxos=%d stakes=%d rewards=%d pools=%d proposals=%d",
+		snapshot.CurrentEpoch,
+		len(snapshot.UtxoIDs),
+		len(snapshot.StakeRegistrationsByCredential),
+		len(snapshot.RewardAccountBalances),
+		len(snapshot.PoolRegistrations),
+		proposalCount,
+	)
 }
 
 // processEvent processes a single event from a test vector.
@@ -547,6 +783,10 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 		}
 	}
 
+	if err := h.compareFinalState(vector.FinalState); err != nil {
+		result.Error = fmt.Errorf("final state comparison failed: %w", err)
+		return result
+	}
 	result.Success = true
 	return result
 }

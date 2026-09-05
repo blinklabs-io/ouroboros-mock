@@ -229,6 +229,15 @@ func TestParseProposalCardanoWireOffsets(t *testing.T) {
 	}])
 }
 
+func TestExtractVotesFromTypedCredentialMap(t *testing.T) {
+	hash := filledBlake2b224(0x42)
+	votes := make(map[string]uint8)
+	extractVotes(votes, map[any]any{
+		stakeCredential{Type: 1, Hash: hash}: uint64(1),
+	}, 0)
+	require.Equal(t, uint8(1), votes["1:"+hex.EncodeToString(hash[:])])
+}
+
 func TestParseSyntheticCardanoWireOffsetsRejectShiftedFields(t *testing.T) {
 	tests := []struct {
 		name       string

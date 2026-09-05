@@ -234,13 +234,18 @@ func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
 	if err != nil {
 		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
 	}
-	newState, err := decode("newLedgerState", source.NewLedgerState)
-	if err != nil {
-		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+	var newState []byte
+	if source.NewLedgerState != "" {
+		newState, err = decode("newLedgerState", source.NewLedgerState)
+		if err != nil {
+			return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+		}
 	}
 	epoch := blueprintExecutionEpoch(path)
 	oldState = wrapBlueprintLedgerStateAtEpoch(oldState, epoch)
-	newState = wrapBlueprintLedgerStateAtEpoch(newState, epoch)
+	if newState != nil {
+		newState = wrapBlueprintLedgerStateAtEpoch(newState, epoch)
+	}
 
 	return &TestVector{
 		Title:        source.TestState,

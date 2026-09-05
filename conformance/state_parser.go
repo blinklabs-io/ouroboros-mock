@@ -1265,7 +1265,9 @@ func parseDelegationState(
 
 			// Current AccountState values place stake-pool delegation third.
 			if vArr, ok := v.([]any); ok && len(vArr) > 2 {
-				if pool := extractBlake2b224(unwrapPointer(vArr[2])); pool != nil {
+				if pool := extractBlake2b224(
+					unwrapSingleton(unwrapPointer(vArr[2])),
+				); pool != nil {
 					state.PoolDelegationsByCredential[accountKey] = *pool
 				}
 			}
@@ -1277,7 +1279,7 @@ func parseDelegationState(
 					if len(vArr) <= idx {
 						continue
 					}
-					if drep := extractDRepDelegation(vArr[idx]); drep != nil {
+					if drep := extractDRepDelegation(unwrapPointer(vArr[idx])); drep != nil {
 						if state.DRepDelegationsByCredential == nil {
 							state.DRepDelegationsByCredential = make(
 								map[mockledger.RewardAccountKey]common.Drep,
@@ -1358,14 +1360,14 @@ func extractDRepDelegation(raw any) *common.Drep {
 		}
 	}
 	items, ok := raw.([]any)
-	if !ok || len(items) != 1 {
+	if !ok {
 		return nil
-	}
-	if wrapped, ok := items[0].([]any); ok {
-		items = wrapped
 	}
 	if len(items) != 1 {
 		return nil
+	}
+	if wrapped, ok := items[0].([]any); ok {
+		return extractDRepDelegation(wrapped)
 	}
 	drepType, ok := items[0].(uint64)
 	if !ok || (drepType != common.DrepTypeAbstain &&
@@ -1833,6 +1835,10 @@ func extractVotes(votes map[string]uint8, votesRaw any, voterTypeBase uint8) {
 			// Raw bytes - assume key hash (type 0)
 			credHash = hex.EncodeToString(key.Bytes())
 			credType = 0
+		case stakeCredential:
+			credHash = hex.EncodeToString(key.Hash[:])
+			//nolint:gosec // CredType is 0 or 1
+			credType = uint8(key.Type)
 		case []any:
 			// [type, hash] credential - extract actual credential type
 			if cred := extractCredentialHash(key); cred != nil {
@@ -2152,6 +2158,13 @@ func unwrapPointer(v any) any {
 	// If it's a pointer to any, dereference once
 	if ptr, ok := v.(*any); ok && ptr != nil {
 		return *ptr
+	}
+	return v
+}
+
+func unwrapSingleton(v any) any {
+	if items, ok := v.([]any); ok && len(items) == 1 {
+		return items[0]
 	}
 	return v
 }
