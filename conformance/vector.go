@@ -117,6 +117,10 @@ func hasPathSegment(normalizedPath, name string) bool {
 	return false
 }
 
+func hasParentPathSegment(path, name string) bool {
+	return hasPathSegment(filepath.ToSlash(filepath.Dir(path)), name)
+}
+
 // CollectVectorFiles walks the testdata directory and returns all vector file paths.
 // It skips pparams-by-hash directories, scripts directories, and non-vector files.
 // Directory filters match whole path segments, so a vector directory whose name
@@ -139,8 +143,8 @@ func CollectVectorFiles(root string) ([]string, error) {
 				return nil
 			}
 			// Skip files in special directories
-			if hasPathSegment(normalizedPath, "pparams-by-hash") ||
-				hasPathSegment(normalizedPath, "scripts") {
+			if hasParentPathSegment(path, "pparams-by-hash") ||
+				hasParentPathSegment(path, "scripts") {
 				return nil
 			}
 			// Skip documentation files

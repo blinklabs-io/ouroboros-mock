@@ -72,6 +72,18 @@ func TestCollectVectorFilesMatchesWholeSegments(t *testing.T) {
 		t.Fatalf("write skipped pparams file: %v", err)
 	}
 
+	// Filter words used as leaf filenames are valid vectors and must be kept.
+	leafDir := filepath.Join(root, "eras", "conway", "leaf-vectors")
+	if err := os.MkdirAll(leafDir, 0o755); err != nil {
+		t.Fatalf("mkdir leaf vectors: %v", err)
+	}
+	for _, name := range []string{"scripts", "pparams-by-hash"} {
+		path := filepath.Join(leafDir, name)
+		if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write leaf vector %s: %v", name, err)
+		}
+	}
+
 	got, err := conformance.CollectVectorFiles(root)
 	if err != nil {
 		t.Fatalf("CollectVectorFiles: %v", err)
@@ -82,7 +94,12 @@ func TestCollectVectorFilesMatchesWholeSegments(t *testing.T) {
 		found[filepath.ToSlash(path)] = true
 	}
 
-	for _, want := range []string{keptVector, keptPparamsVector} {
+	for _, want := range []string{
+		keptVector,
+		keptPparamsVector,
+		filepath.Join(leafDir, "scripts"),
+		filepath.Join(leafDir, "pparams-by-hash"),
+	} {
 		if !found[filepath.ToSlash(want)] {
 			t.Errorf(
 				"vector in a directory ending in a filter word was dropped: %s",
@@ -91,8 +108,7 @@ func TestCollectVectorFilesMatchesWholeSegments(t *testing.T) {
 		}
 	}
 	for _, path := range got {
-		slashed := filepath.ToSlash(path)
-		for _, segment := range strings.Split(slashed, "/") {
+		for _, segment := range strings.Split(filepath.ToSlash(filepath.Dir(path)), "/") {
 			if segment == "scripts" || segment == "pparams-by-hash" {
 				t.Errorf("a genuinely filtered directory was collected: %s", path)
 			}
