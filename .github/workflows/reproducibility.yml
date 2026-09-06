@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
+  pull_request_target:
 
 permissions:
   contents: read
@@ -19,13 +19,28 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: verify immutable sources
+        env:
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git fetch origin refs/heads/main:refs/remotes/origin/main
-          if git cat-file -e origin/main:scripts/check-reproducibility.sh 2>/dev/null; then
-            git diff --exit-code origin/main -- scripts/check-reproducibility.sh
-            git show origin/main:scripts/check-reproducibility.sh > "$RUNNER_TEMP/check-reproducibility.sh"
-            chmod +x "$RUNNER_TEMP/check-reproducibility.sh"
-            "$RUNNER_TEMP/check-reproducibility.sh" "$GITHUB_WORKSPACE"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request_target" ]]; then
+            if [[ -z "${PR_HEAD_REPOSITORY}" || -z "${PR_HEAD_SHA}" ]]; then
+              echo "pull request head metadata is unavailable" >&2
+              exit 1
+            fi
+            git fetch --no-tags --depth=1 \
+              "https://github.com/${PR_HEAD_REPOSITORY}.git" "${PR_HEAD_SHA}"
+            pr_root="${RUNNER_TEMP}/reproducibility-pr"
+            mkdir -p "${pr_root}"
+            git archive "${PR_HEAD_SHA}" | tar -x -C "${pr_root}"
+            if ! git cat-file -e HEAD:scripts/check-reproducibility.sh 2>/dev/null; then
+              echo "trusted reproducibility checker is missing from the base branch" >&2
+              exit 1
+            fi
+            trusted_checker="${RUNNER_TEMP}/check-reproducibility.sh"
+            git show HEAD:scripts/check-reproducibility.sh > "${trusted_checker}"
+            chmod +x "${trusted_checker}"
+            "${trusted_checker}" "${pr_root}"
           else
             scripts/check-reproducibility.sh "$GITHUB_WORKSPACE"
           fi
