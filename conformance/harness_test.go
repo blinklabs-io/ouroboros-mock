@@ -583,8 +583,18 @@ func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
 func TestProposalEpochsEqualChecksObservedSubmission(t *testing.T) {
 	got := GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8}
 	want := GovActionInfo{SubmittedEpoch: 10, ExpiresAfter: 15}
-	assert.False(t, proposalEpochsEqual(got, want, 7))
-	assert.False(t, proposalEpochsEqual(got, want, 3))
+	assert.True(t, proposalEpochsEqual(got, want, 7))
+	assert.False(t, proposalEpochsEqual(
+		GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8},
+		GovActionInfo{SubmittedEpoch: 4, ExpiresAfter: 10}, 7,
+	))
+	assert.False(t, proposalEpochsEqual(
+		GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 9}, want, 7,
+	))
+	assert.False(t, proposalEpochsEqual(
+		GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8},
+		GovActionInfo{SubmittedEpoch: 4, ExpiresAfter: 9}, 7,
+	))
 }
 
 func TestHasSuccessfulTransactionIncludesEpochEvents(t *testing.T) {
@@ -673,6 +683,17 @@ func TestCompareFinalStateChecksRewardAccountBalances(t *testing.T) {
 	}, HarnessConfig{})
 	err = harness.compareFinalState(vector.FinalState)
 	require.ErrorContains(t, err, "reward account balances")
+}
+
+func TestSnapshotIncludesStakeCredentialDeposits(t *testing.T) {
+	key := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x06},
+	}
+	snapshot := SnapshotFromParsedState(&ParsedInitialState{
+		StakeCredentialDeposits: map[ledger.RewardAccountKey]uint64{key: 7},
+	})
+	require.Equal(t, map[ledger.RewardAccountKey]uint64{key: 7}, snapshot.StakeCredentialDeposits)
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering

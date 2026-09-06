@@ -97,6 +97,7 @@ type StateSnapshot struct {
 	UtxoIDs                        []string
 	StakeRegistrationsByCredential map[ledger.RewardAccountKey]bool
 	RewardAccountBalances          map[ledger.RewardAccountKey]uint64
+	StakeCredentialDeposits        map[ledger.RewardAccountKey]uint64
 	PoolRegistrations              map[common.Blake2b224]bool
 	Governance                     *GovernanceState
 }
@@ -126,6 +127,7 @@ func SnapshotFromParsedState(state *ParsedInitialState) *StateSnapshot {
 		UtxoIDs:                        ids,
 		StakeRegistrationsByCredential: registrations,
 		RewardAccountBalances:          maps.Clone(state.RewardAccountBalances),
+		StakeCredentialDeposits:        maps.Clone(state.StakeCredentialDeposits),
 		PoolRegistrations:              maps.Clone(state.PoolRegistrations),
 		Governance:                     governance,
 	}

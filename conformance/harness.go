@@ -447,7 +447,7 @@ func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
 	if want.ExpiresAfter < want.SubmittedEpoch || got.ExpiresAfter < got.SubmittedEpoch {
 		return false
 	}
-	if want.SubmittedEpoch <= currentEpoch || got.SubmittedEpoch <= currentEpoch {
+	if want.SubmittedEpoch <= currentEpoch && got.SubmittedEpoch <= currentEpoch {
 		return got.SubmittedEpoch == want.SubmittedEpoch &&
 			got.ExpiresAfter == want.ExpiresAfter
 	}

@@ -281,6 +281,19 @@ func (m *MockStateManager) ApplyTransaction(
 
 	// Validate withdrawals before mutating any UTxO or certificate state.
 	withdrawals := make(map[ledger.RewardAccountKey]uint64)
+	deregistered := make(map[ledger.RewardAccountKey]bool)
+	for _, cert := range tx.Certificates() {
+		switch common.CertificateType(cert.Type()) {
+		case common.CertificateTypeStakeDeregistration:
+			if deregCert, ok := cert.(*common.StakeDeregistrationCertificate); ok {
+				deregistered[ledger.NewRewardAccountKey(deregCert.StakeCredential)] = true
+			}
+		case common.CertificateTypeDeregistration:
+			if deregCert, ok := cert.(*common.DeregistrationCertificate); ok {
+				deregistered[ledger.NewRewardAccountKey(deregCert.StakeCredential)] = true
+			}
+		}
+	}
 	for rewardAccount, amount := range tx.Withdrawals() {
 		if rewardAccount == nil || amount == nil {
 			continue
@@ -293,6 +306,9 @@ func (m *MockStateManager) ApplyTransaction(
 		withdrawals[key] += amount.Uint64()
 	}
 	for key, withdrawal := range withdrawals {
+		if deregistered[key] {
+			continue
+		}
 		balance, exists := m.rewardAccounts[key]
 		if exists && withdrawal > balance {
 			return fmt.Errorf(
@@ -1444,6 +1460,7 @@ func (m *MockStateManager) GetStateSnapshot() *StateSnapshot {
 		UtxoIDs:                        utxoIDs,
 		StakeRegistrationsByCredential: registrations,
 		RewardAccountBalances:          maps.Clone(m.rewardAccounts),
+		StakeCredentialDeposits:        maps.Clone(m.stakeCredentialDeposits),
 		PoolRegistrations:              maps.Clone(m.poolRegistrations),
 		Governance:                     cloneGovernanceState(m.govState),
 	}

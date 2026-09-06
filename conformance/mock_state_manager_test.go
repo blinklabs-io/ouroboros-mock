@@ -141,6 +141,43 @@ func TestApplyTransactionValidatesWithdrawalsBeforeMutatingState(t *testing.T) {
 	assert.Contains(t, manager.utxos, fmt.Sprintf("%s#0", hex.EncodeToString(input.Id().Bytes())))
 	assert.NotContains(t, manager.stakeRegistrations, ledger.NewRewardAccountKey(cert.StakeCredential))
 }
+
+func TestApplyTransactionAllowsWithdrawalWithStakeDeregistration(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x05},
+	}
+	key := ledger.NewRewardAccountKey(credential)
+	address, err := common.NewAddressFromParts(
+		common.AddressTypeNoneKey,
+		common.AddressNetworkTestnet,
+		nil,
+		credential.Credential[:],
+	)
+	require.NoError(t, err)
+	manager := NewMockStateManager()
+	manager.rewardAccounts[key] = 1
+	manager.stakeRegistrations[key] = 1
+	input, err := ledger.NewTransactionInputBuilder().
+		WithTxId([]byte{0x05}).WithIndex(0).Build()
+	require.NoError(t, err)
+	output, err := ledger.NewTransactionOutputBuilder().
+		WithAddress(address.String()).WithLovelace(1).Build()
+	require.NoError(t, err)
+	tx := ledger.NewTransactionBuilder().
+		WithCertificates(&common.StakeDeregistrationCertificate{
+			CertType:        uint(common.CertificateTypeStakeDeregistration),
+			StakeCredential: credential,
+		}).
+		WithWithdrawals(map[*common.Address]uint64{&address: 2}).
+		WithInputs(input).WithOutputs(output)
+
+	built, err := tx.Build()
+	require.NoError(t, err)
+	require.NoError(t, manager.ApplyTransaction(built, 0))
+	assert.NotContains(t, manager.rewardAccounts, key)
+	assert.NotContains(t, manager.stakeRegistrations, key)
+}
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
 	coldCredential := common.Credential{
