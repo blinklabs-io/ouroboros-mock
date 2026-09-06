@@ -580,6 +580,22 @@ func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
 	}
 }
 
+func TestProposalEpochsEqualChecksObservedSubmission(t *testing.T) {
+	got := GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8}
+	want := GovActionInfo{SubmittedEpoch: 10, ExpiresAfter: 15}
+	assert.False(t, proposalEpochsEqual(got, want, 7))
+	assert.False(t, proposalEpochsEqual(got, want, 3))
+}
+
+func TestHasSuccessfulTransactionIncludesEpochEvents(t *testing.T) {
+	assert.True(t, hasSuccessfulTransaction([]VectorEvent{{
+		Type: EventTypePassEpoch,
+	}}))
+	assert.False(t, hasSuccessfulTransaction([]VectorEvent{{
+		Type: EventTypePassTick,
+	}}))
+}
+
 func TestDRepExpiriesEqualComparesExpiredValues(t *testing.T) {
 	key := ledger.NewRewardAccountKey(common.Credential{
 		CredType:   common.CredentialTypeAddrKeyHash,
@@ -616,12 +632,6 @@ func TestDeregisterDRepCredentialCleansSameHashDelegations(t *testing.T) {
 	_, ok := g.DRepDelegationsByCredential[stake]
 	assert.False(t, ok)
 	assert.True(t, g.IsDRepCredentialRegistered(scriptDRep))
-}
-
-func TestProposalEpochsEqualChecksObservedSubmission(t *testing.T) {
-	got := GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8}
-	want := GovActionInfo{SubmittedEpoch: 10, ExpiresAfter: 15}
-	require.False(t, proposalEpochsEqual(got, want, 7))
 }
 
 type fixedSnapshotStateManager struct {

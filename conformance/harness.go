@@ -819,7 +819,8 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 
 func hasSuccessfulTransaction(events []VectorEvent) bool {
 	for _, event := range events {
-		if event.Type == EventTypeTransaction && event.Success {
+		if (event.Type == EventTypeTransaction && event.Success) ||
+			event.Type == EventTypePassEpoch {
 			return true
 		}
 	}

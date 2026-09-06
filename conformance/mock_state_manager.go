@@ -279,6 +279,29 @@ func (m *MockStateManager) ApplyTransaction(
 	txHash := tx.Hash()
 	txHashStr := hex.EncodeToString(txHash.Bytes())
 
+	// Validate withdrawals before mutating any UTxO or certificate state.
+	withdrawals := make(map[ledger.RewardAccountKey]uint64)
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		withdrawals[key] += amount.Uint64()
+	}
+	for key, withdrawal := range withdrawals {
+		balance, exists := m.rewardAccounts[key]
+		if exists && withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+	}
+
 	// Process consumed UTxOs (inputs)
 	inputs := tx.Inputs()
 	for _, input := range inputs {
@@ -341,7 +364,6 @@ func (m *MockStateManager) ApplyTransaction(
 		m.rewardAccounts[key] = balance - withdrawal
 	}
 	m.syncRewardBalanceMirrors()
-
 	// Process governance proposals
 	proposals := tx.ProposalProcedures()
 	for idx, proposal := range proposals {
