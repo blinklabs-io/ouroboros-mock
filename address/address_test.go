@@ -110,9 +110,14 @@ func TestDeterministicAddresses(t *testing.T) {
 
 func TestByronAddressBuilder(t *testing.T) {
 	hash := bytes.Repeat([]byte{0x22}, common.AddressHashSize)
-	value, err := NewByronAddress().WithPaymentKeyHash(hash).WithNetworkId(42).BuildBase58()
+	builder := NewByronAddress().WithPaymentKeyHash(hash).WithNetworkId(42)
+	built, err := builder.Build()
 	if err != nil {
 		t.Fatalf("build: %v", err)
+	}
+	value, err := builder.BuildBase58()
+	if err != nil {
+		t.Fatalf("build base58: %v", err)
 	}
 	parsed, err := ParseAddress(value)
 	if err != nil {
@@ -120,6 +125,24 @@ func TestByronAddressBuilder(t *testing.T) {
 	}
 	if parsed.Type() != common.AddressTypeByron {
 		t.Fatalf("type = %d, want Byron", parsed.Type())
+	}
+	builtBytes, err := built.Bytes()
+	if err != nil {
+		t.Fatalf("built bytes: %v", err)
+	}
+	parsedBytes, err := parsed.Bytes()
+	if err != nil {
+		t.Fatalf("parsed bytes: %v", err)
+	}
+	if !bytes.Equal(parsedBytes, builtBytes) {
+		t.Fatalf("round trip changed bytes: %x != %x", parsedBytes, builtBytes)
+	}
+	if got := parsed.PaymentKeyHash().Bytes(); !bytes.Equal(got, hash) {
+		t.Fatalf("payment hash = %x, want %x", got, hash)
+	}
+	attr := parsed.ByronAttr()
+	if attr.Network == nil || *attr.Network != 42 {
+		t.Fatalf("network = %v, want 42", attr.Network)
 	}
 }
 
@@ -132,5 +155,12 @@ func TestAddressBuilderValidation(t *testing.T) {
 	}
 	if _, err := NewAddress().WithPaymentKeyHash(make([]byte, common.AddressHashSize)).Build(); err == nil {
 		t.Fatal("expected missing staking credential error")
+	} else if err.Error() != "staking credential is required" {
+		t.Fatalf("missing staking credential error = %q", err)
+	}
+	if _, err := NewAddress().WithPaymentKeyHash(make([]byte, common.AddressHashSize)).WithStakingKeyHash(make([]byte, common.AddressHashSize-1)).Build(); err == nil {
+		t.Fatal("expected wrong-length staking hash error")
+	} else if err.Error() != "staking hash must be 28 bytes" {
+		t.Fatalf("wrong-length staking hash error = %q", err)
 	}
 }

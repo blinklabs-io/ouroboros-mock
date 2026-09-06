@@ -109,8 +109,10 @@ func (b *AddressBuilder) Build() (common.Address, error) {
 			addrType = common.AddressTypeKeyKey
 		}
 		return common.NewAddressFromParts(addrType, b.networkID, b.payment, b.stake)
-	default:
+	case b.stake == nil:
 		return common.Address{}, errors.New("staking credential is required")
+	default:
+		return common.Address{}, fmt.Errorf("staking hash must be %d bytes", common.AddressHashSize)
 	}
 }
 
@@ -182,11 +184,11 @@ func RandomBase(networkID uint8) (common.Address, error) {
 	return randomAddress(networkID, cryptorand.Reader)
 }
 func RandomEnterprise(networkID uint8) (common.Address, error) {
-	addr, err := randomAddress(networkID, cryptorand.Reader)
+	hash, err := randomHash(cryptorand.Reader)
 	if err != nil {
 		return common.Address{}, err
 	}
-	return NewAddress().WithNetworkId(networkID).WithPaymentKeyHash(addr.PaymentKeyHash().Bytes()).WithNoStaking().Build()
+	return NewAddress().WithNetworkId(networkID).WithPaymentKeyHash(hash).WithNoStaking().Build()
 }
 func RandomReward(networkID uint8) (common.Address, error) {
 	hash, err := randomHash(cryptorand.Reader)
