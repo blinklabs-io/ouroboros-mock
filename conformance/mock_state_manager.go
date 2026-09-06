@@ -135,12 +135,13 @@ func (m *MockStateManager) LoadInitialState(
 			}] = state.RewardAccounts[hash]
 		}
 	}
-	// Initial snapshots do not carry certificate amounts separately. For an
-	// already-registered credential, the current key deposit is the only
-	// available baseline; subsequent registrations record their explicit
-	// amount below and are unaffected by later parameter changes.
+	// Preserve the parsed registration deposit when the initial state exposes
+	// it. Do not fabricate a current-parameter value for older state formats;
+	// the original deposit is not recoverable from registration alone.
 	for credential := range m.stakeRegistrations {
-		m.stakeCredentialDeposits[credential] = keyDepositAmount(pp)
+		if deposit, ok := state.StakeCredentialDeposits[credential]; ok {
+			m.stakeCredentialDeposits[credential] = deposit
+		}
 	}
 	if len(state.RewardAccountBalances) > 0 {
 		maps.Copy(m.rewardAccounts, state.RewardAccountBalances)
@@ -312,6 +313,32 @@ func (m *MockStateManager) ApplyTransaction(
 	certs := tx.Certificates()
 	for _, cert := range certs {
 		m.processCertificate(cert)
+	}
+
+	// Process withdrawals against the reward-account balances. The harness
+	// seeds balances with the final value plus future withdrawals so that
+	// transaction validation sees the pre-withdrawal balance.
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		balance, exists := m.rewardAccounts[key]
+		if !exists {
+			continue
+		}
+		withdrawal := amount.Uint64()
+		if withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+		m.rewardAccounts[key] = balance - withdrawal
 	}
 
 	// Process governance proposals

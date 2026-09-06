@@ -40,6 +40,14 @@ type RewardAccountBalanceSetter interface {
 	SetRewardAccountBalances(balances map[ledger.RewardAccountKey]uint64)
 }
 
+// StateSnapshotProvider is an optional StateManager extension for exposing
+// canonical observable state for final-state comparison.
+type StateSnapshotProvider interface {
+	// GetStateSnapshot returns the canonical observable state after event
+	// processing.
+	GetStateSnapshot() *StateSnapshot
+}
+
 // StateManager handles state mutations during test execution.
 // Implementations manage the full lifecycle of ledger state for a test vector.
 type StateManager interface {
@@ -75,10 +83,6 @@ type StateManager interface {
 
 	// Reset clears all state for the next test vector.
 	Reset() error
-
-	// GetStateSnapshot returns the canonical observable state after event
-	// processing. The harness compares it with the vector's final_state.
-	GetStateSnapshot() *StateSnapshot
 }
 
 // StateSnapshot is the canonical observable state used to compare a

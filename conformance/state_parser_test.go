@@ -340,6 +340,7 @@ func TestParseStakeCredentialMapRewardAccountLayouts(t *testing.T) {
 
 			require.Len(t, entries, 1)
 			require.Equal(t, uint64(11), entries[0].Balance)
+			require.Equal(t, uint64(2), entries[0].Deposit)
 			require.Equal(t, uint64(0), entries[0].CredType)
 			require.Equal(t, hash.Bytes(), entries[0].Hash)
 		})

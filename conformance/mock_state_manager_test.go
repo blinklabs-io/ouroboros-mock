@@ -70,6 +70,35 @@ func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
 	assert.Equal(t, uint64(11), *deposit)
 }
 
+func TestMockStateManagerLoadsOriginalStakeCredentialDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x03},
+	}
+	key := ledger.NewRewardAccountKey(credential)
+	manager := NewMockStateManager()
+	state := &ParsedInitialState{
+		StakeRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
+			key: true,
+		},
+		RewardAccountBalances: map[ledger.RewardAccountKey]uint64{
+			key: 7,
+		},
+		StakeCredentialDeposits: map[ledger.RewardAccountKey]uint64{
+			key: 2,
+		},
+	}
+	require.NoError(t, manager.LoadInitialState(
+		state,
+		&conway.ConwayProtocolParameters{KeyDeposit: 11},
+	))
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(2), *deposit)
+}
+
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
 	coldCredential := common.Credential{

@@ -261,9 +261,25 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 			t.Errorf("event %d failed: %v", i, err)
 		}
 	}
-	if err := h.compareFinalState(vector.FinalState); err != nil {
+	if err := h.compareFinalStateForVector(
+		vector.FinalState,
+		hasSuccessfulTransaction(vector.Events),
+	); err != nil {
 		t.Errorf("final state comparison failed: %v", err)
 	}
+}
+
+func (h *Harness) compareFinalStateForVector(
+	raw cbor.RawMessage,
+	requiresFinalState bool,
+) error {
+	if len(raw) < 2 {
+		if requiresFinalState {
+			return errors.New("successful vector is missing final_state")
+		}
+		return nil
+	}
+	return h.compareFinalState(raw)
 }
 
 func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
@@ -275,7 +291,11 @@ func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
 		return fmt.Errorf("parse final_state: %w", err)
 	}
 	want := SnapshotFromParsedState(finalState)
-	got := h.stateManager.GetStateSnapshot()
+	snapshotProvider, ok := h.stateManager.(StateSnapshotProvider)
+	if !ok {
+		return errors.New("state manager does not implement StateSnapshotProvider")
+	}
+	got := snapshotProvider.GetStateSnapshot()
 	if got == nil {
 		return errors.New("state manager returned a nil snapshot")
 	}
@@ -292,9 +312,12 @@ func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
 	) {
 		mismatches = append(mismatches, "stake registrations")
 	}
-	// Reward balances are used as a look-ahead validation oracle during event
-	// execution (including future withdrawals), so they are intentionally not
-	// compared here. Governance and registration state remain independent.
+	if !reflect.DeepEqual(
+		got.RewardAccountBalances,
+		want.RewardAccountBalances,
+	) {
+		mismatches = append(mismatches, "reward account balances")
+	}
 	if !reflect.DeepEqual(got.PoolRegistrations, want.PoolRegistrations) {
 		mismatches = append(mismatches, "pool registrations")
 	}
@@ -424,7 +447,7 @@ func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
 	if want.ExpiresAfter < want.SubmittedEpoch || got.ExpiresAfter < got.SubmittedEpoch {
 		return false
 	}
-	if want.SubmittedEpoch <= currentEpoch {
+	if want.SubmittedEpoch <= currentEpoch || got.SubmittedEpoch < currentEpoch {
 		return got.SubmittedEpoch == want.SubmittedEpoch &&
 			got.ExpiresAfter == want.ExpiresAfter
 	}
@@ -783,12 +806,24 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 		}
 	}
 
-	if err := h.compareFinalState(vector.FinalState); err != nil {
+	if err := h.compareFinalStateForVector(
+		vector.FinalState,
+		hasSuccessfulTransaction(vector.Events),
+	); err != nil {
 		result.Error = fmt.Errorf("final state comparison failed: %w", err)
 		return result
 	}
 	result.Success = true
 	return result
+}
+
+func hasSuccessfulTransaction(events []VectorEvent) bool {
+	for _, event := range events {
+		if event.Type == EventTypeTransaction && event.Success {
+			return true
+		}
+	}
+	return false
 }
 
 // processEventWithoutT processes an event without a testing.T.
@@ -1122,6 +1157,7 @@ type stakeCredEntry struct {
 	CredType uint64
 	Hash     []byte
 	Balance  uint64
+	Deposit  uint64
 }
 
 // parseStakeCredentialMap manually parses a CBOR map with credential keys
@@ -1212,7 +1248,7 @@ func parseStakeCredEntry(data []byte, pos int) (*stakeCredEntry, int) {
 		return nil, skipCborItem(data, pos)
 	}
 	pos += consumed
-	balance, registered := extractRewardAccountBalance(accountValue.Value())
+	balance, deposit, _, registered := extractRewardAccountState(accountValue.Value())
 	if !registered {
 		return nil, pos
 	}
@@ -1221,6 +1257,7 @@ func parseStakeCredEntry(data []byte, pos int) (*stakeCredEntry, int) {
 		CredType: credType,
 		Hash:     hash,
 		Balance:  balance,
+		Deposit:  deposit,
 	}, pos
 }
 

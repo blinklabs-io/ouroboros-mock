@@ -20,6 +20,7 @@ package conformance
 import (
 	"maps"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -466,7 +467,7 @@ func TestMockStateManager(t *testing.T) {
 		Debug:        false,
 	})
 
-	// Run a subset of vectors to verify the harness works
+	// Run every collected vector to verify the harness works.
 	results, err := harness.RunAllVectorsWithResults()
 	if err != nil {
 		t.Fatalf("failed to run vectors: %v", err)
@@ -515,11 +516,22 @@ func TestFinalStateComparisonRejectsNoOpStateManager(t *testing.T) {
 
 	failed := 0
 	for _, result := range results {
-		if !result.Success {
+		if !result.Success && result.Error != nil &&
+			strings.Contains(result.Error.Error(), "final state comparison failed") {
 			failed++
 		}
 	}
-	require.Positive(t, failed, "no-op StateManager must fail mutation vectors")
+	require.Positive(t, failed, "no-op StateManager must fail final-state comparison")
+}
+
+func TestSuccessfulVectorRequiresFinalState(t *testing.T) {
+	harness := NewHarness(NewMockStateManager(), HarnessConfig{})
+	require.ErrorContains(
+		t,
+		harness.compareFinalStateForVector(nil, true),
+		"successful vector is missing final_state",
+	)
+	require.NoError(t, harness.compareFinalStateForVector(nil, false))
 }
 
 func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
@@ -564,6 +576,53 @@ func TestDRepExpiriesEqualComparesExpiredValues(t *testing.T) {
 	got := map[ledger.RewardAccountKey]uint64{key: 3}
 	want := map[ledger.RewardAccountKey]uint64{key: 5}
 	require.False(t, drepExpiriesEqual(got, want, 4))
+}
+
+func TestProposalEpochsEqualChecksObservedSubmission(t *testing.T) {
+	got := GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8}
+	want := GovActionInfo{SubmittedEpoch: 10, ExpiresAfter: 15}
+	require.False(t, proposalEpochsEqual(got, want, 7))
+}
+
+type fixedSnapshotStateManager struct {
+	*MockStateManager
+	snapshot *StateSnapshot
+}
+
+func (m *fixedSnapshotStateManager) GetStateSnapshot() *StateSnapshot {
+	return m.snapshot
+}
+
+func TestCompareFinalStateChecksRewardAccountBalances(t *testing.T) {
+	paths, err := CollectVectorFiles("testdata/eras")
+	require.NoError(t, err)
+	var vector *TestVector
+	for _, path := range paths {
+		candidate, decodeErr := DecodeTestVector(path)
+		if decodeErr != nil || len(candidate.FinalState) < 2 {
+			continue
+		}
+		finalState, parseErr := ParseInitialState(candidate.FinalState)
+		if parseErr == nil && len(finalState.RewardAccountBalances) > 0 {
+			vector = candidate
+			break
+		}
+	}
+	require.NotNil(t, vector)
+
+	finalState, err := ParseInitialState(vector.FinalState)
+	require.NoError(t, err)
+	snapshot := SnapshotFromParsedState(finalState)
+	for credential, balance := range snapshot.RewardAccountBalances {
+		snapshot.RewardAccountBalances[credential] = balance + 1
+		break
+	}
+	harness := NewHarness(&fixedSnapshotStateManager{
+		MockStateManager: NewMockStateManager(),
+		snapshot:         snapshot,
+	}, HarnessConfig{})
+	err = harness.compareFinalState(vector.FinalState)
+	require.ErrorContains(t, err, "reward account balances")
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering
