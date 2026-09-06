@@ -78,14 +78,12 @@ func NewPlutusScript(version uint) (lcommon.Script, error)      { return plutus(
 func AlwaysSucceedsScript(version uint) (lcommon.Script, error) { return plutus(version) }
 
 func AlwaysFailsScript(version uint) (lcommon.Script, error) {
-	script, err := plutus(version)
-	if err != nil {
-		return nil, err
+	if version < 1 || version > 3 {
+		return nil, fmt.Errorf("unsupported Plutus version %d", version)
 	}
-	raw := append([]byte(nil), script.RawScriptBytes()...)
-	if len(raw) > 0 {
-		raw[len(raw)-1] ^= 1
-	}
+	// A truncated program is deliberately rejected by the evaluator. Keeping
+	// this fixture invalid makes its failure deterministic across language eras.
+	raw := []byte{0x00}
 	switch version {
 	case 1:
 		return lcommon.PlutusV1Script(raw), nil
