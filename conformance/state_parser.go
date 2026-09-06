@@ -69,7 +69,9 @@ type ParsedInitialState struct {
 	RewardAccountBalances map[mockledger.RewardAccountKey]uint64
 
 	// StakeCredentialDeposits maps registered stake credentials to their
-	// original registration deposits.
+	// original registration deposits. Missing entries mean that the original
+	// deposit is unknown and must not be replaced with the current protocol
+	// parameter value.
 	StakeCredentialDeposits map[mockledger.RewardAccountKey]uint64
 
 	// PoolRegistrations tracks which pools are registered (by pool key hash).

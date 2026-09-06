@@ -41,7 +41,10 @@ type RewardAccountBalanceSetter interface {
 }
 
 // StateSnapshotProvider is an optional StateManager extension for exposing
-// canonical observable state for final-state comparison.
+// canonical observable state for final-state comparison. A state manager used
+// with vectors that contain final_state must implement this interface; the
+// harness returns an error instead of silently skipping that comparison when
+// it is absent.
 type StateSnapshotProvider interface {
 	// GetStateSnapshot returns the canonical observable state after event
 	// processing.

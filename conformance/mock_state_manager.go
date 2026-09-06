@@ -340,6 +340,7 @@ func (m *MockStateManager) ApplyTransaction(
 		}
 		m.rewardAccounts[key] = balance - withdrawal
 	}
+	m.syncRewardBalanceMirrors()
 
 	// Process governance proposals
 	proposals := tx.ProposalProcedures()
