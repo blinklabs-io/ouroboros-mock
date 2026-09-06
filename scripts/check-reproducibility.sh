@@ -5,14 +5,18 @@ set -euo pipefail
 readonly repo_root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 readonly workflow_dir="${repo_root}/.github/workflows"
 readonly fixture_script="${repo_root}/scripts/update-upstream-fixtures.sh"
-readonly action_pattern='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^@]+@([0-9a-f]{40})([[:space:]]+#.*)?$'
+readonly action_pattern='^[^@]+@([0-9a-f]{40})$'
+readonly action_parser="${CHECK_WORKFLOW_ACTIONS_PARSER:-${repo_root}/scripts/check-workflow-actions.go}"
 
-while IFS= read -r action_line; do
-	if [[ ! "${action_line}" =~ ${action_pattern} ]]; then
-		echo "workflow action is not pinned to an immutable commit: ${action_line}" >&2
-		exit 1
-	fi
-done < <(find "${workflow_dir}" -type f -print0 | xargs -0 grep -hE '^[[:space:]]*(-[[:space:]]+)?uses:')
+action_lines=$(go run "${action_parser}" "${workflow_dir}")
+if [[ -n "${action_lines}" ]]; then
+	while IFS= read -r action_line; do
+		if [[ ! "${action_line}" =~ ${action_pattern} ]]; then
+			echo "workflow action is not pinned to an immutable commit: ${action_line}" >&2
+			exit 1
+		fi
+	done <<< "${action_lines}"
+fi
 
 readonly expected_revisions=(
 	OUROBOROS_CONSENSUS_REVISION

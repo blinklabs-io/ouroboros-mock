@@ -32,6 +32,11 @@ jobs:
               "https://github.com/${PR_HEAD_REPOSITORY}.git" "${PR_HEAD_SHA}"
             pr_root="${RUNNER_TEMP}/reproducibility-pr"
             mkdir -p "${pr_root}"
+            if ! git ls-tree -r --full-tree "${PR_HEAD_SHA}" | \
+              awk '$1 == "120000" { found=1 } END { exit found }'; then
+              echo "pull request contains symbolic links" >&2
+              exit 1
+            fi
             git archive "${PR_HEAD_SHA}" | tar -x -C "${pr_root}"
             if ! git cat-file -e HEAD:scripts/check-reproducibility.sh 2>/dev/null; then
               echo "trusted reproducibility checker is missing from the base branch" >&2
@@ -40,7 +45,10 @@ jobs:
             trusted_checker="${RUNNER_TEMP}/check-reproducibility.sh"
             git show HEAD:scripts/check-reproducibility.sh > "${trusted_checker}"
             chmod +x "${trusted_checker}"
-            "${trusted_checker}" "${pr_root}"
+            trusted_parser="${RUNNER_TEMP}/check-workflow-actions.go"
+            git show HEAD:scripts/check-workflow-actions.go > "${trusted_parser}"
+            CHECK_WORKFLOW_ACTIONS_PARSER="${trusted_parser}" \
+              "${trusted_checker}" "${pr_root}"
           else
             scripts/check-reproducibility.sh "$GITHUB_WORKSPACE"
           fi
