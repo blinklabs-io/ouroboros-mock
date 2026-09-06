@@ -1321,16 +1321,6 @@ func parseDelegationState(
 	return nil
 }
 
-// extractRewardAccountBalance reads reward balances from the account layouts
-// used by conformance vectors. Vendored UMap values wrap [reward, deposit] in
-// an optional account state, while modern Conway AccountState values expose
-// balance and deposit directly. The historical rewards-map form remains
-// supported for synthetic and downstream fixtures.
-func extractRewardAccountBalance(raw any) (uint64, bool) {
-	balance, _, _, registered := extractRewardAccountState(raw)
-	return balance, registered
-}
-
 func extractRewardAccountState(
 	raw any,
 ) (balance, deposit uint64, hasDeposit, registered bool) {
@@ -1867,6 +1857,13 @@ func extractProposalPayload(info *GovActionInfo, procedure []any) {
 		if _, err := cbor.Decode(encoded, &update); err == nil {
 			info.ParameterUpdate = &update
 		}
+	case common.GovActionTypeHardForkInitiation,
+		common.GovActionTypeTreasuryWithdrawal,
+		common.GovActionTypeNoConfidence,
+		common.GovActionTypeUpdateCommittee,
+		common.GovActionTypeInfo:
+		// These action payloads do not expose additional fields that this
+		// parser needs to preserve for final-state comparison.
 	}
 }
 
