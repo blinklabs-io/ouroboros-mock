@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -14,7 +15,14 @@ func main() {
 		os.Exit(2)
 	}
 
-	err := filepath.WalkDir(os.Args[1], func(path string, entry os.DirEntry, err error) error {
+	root, err := os.OpenRoot(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer func() { _ = root.Close() }()
+
+	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -25,7 +33,7 @@ func main() {
 		if ext != ".yml" && ext != ".yaml" {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := root.ReadFile(path)
 		if err != nil {
 			return err
 		}

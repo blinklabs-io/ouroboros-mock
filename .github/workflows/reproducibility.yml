@@ -37,7 +37,16 @@ jobs:
               echo "pull request contains symbolic links" >&2
               exit 1
             fi
-            git archive "${PR_HEAD_SHA}" | tar -x -C "${pr_root}"
+            git ls-tree -r -z --full-tree "${PR_HEAD_SHA}" | \
+            while IFS=$'\t' read -r -d '' tree_entry path; do
+              mode="${tree_entry%% *}"
+              if [[ "${mode}" == "160000" ]]; then
+                continue
+              fi
+              destination="${pr_root}/${path}"
+              mkdir -p -- "$(dirname -- "${destination}")"
+              git cat-file blob "${PR_HEAD_SHA}:${path}" > "${destination}"
+            done
             if ! git cat-file -e HEAD:scripts/check-reproducibility.sh 2>/dev/null; then
               echo "trusted reproducibility checker is missing from the base branch" >&2
               exit 1
