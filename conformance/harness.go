@@ -167,15 +167,21 @@ func (h *Harness) RunAllVectors(t *testing.T) {
 		t.Fatalf("failed to collect vectors: %v", err)
 	}
 
+	failed := 0
 	for _, path := range vectors {
 		// Use relative path for cleaner test names
 		testName := path
 		if rel, err := filepath.Rel(h.testdataRoot, path); err == nil {
 			testName = rel
 		}
-		t.Run(testName, func(t *testing.T) {
+		if !t.Run(testName, func(t *testing.T) {
 			h.runVectorFile(t, path)
-		})
+		}) {
+			failed++
+		}
+	}
+	if failed > 0 {
+		t.Errorf("conformance vectors failed: %d/%d", failed, len(vectors))
 	}
 }
 
