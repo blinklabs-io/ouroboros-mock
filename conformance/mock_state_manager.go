@@ -135,12 +135,15 @@ func (m *MockStateManager) LoadInitialState(
 			}] = state.RewardAccounts[hash]
 		}
 	}
-	// Initial snapshots do not carry certificate amounts separately. For an
-	// already-registered credential, the current key deposit is the only
-	// available baseline; subsequent registrations record their explicit
-	// amount below and are unaffected by later parameter changes.
+	// Initial snapshots may carry the original registration deposit in each
+	// account tuple. Fall back to the current key deposit for older snapshots
+	// that do not record it.
 	for credential := range m.stakeRegistrations {
-		m.stakeCredentialDeposits[credential] = keyDepositAmount(pp)
+		if deposit, exists := state.StakeCredentialDeposits[credential]; exists {
+			m.stakeCredentialDeposits[credential] = deposit
+		} else {
+			m.stakeCredentialDeposits[credential] = keyDepositAmount(pp)
+		}
 	}
 	if len(state.RewardAccountBalances) > 0 {
 		maps.Copy(m.rewardAccounts, state.RewardAccountBalances)

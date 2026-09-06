@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -68,6 +69,29 @@ func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, deposit)
 	assert.Equal(t, uint64(11), *deposit)
+}
+
+func TestMockStateManagerLoadsHistoricalStakeCredentialDeposit(t *testing.T) {
+	// Conway AccountState is [reward, deposit, pool-delegation,
+	// drep-delegation]. The recorded deposit predates the current parameter.
+	hash := filledBlake2b224(0x03)
+	delegation := "a1" +
+		"8200581c" + strings.Repeat("03", common.Blake2b224Size) +
+		"840b078080"
+	state := parseSyntheticInitialState(t, "", "", "81"+delegation, "")
+	manager := NewMockStateManager()
+	pp := &conway.ConwayProtocolParameters{KeyDeposit: 99}
+
+	require.NoError(t, manager.LoadInitialState(state, pp))
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(
+		common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(7), *deposit)
 }
 
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
