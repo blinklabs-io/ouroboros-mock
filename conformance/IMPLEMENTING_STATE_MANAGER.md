@@ -88,6 +88,7 @@ Called once per vector, before any events are processed. Your job is to hydrate 
 | `StakeRegistrations` | `map[Blake2b224]bool` | Deprecated hash-only compatibility view |
 | `RewardAccountBalances` | `map[ledger.RewardAccountKey]uint64` | Reward balances keyed by credential type and hash |
 | `RewardAccounts` | `map[Blake2b224]uint64` | Deprecated hash-only compatibility view |
+| `StakeCredentialDeposits` | `map[ledger.RewardAccountKey]uint64` | Original registration deposits; missing entries are unknown and must not be replaced with the current protocol-parameter deposit |
 | `PoolRegistrations` | `map[Blake2b224]bool` | Registered pools |
 | `CommitteeMembers` | `map[Blake2b224]uint64` | Cold key → expiry epoch |
 | `HotKeyAuthorizations` | `map[Blake2b224]Blake2b224` | Cold key → hot key |
@@ -105,6 +106,10 @@ Each `ParsedUtxo` carries the full `common.TransactionOutput` (decoded as `babba
 The `pp` parameter is a deep copy of the protocol parameters loaded from `pparams-by-hash/` using `PParamsHash`. Store it; it may be updated later when `ParameterChange` proposals are enacted.
 
 **Also initialize `GovernanceState` here.** The easiest way is to call `GovernanceState.LoadFromParsedState(state)` on a `NewGovernanceState()` instance — this populates all the committee, DRep, stake, pool, proposal, and root fields needed for harness pre-validation.
+
+Implement `StateSnapshotProvider` when the manager supports final-state
+comparison. Vectors with a `final_state` require `GetStateSnapshot` so the
+harness can compare the complete observable state.
 
 ### `ApplyTransaction(tx common.Transaction, slot uint64) error`
 

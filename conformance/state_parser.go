@@ -1806,6 +1806,7 @@ func extractProposalInfo(raw any) GovActionInfo {
 		info.ProposedMembers = committeeMembersByHash(
 			info.ProposedMembersByCredential,
 		)
+		extractProposalPayload(&info, procedure)
 	}
 
 	// proposed_in at arr[5]
@@ -1819,6 +1820,65 @@ func extractProposalInfo(raw any) GovActionInfo {
 	}
 
 	return info
+}
+
+// extractProposalPayload preserves governance fields encoded inside the action
+// payload rather than in the surrounding proposal record.
+func extractProposalPayload(info *GovActionInfo, procedure []any) {
+	if info == nil {
+		return
+	}
+	var action []any
+	for i := 2; i < len(procedure) && i <= 4; i++ {
+		candidate, ok := procedure[i].([]any)
+		if ok && len(candidate) > 0 {
+			if _, ok := candidate[0].(uint64); ok {
+				action = candidate
+				break
+			}
+		}
+	}
+	if len(action) == 0 {
+		return
+	}
+	if len(action) > 1 {
+		if parent := extractGovActionId(action[1]); parent != "" {
+			info.ParentActionId = &parent
+		}
+	}
+	if len(action) < 3 {
+		return
+	}
+	switch info.ActionType {
+	case common.GovActionTypeNewConstitution:
+		constitution, ok := action[2].([]any)
+		if !ok || len(constitution) < 2 {
+			return
+		}
+		if policyHash := rawBytes(constitution[1]); len(policyHash) > 0 {
+			info.PolicyHash = policyHash
+		}
+	case common.GovActionTypeParameterChange:
+		encoded, err := cbor.Encode(action[2])
+		if err != nil {
+			return
+		}
+		var update conway.ConwayProtocolParameterUpdate
+		if _, err := cbor.Decode(encoded, &update); err == nil {
+			info.ParameterUpdate = &update
+		}
+	}
+}
+
+func rawBytes(raw any) []byte {
+	switch value := raw.(type) {
+	case []byte:
+		return append([]byte(nil), value...)
+	case cbor.ByteString:
+		return append([]byte(nil), value.Bytes()...)
+	default:
+		return nil
+	}
 }
 
 func extractProposalStake(

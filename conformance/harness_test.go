@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -246,7 +247,9 @@ func TestVectorStructure(t *testing.T) {
 			t.Errorf("%s: empty initial state", path)
 		}
 		if len(vector.FinalState) == 0 {
-			// Invalid transaction vectors may intentionally omit a final state.
+			if hasSuccessfulTransaction(vector.Events) {
+				t.Errorf("%s: successful vector missing final state", path)
+			}
 		}
 		if vector.FilePath != path {
 			t.Errorf("%s: FilePath mismatch: %s", path, vector.FilePath)
@@ -537,12 +540,13 @@ func TestSuccessfulVectorRequiresFinalState(t *testing.T) {
 func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
 	parent := "parent#0"
 	base := GovActionInfo{
-		ActionType:     common.GovActionTypeNoConfidence,
-		SubmittedEpoch: 1,
-		ExpiresAfter:   5,
-		ParentActionId: &parent,
-		Votes:          map[string]uint8{"drep:key": 1},
-		PolicyHash:     []byte{1, 2, 3},
+		ActionType:      common.GovActionTypeNoConfidence,
+		SubmittedEpoch:  1,
+		ExpiresAfter:    5,
+		ParentActionId:  &parent,
+		Votes:           map[string]uint8{"drep:key": 1},
+		PolicyHash:      []byte{1, 2, 3},
+		ParameterUpdate: &conway.ConwayProtocolParameterUpdate{},
 	}
 
 	for name, mutate := range map[string]func(*GovActionInfo){
@@ -556,10 +560,18 @@ func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
 		"policy hash": func(info *GovActionInfo) {
 			info.PolicyHash = []byte{4, 5, 6}
 		},
+		"parameter update": func(info *GovActionInfo) {
+			value := uint(2)
+			info.ParameterUpdate.MinFeeA = &value
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gotInfo := base
 			gotInfo.Votes = maps.Clone(base.Votes)
+			if base.ParameterUpdate != nil {
+				update := *base.ParameterUpdate
+				gotInfo.ParameterUpdate = &update
+			}
 			mutate(&gotInfo)
 			got := map[string]*ProposalState{"proposal#0": {GovActionInfo: gotInfo}}
 			want := map[string]*ProposalState{"proposal#0": {GovActionInfo: base}}
@@ -576,6 +588,34 @@ func TestDRepExpiriesEqualComparesExpiredValues(t *testing.T) {
 	got := map[ledger.RewardAccountKey]uint64{key: 3}
 	want := map[ledger.RewardAccountKey]uint64{key: 5}
 	require.False(t, drepExpiriesEqual(got, want, 4))
+}
+
+func TestDeregisterDRepCredentialCleansSameHashDelegations(t *testing.T) {
+	hash := common.Blake2b224{1}
+	keyDRep := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptDRep := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	stake := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{2},
+	})
+	g := NewGovernanceState()
+	g.DRepRegistrationsByCredential[ledger.NewRewardAccountKey(keyDRep)] = true
+	g.DRepRegistrationsByCredential[ledger.NewRewardAccountKey(scriptDRep)] = true
+	g.DRepRegistrations[hash] = true
+	g.DRepDelegationsByCredential[stake] = common.Drep{
+		Type:       common.DrepTypeAddrKeyHash,
+		Credential: hash[:],
+	}
+	g.DeregisterDRepCredential(keyDRep)
+	_, ok := g.DRepDelegationsByCredential[stake]
+	assert.False(t, ok)
+	assert.True(t, g.IsDRepCredentialRegistered(scriptDRep))
 }
 
 func TestProposalEpochsEqualChecksObservedSubmission(t *testing.T) {
