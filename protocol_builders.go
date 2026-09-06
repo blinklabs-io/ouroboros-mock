@@ -38,7 +38,9 @@ func NewTip(point pcommon.Point, blockNumber uint64) chainsync.Tip {
 }
 
 // ChainSyncRequestNext builds a node-to-node or node-to-client request-next
-// input entry.
+// input entry. nodeToClient selects the decoder for the negotiated protocol
+// mode; the returned entry always describes a request received by the server
+// under test.
 func ChainSyncRequestNext(nodeToClient bool) ConversationEntryInput {
 	protocolID := chainsync.ProtocolIdNtN
 	messageFromCbor := chainsync.NewMsgFromCborNtN
@@ -51,7 +53,7 @@ func ChainSyncRequestNext(nodeToClient bool) ConversationEntryInput {
 		Message:         chainsync.NewMsgRequestNext(),
 		MessageType:     chainsync.MessageTypeRequestNext,
 		MsgFromCborFunc: messageFromCbor,
-		IsResponse:      nodeToClient,
+		IsResponse:      false,
 	}
 }
 

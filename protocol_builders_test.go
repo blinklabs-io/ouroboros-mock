@@ -60,6 +60,9 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 		LocalStateQueryQuery(nil),
 		LocalStateQueryRelease(),
 	}
+	if ChainSyncRequestNext(true).IsResponse {
+		t.Fatal("request-next builder marked an input as a response")
+	}
 	for i, entry := range entries {
 		switch entry := entry.(type) {
 		case ConversationEntryInput:
