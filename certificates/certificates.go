@@ -266,7 +266,7 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 	case b.margin.Rat == nil:
 		return nil, errors.New("pool margin denominator cannot be zero")
 	}
-	if b.margin.Rat.Sign() < 0 || b.margin.Rat.Cmp(big.NewRat(1, 1)) > 0 {
+	if b.margin.Sign() < 0 || b.margin.Cmp(big.NewRat(1, 1)) > 0 {
 		return nil, errors.New("pool margin must be in the unit interval [0,1]")
 	}
 	return &lcommon.PoolRegistrationCertificate{
@@ -321,6 +321,13 @@ type conwayBuilder struct {
 	deposit       uint64
 	anchor        *lcommon.GovAnchor
 	anchorErr     error
+}
+
+func checkedAmount(amount uint64) (int64, error) {
+	if amount > math.MaxInt64 {
+		return 0, fmt.Errorf("deposit %d exceeds maximum int64 value", amount)
+	}
+	return int64(amount), nil
 }
 
 func (b *conwayBuilder) WithCredential(hash []byte) *conwayBuilder {
@@ -398,10 +405,14 @@ func (b *DRepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
 	return &lcommon.RegistrationDrepCertificate{
 		CertType:       uint(lcommon.CertificateTypeRegistrationDrep),
 		DrepCredential: b.credential,
-		Amount:         int64(b.deposit),
+		Amount:         amount,
 		Anchor:         b.anchor,
 	}, nil
 }
@@ -430,10 +441,14 @@ func (b *DRepDeregistrationBuilder) Build() (*lcommon.DeregistrationDrepCertific
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
 	return &lcommon.DeregistrationDrepCertificate{
 		CertType:       uint(lcommon.CertificateTypeDeregistrationDrep),
 		DrepCredential: b.credential,
-		Amount:         int64(b.deposit),
+		Amount:         amount,
 	}, nil
 }
 
@@ -535,7 +550,7 @@ func (b *VoteDelegationBuilder) WithDRepScriptHash(hash []byte) *VoteDelegationB
 }
 
 func (b *VoteDelegationBuilder) Build() (*lcommon.VoteDelegationCertificate, error) {
-	if err := b.stakeBuilder.validate(); err != nil {
+	if err := b.validate(); err != nil {
 		return nil, err
 	}
 	if err := b.validateDRep(); err != nil {
@@ -590,7 +605,7 @@ func (b *StakeVoteDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeVoteDele
 }
 
 func (b *StakeVoteDelegationBuilder) Build() (*lcommon.StakeVoteDelegationCertificate, error) {
-	if err := b.stakeBuilder.validate(); err != nil {
+	if err := b.validate(); err != nil {
 		return nil, err
 	}
 	if err := b.validateDRep(); err != nil {
@@ -641,7 +656,7 @@ func (b *combinedBuilder) WithDeposit(amount uint64) {
 }
 
 func (b *combinedBuilder) validateCombined(requireDRep, requirePool bool) error {
-	if err := b.stakeBuilder.validate(); err != nil {
+	if err := b.validate(); err != nil {
 		return err
 	}
 	if requireDRep {
@@ -669,6 +684,7 @@ func (b *StakeRegistrationDelegationBuilder) WithCredential(hash []byte) *StakeR
 	b.combinedBuilder.WithCredential(hash)
 	return b
 }
+
 func (b *StakeRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeRegistrationDelegationBuilder {
 	b.combinedBuilder.WithPoolKeyHash(hash)
 	return b
@@ -678,15 +694,21 @@ func (b *StakeRegistrationDelegationBuilder) WithScriptCredential(hash []byte) *
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
+
 func (b *StakeRegistrationDelegationBuilder) WithDeposit(amount uint64) *StakeRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDeposit(amount)
 	return b
 }
+
 func (b *StakeRegistrationDelegationBuilder) Build() (*lcommon.StakeRegistrationDelegationCertificate, error) {
 	if err := b.validateCombined(false, true); err != nil {
 		return nil, err
 	}
-	return &lcommon.StakeRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeStakeRegistrationDelegation), StakeCredential: b.credential, PoolKeyHash: b.poolKeyHash, Amount: int64(b.deposit)}, nil
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
+	return &lcommon.StakeRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeStakeRegistrationDelegation), StakeCredential: b.credential, PoolKeyHash: b.poolKeyHash, Amount: amount}, nil
 }
 
 // VoteRegistrationDelegationBuilder builds a Conway vote registration and delegation certificate.
@@ -695,31 +717,41 @@ type VoteRegistrationDelegationBuilder struct{ combinedBuilder }
 func NewVoteRegistrationDelegation() *VoteRegistrationDelegationBuilder {
 	return &VoteRegistrationDelegationBuilder{}
 }
+
 func (b *VoteRegistrationDelegationBuilder) WithCredential(hash []byte) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithCredential(hash)
 	return b
 }
+
 func (b *VoteRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepKeyHash(hash)
 	return b
 }
+
 func (b *VoteRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRep(drep)
 	return b
 }
+
 func (b *VoteRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepScriptHash(hash)
 	return b
 }
+
 func (b *VoteRegistrationDelegationBuilder) WithDeposit(amount uint64) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDeposit(amount)
 	return b
 }
+
 func (b *VoteRegistrationDelegationBuilder) Build() (*lcommon.VoteRegistrationDelegationCertificate, error) {
 	if err := b.validateCombined(true, false); err != nil {
 		return nil, err
 	}
-	return &lcommon.VoteRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeVoteRegistrationDelegation), StakeCredential: b.credential, Drep: b.drep, Amount: int64(b.deposit)}, nil
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
+	return &lcommon.VoteRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeVoteRegistrationDelegation), StakeCredential: b.credential, Drep: b.drep, Amount: amount}, nil
 }
 
 // StakeVoteRegistrationDelegationBuilder builds a Conway stake and vote registration and delegation certificate.
@@ -728,35 +760,46 @@ type StakeVoteRegistrationDelegationBuilder struct{ combinedBuilder }
 func NewStakeVoteRegistrationDelegation() *StakeVoteRegistrationDelegationBuilder {
 	return &StakeVoteRegistrationDelegationBuilder{}
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) WithCredential(hash []byte) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithCredential(hash)
 	return b
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepKeyHash(hash)
 	return b
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRep(drep)
 	return b
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepScriptHash(hash)
 	return b
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithPoolKeyHash(hash)
 	return b
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) WithDeposit(amount uint64) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDeposit(amount)
 	return b
 }
+
 func (b *StakeVoteRegistrationDelegationBuilder) Build() (*lcommon.StakeVoteRegistrationDelegationCertificate, error) {
 	if err := b.validateCombined(true, true); err != nil {
 		return nil, err
 	}
-	return &lcommon.StakeVoteRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeStakeVoteRegistrationDelegation), StakeCredential: b.credential, PoolKeyHash: b.poolKeyHash, Drep: b.drep, Amount: int64(b.deposit)}, nil
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
+	return &lcommon.StakeVoteRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeStakeVoteRegistrationDelegation), StakeCredential: b.credential, PoolKeyHash: b.poolKeyHash, Drep: b.drep, Amount: amount}, nil
 }
 
 // AuthCommitteeHotBuilder builds a Conway committee hot-key authorization certificate.
