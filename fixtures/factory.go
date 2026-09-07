@@ -92,7 +92,7 @@ func generateByronChain(
 	if startSlot%byron.ByronSlotsPerEpoch != 0 ||
 		slotIncrement%byron.ByronSlotsPerEpoch != 0 {
 		return nil, fmt.Errorf(
-			"Byron fixture slots must be epoch-aligned: start=%d increment=%d",
+			"byron fixture slots must be epoch-aligned: start=%d increment=%d",
 			startSlot,
 			slotIncrement,
 		)
@@ -103,7 +103,7 @@ func generateByronChain(
 		body := []common.Blake2b224{}
 		bodyCbor, err := cbor.Encode(body)
 		if err != nil {
-			return nil, fmt.Errorf("encode Byron EBB body %d: %w", i, err)
+			return nil, fmt.Errorf("encode byron EBB body %d: %w", i, err)
 		}
 		header := &byron.ByronEpochBoundaryBlockHeader{
 			ProtocolMagic: byron.TestnetProtocolMagic,
@@ -119,14 +119,14 @@ func generateByronChain(
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
-			return nil, fmt.Errorf("encode Byron EBB %d: %w", i, err)
+			return nil, fmt.Errorf("encode byron EBB %d: %w", i, err)
 		}
 		decoded, err := byron.NewByronEpochBoundaryBlockFromCbor(blockCbor)
 		if err != nil {
-			return nil, fmt.Errorf("decode Byron EBB %d: %w", i, err)
+			return nil, fmt.Errorf("decode byron EBB %d: %w", i, err)
 		}
 		if !bytes.Equal(decoded.Cbor(), blockCbor) {
-			return nil, fmt.Errorf("Byron EBB %d CBOR mismatch after round-trip", i)
+			return nil, fmt.Errorf("byron EBB %d CBOR mismatch after round-trip", i)
 		}
 		blocks = append(blocks, decoded)
 		currentPrev = decoded.Hash()
