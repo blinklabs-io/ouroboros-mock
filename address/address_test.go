@@ -164,3 +164,19 @@ func TestAddressBuilderValidation(t *testing.T) {
 		t.Fatalf("wrong-length staking hash error = %q", err)
 	}
 }
+
+func TestAddressBuilderPointerCoordinates(t *testing.T) {
+	hash := bytes.Repeat([]byte{0x11}, common.AddressHashSize)
+	addr, err := NewAddress().WithPaymentKeyHash(hash).
+		WithStakePointer(300, 2, 1).Build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	pointer, ok := addr.StakingPayload().(common.AddressPayloadPointer)
+	if !ok {
+		t.Fatalf("staking payload type = %T, want pointer", addr.StakingPayload())
+	}
+	if pointer.Slot != 300 || pointer.TxIndex != 2 || pointer.CertIndex != 1 {
+		t.Fatalf("pointer = %#v, want slot 300, tx index 2, cert index 1", pointer)
+	}
+}

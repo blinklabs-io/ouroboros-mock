@@ -17,7 +17,6 @@ package address
 
 import (
 	cryptorand "crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	mathrand "math/rand"
@@ -265,11 +264,18 @@ func randomHash(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
 }
 func clone(value []byte) []byte { return append([]byte(nil), value...) }
 func encodePointer(pointer common.AddressPayloadPointer) []byte {
-	var ret []byte
+	ret := make([]byte, 0, 30)
 	for _, value := range []uint64{pointer.Slot, pointer.TxIndex, pointer.CertIndex} {
 		var buf [10]byte
-		n := binary.PutUvarint(buf[:], value)
-		ret = append(ret, buf[:n]...)
+		pos := len(buf)
+		buf[pos-1] = byte(value & 0x7f)
+		value >>= 7
+		for value > 0 {
+			pos--
+			buf[pos-1] = byte(value&0x7f) | 0x80
+			value >>= 7
+		}
+		ret = append(ret, buf[pos-1:]...)
 	}
 	return ret
 }
