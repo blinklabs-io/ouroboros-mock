@@ -9,6 +9,7 @@
 package ouroboros_mock
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -17,6 +18,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
+	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
 
@@ -57,7 +59,7 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 		LocalTxMonitorRelease(),
 		LocalStateQueryAcquire(point),
 		LocalStateQueryReAcquire(point),
-		LocalStateQueryQuery(nil),
+		LocalStateQueryQuery([]any{localstatequery.QueryTypeSystemStart}),
 		LocalStateQueryRelease(),
 	}
 	if ChainSyncRequestNext(true).IsResponse {
@@ -69,7 +71,7 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 			if entry.Message == nil {
 				t.Fatalf("entry %d has no message", i)
 			}
-			assertMessageEncodes(t, entry.Message)
+			assertMessageRoundTrips(t, entry)
 		case ConversationEntryOutput:
 			if len(entry.Messages) == 0 {
 				t.Fatalf("entry %d has no output messages", i)
@@ -89,6 +91,21 @@ func assertMessageEncodes(t *testing.T, message protocol.Message) {
 	}
 	if len(encoded) == 0 {
 		t.Fatalf("encode %T returned empty CBOR", message)
+	}
+}
+
+func assertMessageRoundTrips(t *testing.T, entry ConversationEntryInput) {
+	t.Helper()
+	encoded, err := cbor.Encode(entry.Message)
+	if err != nil {
+		t.Fatalf("encode %T: %v", entry.Message, err)
+	}
+	decoded, err := entry.MsgFromCborFunc(entry.MessageType, encoded)
+	if err != nil {
+		t.Fatalf("decode %T with message type %d: %v", entry.Message, entry.MessageType, err)
+	}
+	if reflect.TypeOf(decoded) != reflect.TypeOf(entry.Message) {
+		t.Fatalf("decoded message type = %T, want %T", decoded, entry.Message)
 	}
 }
 
