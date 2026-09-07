@@ -33,6 +33,17 @@ func TestLeiosConversationBuilders(t *testing.T) {
 		t.Fatalf("unexpected Leios votes entry: %#v", votes)
 	}
 
+	responses := []mock.ConversationEntryOutput{
+		mock.NewConversationEntryLeiosFetchResponse(leiosfetch.NewMsgDone()),
+		mock.NewConversationEntryLeiosNotifyResponse(leiosnotify.NewMsgDone()),
+		mock.NewConversationEntryLeiosVotesResponse(leiosvotes.NewMsgDone()),
+	}
+	for i, response := range responses {
+		if response.ProtocolId == 0 || !response.IsResponse || len(response.Messages) != 1 {
+			t.Errorf("response %d has unexpected shape: %#v", i, response)
+		}
+	}
+
 	for name, conversation := range map[string][]mock.ConversationEntry{
 		"fetch":  mock.ConversationLeiosFetch,
 		"notify": mock.ConversationLeiosNotify,

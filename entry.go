@@ -269,24 +269,24 @@ func NewConversationEntryLeiosVotesResponse(
 	}
 }
 
-// ConversationLeiosFetch is a minimal Leios fetch conversation that exercises
-// a request, an empty response, and protocol completion.
+// ConversationLeiosFetch is a minimal Leios fetch conversation that performs
+// the handshake, then completes the protocol from the client with Done.
 var ConversationLeiosFetch = []ConversationEntry{
 	ConversationEntryHandshakeRequestGeneric,
 	ConversationEntryHandshakeNtNResponse,
 	NewConversationEntryLeiosFetchRequest(leiosfetch.NewMsgDone()),
 }
 
-// ConversationLeiosNotify is a minimal Leios notify conversation that
-// exercises a notification request and protocol completion.
+// ConversationLeiosNotify is a minimal Leios notify conversation that performs
+// the handshake, then completes the protocol from the client with Done.
 var ConversationLeiosNotify = []ConversationEntry{
 	ConversationEntryHandshakeRequestGeneric,
 	ConversationEntryHandshakeNtNResponse,
 	NewConversationEntryLeiosNotifyRequest(leiosnotify.NewMsgDone()),
 }
 
-// ConversationLeiosVotes is a minimal Leios votes conversation that exercises
-// a request for one vote and protocol completion.
+// ConversationLeiosVotes is a minimal Leios votes conversation that performs
+// the handshake, then completes the protocol from the client with Done.
 var ConversationLeiosVotes = []ConversationEntry{
 	ConversationEntryHandshakeRequestGeneric,
 	ConversationEntryHandshakeNtNResponse,
