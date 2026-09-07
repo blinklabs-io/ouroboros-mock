@@ -38,8 +38,13 @@ func TestLeiosConversationBuilders(t *testing.T) {
 		mock.NewConversationEntryLeiosNotifyResponse(leiosnotify.NewMsgDone()),
 		mock.NewConversationEntryLeiosVotesResponse(leiosvotes.NewMsgDone()),
 	}
+	expectedResponseIDs := []uint16{
+		leiosfetch.ProtocolId,
+		leiosnotify.ProtocolId,
+		leiosvotes.ProtocolId,
+	}
 	for i, response := range responses {
-		if response.ProtocolId == 0 || !response.IsResponse || len(response.Messages) != 1 {
+		if response.ProtocolId != expectedResponseIDs[i] || !response.IsResponse || len(response.Messages) != 1 {
 			t.Errorf("response %d has unexpected shape: %#v", i, response)
 		}
 	}
@@ -51,6 +56,9 @@ func TestLeiosConversationBuilders(t *testing.T) {
 	} {
 		if len(conversation) != 3 {
 			t.Errorf("%s conversation length = %d, want 3", name, len(conversation))
+		}
+		if entry, ok := conversation[2].(mock.ConversationEntryInput); !ok || entry.IsResponse || entry.Message == nil {
+			t.Errorf("%s completion entry has unexpected shape: %#v", name, conversation[2])
 		}
 	}
 }
