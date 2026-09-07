@@ -32,10 +32,6 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
 
-var errUnsupportedDijkstraRefScriptFields = errors.New(
-	"unsupported Dijkstra ref-script protocol parameter fields",
-)
-
 // DecodedProtocolParameterUpdate wraps an era-specific protocol-parameter
 // update value decoded from a JSON fixture.
 type DecodedProtocolParameterUpdate struct {
@@ -170,7 +166,10 @@ func (f Fixture) DecodeProtocolParameterUpdate() (DecodedProtocolParameterUpdate
 			value: value,
 		}, nil
 	case "dijkstra":
-		value := payload.toDijkstraProtocolParameterUpdate()
+		value, err := payload.toDijkstraProtocolParameterUpdate()
+		if err != nil {
+			return DecodedProtocolParameterUpdate{}, err
+		}
 		return DecodedProtocolParameterUpdate{
 			Era:   f.Era,
 			value: value,
@@ -279,8 +278,7 @@ type protocolParametersJSON struct {
 	DRepActivity               *jsonUint64               `json:"dRepActivity"`
 	MinFeeRefScriptCostPerByte *jsonRational             `json:"minFeeRefScriptCostPerByte"`
 
-	// Dijkstra-era ref-script parameters. Parsed from JSON fixtures but not
-	// yet mapped to gouroboros types (no corresponding struct fields exist).
+	// Dijkstra-era reference-script parameters.
 	MaxRefScriptSizePerBlock *jsonUint     `json:"maxRefScriptSizePerBlock"`
 	MaxRefScriptSizePerTx    *jsonUint     `json:"maxRefScriptSizePerTx"`
 	RefScriptCostStride      *jsonUint     `json:"refScriptCostStride"`
@@ -313,11 +311,20 @@ func (p protocolParametersJSON) toDijkstraProtocolParameters() (*dijkstra.Dijkst
 	}, nil
 }
 
-func (p protocolParametersJSON) toDijkstraProtocolParameterUpdate() *dijkstra.DijkstraProtocolParameterUpdate {
+func (p protocolParametersJSON) toDijkstraProtocolParameterUpdate() (*dijkstra.DijkstraProtocolParameterUpdate, error) {
 	u := p.toConwayProtocolParameterUpdate()
-	maxBlock := optionalUint32Pointer(p.MaxRefScriptSizePerBlock)
-	maxTx := optionalUint32Pointer(p.MaxRefScriptSizePerTx)
-	stride := optionalUint32Pointer(p.RefScriptCostStride)
+	maxBlock, err := optionalUint32Pointer("maxRefScriptSizePerBlock", p.MaxRefScriptSizePerBlock)
+	if err != nil {
+		return nil, err
+	}
+	maxTx, err := optionalUint32Pointer("maxRefScriptSizePerTx", p.MaxRefScriptSizePerTx)
+	if err != nil {
+		return nil, err
+	}
+	stride, err := optionalUint32Pointer("refScriptCostStride", p.RefScriptCostStride)
+	if err != nil {
+		return nil, err
+	}
 	return &dijkstra.DijkstraProtocolParameterUpdate{
 		MinFeeA:                    u.MinFeeA,
 		MinFeeB:                    u.MinFeeB,
@@ -354,7 +361,7 @@ func (p protocolParametersJSON) toDijkstraProtocolParameterUpdate() *dijkstra.Di
 		MaxRefScriptSizePerTx:      maxTx,
 		RefScriptCostStride:        stride,
 		RefScriptCostMultiplier:    cloneRat(p.RefScriptCostMultiplier),
-	}
+	}, nil
 }
 
 func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyProtocolParameters, error) {
@@ -957,35 +964,6 @@ func (p protocolParametersJSON) toConwayProtocolParameterUpdate() *conway.Conway
 	return update
 }
 
-func (p protocolParametersJSON) rejectUnsupportedDijkstraRefScriptFields() error {
-	fields := p.dijkstraRefScriptFields()
-	if len(fields) == 0 {
-		return nil
-	}
-	return fmt.Errorf(
-		"%w: %s",
-		errUnsupportedDijkstraRefScriptFields,
-		strings.Join(fields, ", "),
-	)
-}
-
-func (p protocolParametersJSON) dijkstraRefScriptFields() []string {
-	var fields []string
-	if p.MaxRefScriptSizePerBlock != nil {
-		fields = append(fields, "maxRefScriptSizePerBlock")
-	}
-	if p.MaxRefScriptSizePerTx != nil {
-		fields = append(fields, "maxRefScriptSizePerTx")
-	}
-	if p.RefScriptCostStride != nil {
-		fields = append(fields, "refScriptCostStride")
-	}
-	if p.RefScriptCostMultiplier != nil {
-		fields = append(fields, "refScriptCostMultiplier")
-	}
-	return fields
-}
-
 func (p protocolParametersJSON) requireProtocolVersion() (*gcommon.ProtocolParametersProtocolVersion, error) {
 	if p.ProtocolVersion == nil {
 		return nil, errors.New("missing protocolVersion")
@@ -1390,12 +1368,15 @@ func optionalUint32Field(name string, value *jsonUint) (uint32, error) {
 	return uint32(value.value), nil
 }
 
-func optionalUint32Pointer(value *jsonUint) *uint32 {
+func optionalUint32Pointer(name string, value *jsonUint) (*uint32, error) {
 	if value == nil {
-		return nil
+		return nil, nil
+	}
+	if uint64(value.value) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("%s exceeds uint32", name)
 	}
 	ret := uint32(value.value)
-	return &ret
+	return &ret, nil
 }
 
 func optionalUint64Value(value *jsonUint64) uint64 {
