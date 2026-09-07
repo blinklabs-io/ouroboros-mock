@@ -111,8 +111,10 @@ type CommitteeHotCredentialMemberFunc func(
 	lcommon.Credential,
 ) (*lcommon.CommitteeMember, error)
 
-// DRepRegistrationFunc is a callback for DRep registration lookups
-type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
+// DRepRegistrationFunc is a callback for DRep registration lookups. It takes
+// the full credential because the credential type is part of a DRep's
+// identity: a key-hash and a script-hash DRep sharing a hash are distinct.
+type DRepRegistrationFunc func(lcommon.Credential) (*lcommon.DRepRegistration, error)
 
 // DRepDelegationFunc is a callback for DRep delegation lookups. It returns the
 // full DRep sum type so predefined DReps remain distinguishable from credential
@@ -444,16 +446,22 @@ func (ls *MockLedgerState) CommitteeMembers() ([]lcommon.CommitteeMember, error)
 	return ls.committeeMembers, nil
 }
 
-// DRepRegistration looks up a DRep registration by credential hash
+// DRepRegistration looks up a DRep registration by credential. Both the
+// credential type and the hash have to match: the same hash under a key-hash
+// and a script-hash credential identifies two different DReps.
 func (ls *MockLedgerState) DRepRegistration(
-	credential lcommon.Blake2b224,
+	credential lcommon.Credential,
 ) (*lcommon.DRepRegistration, error) {
 	if ls.DRepRegistrationCallback != nil {
 		return ls.DRepRegistrationCallback(credential)
 	}
-	// Search in stored DRep registrations
+	// Search in stored DRep registrations. lcommon.Credential embeds decoded
+	// CBOR state, so the identity comparison is on its fields rather than
+	// the struct.
 	for i := range ls.drepRegistrations {
-		if ls.drepRegistrations[i].Credential == credential {
+		stored := ls.drepRegistrations[i].Credential
+		if stored.CredType == credential.CredType &&
+			stored.Credential == credential.Credential {
 			return &ls.drepRegistrations[i], nil
 		}
 	}
