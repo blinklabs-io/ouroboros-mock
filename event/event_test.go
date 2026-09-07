@@ -1,9 +1,10 @@
 package event
 
 import (
-	ocommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"testing"
 	"time"
+
+	ocommon "github.com/blinklabs-io/gouroboros/protocol/common"
 )
 
 func TestBaseBuildersUseStableEventShapes(t *testing.T) {

@@ -117,6 +117,7 @@ func (s *EventSequence) Add(events ...Event) *EventSequence {
 	s.Events = append(s.Events, events...)
 	return s
 }
+
 func EventSequenceFromBlocks(blocks []ledger.Block, networkMagic uint32) EventSequence {
 	var seq EventSequence
 	for _, block := range blocks {
