@@ -50,12 +50,22 @@ func TestGenerateChainSupportsRegisteredEras(t *testing.T) {
 }
 
 func TestGenerateBlockUsesRequestedValues(t *testing.T) {
-	era := fixtures.SupportedEras()[6] // Conway
+	era := ledger.GetEraById(6) // Conway
 	block, err := fixtures.GenerateBlock(era, 11, 22)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if block.BlockNumber() != 11 || block.SlotNumber() != 22 {
 		t.Fatalf("got block %d at slot %d", block.BlockNumber(), block.SlotNumber())
+	}
+}
+
+func TestGenerateBlockByronRequiresEpochAlignedSlot(t *testing.T) {
+	era := ledger.GetEraById(0)
+	if _, err := fixtures.GenerateBlock(era, 1, 1); err == nil {
+		t.Fatal("expected non-aligned Byron slot to fail")
+	}
+	if _, err := fixtures.GenerateBlock(era, 1, 0); err != nil {
+		t.Fatalf("aligned Byron slot failed: %v", err)
 	}
 }

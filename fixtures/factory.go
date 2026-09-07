@@ -67,8 +67,9 @@ func GenerateChain(
 	}
 }
 
-// GenerateBlock returns one empty block for era. It is a convenience wrapper
-// around GenerateChain for tests that need a single block.
+// GenerateBlock returns one empty block for era. Byron blocks require the
+// requested slot to be aligned to a Byron epoch boundary. It is a convenience
+// wrapper around GenerateChain for tests that need a single block.
 func GenerateBlock(era common.Era, blockNumber, slot uint64) (ledger.Block, error) {
 	blocks, err := GenerateChain(
 		era, blockNumber, common.Blake2b256{}, slot, 0, 1,
