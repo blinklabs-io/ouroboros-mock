@@ -38,12 +38,22 @@ jobs:
               exit 1
             fi
             git ls-tree -r -z --full-tree "${PR_HEAD_SHA}" | \
-            while IFS=$'\t' read -r -d '' tree_entry path; do
+            while IFS= read -r -d '' tree_record; do
+              tree_entry="${tree_record%%$'\t'*}"
+              path="${tree_record#*$'\t'}"
               mode="${tree_entry%% *}"
               if [[ "${mode}" == "160000" ]]; then
                 continue
               fi
               destination="${pr_root}/${path}"
+              resolved_destination=$(realpath -m -- "${destination}")
+              case "${resolved_destination}" in
+                "${pr_root}"/*) ;;
+                *)
+                  echo "pull request path escapes reconstruction root: ${path}" >&2
+                  exit 1
+                  ;;
+              esac
               mkdir -p -- "$(dirname -- "${destination}")"
               git cat-file blob "${PR_HEAD_SHA}:${path}" > "${destination}"
             done
