@@ -38,27 +38,72 @@ func TestLeiosConversationBuilders(t *testing.T) {
 		mock.NewConversationEntryLeiosNotifyResponse(leiosnotify.NewMsgDone()),
 		mock.NewConversationEntryLeiosVotesResponse(leiosvotes.NewMsgDone()),
 	}
-	expectedResponseIDs := []uint16{
-		leiosfetch.ProtocolId,
-		leiosnotify.ProtocolId,
-		leiosvotes.ProtocolId,
+	expectedResponses := []struct {
+		protocolID uint16
+		messageID  uint8
+	}{
+		{leiosfetch.ProtocolId, leiosfetch.MessageTypeDone},
+		{leiosnotify.ProtocolId, leiosnotify.MessageTypeDone},
+		{leiosvotes.ProtocolId, leiosvotes.MessageTypeDone},
 	}
 	for i, response := range responses {
-		if response.ProtocolId != expectedResponseIDs[i] || !response.IsResponse || len(response.Messages) != 1 {
+		if response.ProtocolId != expectedResponses[i].protocolID || !response.IsResponse {
 			t.Errorf("response %d has unexpected shape: %#v", i, response)
+			continue
+		}
+		if len(response.Messages) != 1 {
+			t.Fatalf("response %d contains %d messages, want 1", i, len(response.Messages))
+		}
+		if response.Messages[0].Type() != expectedResponses[i].messageID {
+			t.Errorf(
+				"response %d message type = %d, want %d",
+				i,
+				response.Messages[0].Type(),
+				expectedResponses[i].messageID,
+			)
 		}
 	}
 
-	for name, conversation := range map[string][]mock.ConversationEntry{
-		"fetch":  mock.ConversationLeiosFetch,
-		"notify": mock.ConversationLeiosNotify,
-		"votes":  mock.ConversationLeiosVotes,
-	} {
-		if len(conversation) != 3 {
-			t.Errorf("%s conversation length = %d, want 3", name, len(conversation))
+	conversations := map[string]struct {
+		entries      []mock.ConversationEntry
+		protocolID   uint16
+		completionID uint8
+	}{
+		"fetch": {
+			entries:      mock.ConversationLeiosFetch,
+			protocolID:   leiosfetch.ProtocolId,
+			completionID: leiosfetch.MessageTypeDone,
+		},
+		"notify": {
+			entries:      mock.ConversationLeiosNotify,
+			protocolID:   leiosnotify.ProtocolId,
+			completionID: leiosnotify.MessageTypeDone,
+		},
+		"votes": {
+			entries:      mock.ConversationLeiosVotes,
+			protocolID:   leiosvotes.ProtocolId,
+			completionID: leiosvotes.MessageTypeDone,
+		},
+	}
+	for name, conversation := range conversations {
+		entries := conversation.entries
+		if len(entries) != 3 {
+			t.Fatalf("%s conversation length = %d, want 3", name, len(entries))
 		}
-		if entry, ok := conversation[2].(mock.ConversationEntryInput); !ok || entry.IsResponse || entry.Message == nil {
-			t.Errorf("%s completion entry has unexpected shape: %#v", name, conversation[2])
+		handshakeRequest, ok := entries[0].(mock.ConversationEntryInput)
+		if !ok || handshakeRequest.ProtocolId != mock.ConversationEntryHandshakeRequestGeneric.ProtocolId || handshakeRequest.MessageType != mock.ConversationEntryHandshakeRequestGeneric.MessageType {
+			t.Fatalf("%s handshake request has unexpected shape: %#v", name, entries[0])
+		}
+		handshakeResponse, ok := entries[1].(mock.ConversationEntryOutput)
+		if !ok || handshakeResponse.ProtocolId != mock.ConversationEntryHandshakeNtNResponse.ProtocolId || !handshakeResponse.IsResponse {
+			t.Fatalf("%s handshake response has unexpected shape: %#v", name, entries[1])
+		}
+		completion, ok := entries[2].(mock.ConversationEntryInput)
+		if !ok || completion.ProtocolId != conversation.protocolID || completion.IsResponse || completion.Message == nil {
+			t.Fatalf("%s completion entry has unexpected shape: %#v", name, entries[2])
+		}
+		if completion.Message.Type() != conversation.completionID {
+			t.Errorf("%s completion message type = %d, want %d", name, completion.Message.Type(), conversation.completionID)
 		}
 	}
 }
