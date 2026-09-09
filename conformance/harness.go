@@ -324,6 +324,12 @@ func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
 	) {
 		mismatches = append(mismatches, "reward account balances")
 	}
+	if !reflect.DeepEqual(
+		got.StakeCredentialDeposits,
+		want.StakeCredentialDeposits,
+	) {
+		mismatches = append(mismatches, "stake credential deposits")
+	}
 	if !reflect.DeepEqual(got.PoolRegistrations, want.PoolRegistrations) {
 		mismatches = append(mismatches, "pool registrations")
 	}

@@ -18,11 +18,13 @@
 package conformance
 
 import (
+	"encoding/hex"
 	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -683,6 +685,31 @@ func TestCompareFinalStateChecksRewardAccountBalances(t *testing.T) {
 	}, HarnessConfig{})
 	err = harness.compareFinalState(vector.FinalState)
 	require.ErrorContains(t, err, "reward account balances")
+}
+
+func TestCompareFinalStateChecksStakeCredentialDeposits(t *testing.T) {
+	delegation := "a1" +
+		"8200581c" + strings.Repeat("03", common.Blake2b224Size) +
+		"840b078080"
+	rawHex := "8400f6f682f68283" +
+		"82a0a0" + "81a0" + "81" + delegation +
+		"84a0a0f683" + "85a0f6f6f6f6" + "8182a0f681f6"
+	raw, err := hex.DecodeString(rawHex)
+	require.NoError(t, err)
+	finalState, err := ParseInitialState(cbor.RawMessage(raw))
+	require.NoError(t, err)
+	require.Len(t, finalState.StakeCredentialDeposits, 1)
+	snapshot := SnapshotFromParsedState(finalState)
+	for credential, deposit := range snapshot.StakeCredentialDeposits {
+		snapshot.StakeCredentialDeposits[credential] = deposit + 1
+		break
+	}
+	harness := NewHarness(&fixedSnapshotStateManager{
+		MockStateManager: NewMockStateManager(),
+		snapshot:         snapshot,
+	}, HarnessConfig{})
+	err = harness.compareFinalState(cbor.RawMessage(raw))
+	require.ErrorContains(t, err, "stake credential deposits")
 }
 
 func TestSnapshotIncludesStakeCredentialDeposits(t *testing.T) {
