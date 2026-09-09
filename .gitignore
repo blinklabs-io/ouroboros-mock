@@ -28,5 +28,7 @@ go.work
 /compose-consensus-vector
 /check-consensus-vector
 
-# Reproducible conformance corpus extracted from the Cardano Blueprint submodule
+# Working copy of the conformance corpus, extracted from the tracked archive
+# conformance/blueprint-vectors.tar.gz by `make prepare-blueprint-testdata`.
+# The archive, not this directory, is what ships in the Go module.
 /conformance/testdata/eras/

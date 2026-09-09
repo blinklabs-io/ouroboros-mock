@@ -101,8 +101,26 @@ type TestVector struct {
 	FilePath string
 }
 
+// hasPathSegment reports whether a slash-normalized path contains name as a
+// whole path segment.
+//
+// A substring test is wrong here: the Cardano Blueprint corpus contains vector
+// directories whose names end in the filter words, such as
+// Conway.Imp.ConwayImpSpec - Version 10.UTXOS.can use reference scripts, which a
+// strings.Contains check for "scripts/" silently excluded.
+func hasPathSegment(normalizedPath, name string) bool {
+	for _, segment := range strings.Split(normalizedPath, "/") {
+		if segment == name {
+			return true
+		}
+	}
+	return false
+}
+
 // CollectVectorFiles walks the testdata directory and returns all vector file paths.
 // It skips pparams-by-hash directories, scripts directories, and non-vector files.
+// Directory filters match whole path segments, so a vector directory whose name
+// merely ends in a filter word is still collected.
 func CollectVectorFiles(root string) ([]string, error) {
 	var vectors []string
 	err := filepath.WalkDir(
@@ -115,14 +133,14 @@ func CollectVectorFiles(root string) ([]string, error) {
 			normalizedPath := filepath.ToSlash(path)
 			if entry.IsDir() {
 				// Skip protocol parameters directory
-				if strings.Contains(normalizedPath, "pparams-by-hash") {
+				if hasPathSegment(normalizedPath, "pparams-by-hash") {
 					return filepath.SkipDir
 				}
 				return nil
 			}
 			// Skip files in special directories
-			if strings.Contains(normalizedPath, "pparams-by-hash") ||
-				strings.Contains(normalizedPath, "scripts/") {
+			if hasPathSegment(normalizedPath, "pparams-by-hash") ||
+				hasPathSegment(normalizedPath, "scripts") {
 				return nil
 			}
 			// Skip documentation files
