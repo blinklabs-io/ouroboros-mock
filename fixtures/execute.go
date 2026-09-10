@@ -27,6 +27,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	gcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
 
@@ -657,10 +658,6 @@ func executeGenesisFixture(fixture Fixture) (int, error) {
 func executeProtocolParametersFixture(fixture Fixture) (int, error) {
 	params, err := fixture.DecodeProtocolParameters()
 	if err != nil {
-		if fixture.Era == "dijkstra" &&
-			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
-			return 1, nil
-		}
 		return 0, fmt.Errorf(
 			"failed to decode protocol-parameters fixture %s: %w",
 			fixture.RelPath,
@@ -683,10 +680,6 @@ func executeProtocolParametersUpdateFixture(
 ) (int, error) {
 	update, err := fixture.DecodeProtocolParameterUpdate()
 	if err != nil {
-		if fixture.Era == "dijkstra" &&
-			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
-			return 1, nil
-		}
 		return 0, fmt.Errorf(
 			"failed to decode protocol-parameters update fixture %s: %w",
 			fixture.RelPath,
@@ -703,10 +696,6 @@ func executeProtocolParametersUpdateFixture(
 	}
 	params, err := baseFixture.DecodeProtocolParameters()
 	if err != nil {
-		if baseFixture.Era == "dijkstra" &&
-			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
-			return 1, nil
-		}
 		return 0, fmt.Errorf(
 			"failed to decode paired protocol parameters fixture %s: %w",
 			baseFixture.RelPath,
@@ -1186,6 +1175,16 @@ func validateDecodedProtocolParameters(
 		}
 		if pp.ProtocolVersion.Major == 0 {
 			return errors.New("missing Conway protocol version")
+		}
+	case *dijkstra.DijkstraProtocolParameters:
+		if pp.A0 == nil || pp.Rho == nil || pp.Tau == nil {
+			return errors.New("missing Dijkstra rational parameters")
+		}
+		if pp.ExecutionCosts.MemPrice == nil || pp.ExecutionCosts.StepPrice == nil {
+			return errors.New("missing Dijkstra execution prices")
+		}
+		if pp.ProtocolVersion.Major == 0 {
+			return errors.New("missing Dijkstra protocol version")
 		}
 	default:
 		return fmt.Errorf("unsupported protocol parameters type %T", params)
