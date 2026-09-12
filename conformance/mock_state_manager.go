@@ -599,8 +599,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			if drepCert.Amount >= 0 {
 				deposit = uint64(drepCert.Amount)
 			}
-			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] =
-				&deposit
+			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
 				m.drepActivityExpiry(),
