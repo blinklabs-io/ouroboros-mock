@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
 	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -283,15 +284,11 @@ func (m *MockStateManager) ApplyTransaction(
 	withdrawals := make(map[ledger.RewardAccountKey]uint64)
 	deregistered := make(map[ledger.RewardAccountKey]bool)
 	for _, cert := range tx.Certificates() {
-		switch common.CertificateType(cert.Type()) {
-		case common.CertificateTypeStakeDeregistration:
-			if deregCert, ok := cert.(*common.StakeDeregistrationCertificate); ok {
-				deregistered[ledger.NewRewardAccountKey(deregCert.StakeCredential)] = true
-			}
-		case common.CertificateTypeDeregistration:
-			if deregCert, ok := cert.(*common.DeregistrationCertificate); ok {
-				deregistered[ledger.NewRewardAccountKey(deregCert.StakeCredential)] = true
-			}
+		switch cert := cert.(type) {
+		case *common.StakeDeregistrationCertificate:
+			deregistered[ledger.NewRewardAccountKey(cert.StakeCredential)] = true
+		case *common.DeregistrationCertificate:
+			deregistered[ledger.NewRewardAccountKey(cert.StakeCredential)] = true
 		}
 	}
 	for rewardAccount, amount := range tx.Withdrawals() {
@@ -955,7 +952,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 	cloned.ProposedMembersByCredential = maps.Clone(
 		proposal.ProposedMembersByCredential,
 	)
-	cloned.PolicyHash = append([]byte(nil), proposal.PolicyHash...)
+	cloned.PolicyHash = slices.Clone(proposal.PolicyHash)
 	if proposal.ParentActionId != nil {
 		parentActionID := *proposal.ParentActionId
 		cloned.ParentActionId = &parentActionID
@@ -976,10 +973,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 				len(proposal.ParameterUpdate.CostModels),
 			)
 			for version, costModel := range proposal.ParameterUpdate.CostModels {
-				parameterUpdate.CostModels[version] = append(
-					[]int64(nil),
-					costModel...,
-				)
+				parameterUpdate.CostModels[version] = slices.Clone(costModel)
 			}
 		}
 		cloned.ParameterUpdate = &parameterUpdate
@@ -1017,8 +1011,8 @@ func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
 		return nil
 	}
 	cloned := *constitution
-	cloned.AnchorHash = append([]byte(nil), constitution.AnchorHash...)
-	cloned.PolicyHash = append([]byte(nil), constitution.PolicyHash...)
+	cloned.AnchorHash = slices.Clone(constitution.AnchorHash)
+	cloned.PolicyHash = slices.Clone(constitution.PolicyHash)
 	return &cloned
 }
 

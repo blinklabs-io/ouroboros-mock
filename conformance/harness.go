@@ -414,7 +414,7 @@ func proposalStatesEqual(
 		policyMismatch := len(wantInfo.PolicyHash) > 0 &&
 			!bytes.Equal(gotInfo.PolicyHash, wantInfo.PolicyHash)
 		parameterMismatch := wantInfo.ParameterUpdate != nil &&
-			!reflect.DeepEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate)
+			!parameterUpdatesEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate)
 		if gotInfo.ActionType != wantInfo.ActionType ||
 			!proposalEpochsEqual(gotInfo, wantInfo, currentEpoch) ||
 			parentMismatch || votesMismatch ||
