@@ -203,9 +203,9 @@ func (s *stubBackend) CommitteeHotCredentialMember(
 }
 
 func (s *stubBackend) DRepRegistration(
-	hash common.Blake2b224,
+	credential common.Credential,
 ) (*common.DRepRegistration, error) {
-	return s.getInner().DRepRegistration(hash)
+	return s.getInner().DRepRegistration(credential)
 }
 
 func (s *stubBackend) DRepRegistrations() ([]common.DRepRegistration, error) {

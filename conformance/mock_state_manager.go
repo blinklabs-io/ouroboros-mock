@@ -58,8 +58,11 @@ type MockStateManager struct {
 	// poolRegistrations tracks registered pools
 	poolRegistrations map[common.Blake2b224]bool
 
-	// drepRegistrations tracks registered DReps
-	drepRegistrations map[common.Blake2b224]bool
+	// drepRegistrations tracks registered DReps by full credential
+	// identity, holding the deposit recorded against each registration. A
+	// nil value is a registration the fixture supplied no deposit for,
+	// which is distinct from a recorded deposit of zero.
+	drepRegistrations map[ledger.RewardAccountKey]*uint64
 
 	// committeeMembers tracks committee members (cold key -> expiry epoch)
 	committeeMembers map[ledger.RewardAccountKey]uint64
@@ -72,6 +75,21 @@ type MockStateManager struct {
 	committeeResignations map[ledger.RewardAccountKey]bool
 }
 
+// drepSeedDeposit returns the deposit the initial state records for a DRep
+// credential, or nil when the state supplies none. It is a pointer rather
+// than a zero default so an unsupplied deposit stays distinguishable from a
+// recorded deposit of zero.
+func drepSeedDeposit(
+	state *ParsedInitialState,
+	key ledger.RewardAccountKey,
+) *uint64 {
+	deposit, found := state.DRepDeposits[key]
+	if !found {
+		return nil
+	}
+	return &deposit
+}
+
 // NewMockStateManager creates a new MockStateManager.
 func NewMockStateManager() *MockStateManager {
 	return &MockStateManager{
@@ -81,7 +99,7 @@ func NewMockStateManager() *MockStateManager {
 		stakeCredentialDeposits: make(map[ledger.RewardAccountKey]uint64),
 		rewardAccounts:          make(map[ledger.RewardAccountKey]uint64),
 		poolRegistrations:       make(map[common.Blake2b224]bool),
-		drepRegistrations:       make(map[common.Blake2b224]bool),
+		drepRegistrations:       make(map[ledger.RewardAccountKey]*uint64),
 		committeeMembers:        make(map[ledger.RewardAccountKey]uint64),
 		hotKeyAuthorizations: make(
 			map[ledger.RewardAccountKey]common.Credential,
@@ -104,7 +122,7 @@ func (m *MockStateManager) LoadInitialState(
 	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
-	m.drepRegistrations = make(map[common.Blake2b224]bool)
+	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
 	m.committeeMembers = make(map[ledger.RewardAccountKey]uint64)
 	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
 	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
@@ -170,9 +188,27 @@ func (m *MockStateManager) LoadInitialState(
 		}
 	}
 
-	// Load DRep registrations
+	// Load DRep registrations. The typed set is authoritative; the legacy
+	// hash list is its key-hash compatibility projection, matching
+	// GovernanceState.RegisterDRep.
+	for key, registered := range state.DRepRegistrationsByCredential {
+		if !registered {
+			continue
+		}
+		m.drepRegistrations[key] = drepSeedDeposit(state, key)
+	}
 	for _, hash := range state.DRepRegistrations {
-		m.drepRegistrations[hash] = true
+		if hasCredentialHash(state.DRepRegistrationsByCredential, hash) {
+			continue
+		}
+		key := ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}
+		if _, found := m.drepRegistrations[key]; found {
+			continue
+		}
+		m.drepRegistrations[key] = drepSeedDeposit(state, key)
 	}
 	// Load committee members. Legacy entries represent key credentials, but a
 	// hash already present in the typed state may be its compatibility projection.
@@ -563,7 +599,13 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeRegistrationDrep:
 		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
 			credential := drepCert.DrepCredential
-			m.drepRegistrations[credential.Credential] = true
+			// The certificate carries the deposit the DRep paid, and
+			// that is the amount its deregistration must refund.
+			deposit := uint64(0)
+			if drepCert.Amount >= 0 {
+				deposit = uint64(drepCert.Amount)
+			}
+			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
 				m.drepActivityExpiry(),
@@ -573,11 +615,19 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeDeregistrationDrep:
 		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
 			credential := drepCert.DrepCredential
+			key := ledger.NewRewardAccountKey(credential)
 			m.govState.DeregisterDRepCredential(credential)
-			if m.govState.IsDRepRegistered(credential.Credential) {
-				m.drepRegistrations[credential.Credential] = true
-			} else {
-				delete(m.drepRegistrations, credential.Credential)
+			if !m.govState.IsDRepCredentialRegistered(credential) {
+				delete(m.drepRegistrations, key)
+				if !hasRegisteredCredentialHash(
+					m.govState.DRepRegistrationsByCredential,
+					credential.Credential,
+				) {
+					delete(m.drepRegistrations, ledger.RewardAccountKey{
+						CredType:   common.CredentialTypeAddrKeyHash,
+						Credential: credential.Credential,
+					})
+				}
 			}
 		}
 
@@ -1430,7 +1480,7 @@ func (m *MockStateManager) Reset() error {
 	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
-	m.drepRegistrations = make(map[common.Blake2b224]bool)
+	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
 	m.committeeMembers = make(map[ledger.RewardAccountKey]uint64)
 	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
 	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
@@ -1495,15 +1545,17 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	)
 
 	// Set up DRep lookup callback
-	drepRegs := m.drepRegistrations // capture for closure
+	drepRegs := maps.Clone(m.drepRegistrations) // capture for closure
 	builder.WithDRepRegistration(
-		func(cred common.Blake2b224) (*common.DRepRegistration, error) {
-			if drepRegs[cred] {
-				return &common.DRepRegistration{
-					Credential: cred,
-				}, nil
+		func(cred common.Credential) (*common.DRepRegistration, error) {
+			deposit, found := drepRegs[ledger.NewRewardAccountKey(cred)]
+			if !found {
+				return nil, nil
 			}
-			return nil, nil
+			return &common.DRepRegistration{
+				Credential: cred,
+				Deposit:    deposit,
+			}, nil
 		},
 	)
 	drepDelegations := m.govState.DRepDelegationsByCredential
