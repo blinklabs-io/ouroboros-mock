@@ -16,7 +16,9 @@
 package conformance
 
 import (
+	"bytes"
 	"maps"
+	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -29,13 +31,23 @@ import (
 type StateProvider = ledger.StateProvider
 
 // RewardAccountBalanceSetter is an optional StateManager extension for
-// preserving the full reward-account credential identity. The harness falls
-// back to StateManager.SetRewardBalances for implementations that have not yet
-// adopted it.
+// preserving the full reward-account credential identity for explicit callers.
+// The harness derives rewards from initial state and applied events, not setters.
 type RewardAccountBalanceSetter interface {
 	// SetRewardAccountBalances updates balances for accounts already registered
 	// by the state manager. It must not create or remove registrations.
 	SetRewardAccountBalances(balances map[ledger.RewardAccountKey]uint64)
+}
+
+// StateSnapshotProvider is an optional StateManager extension for exposing
+// canonical observable state for final-state comparison. A state manager used
+// with vectors that contain final_state must implement this interface; the
+// harness returns an error instead of silently skipping that comparison when
+// it is absent.
+type StateSnapshotProvider interface {
+	// GetStateSnapshot returns the canonical observable state after event
+	// processing.
+	GetStateSnapshot() *StateSnapshot
 }
 
 // StateManager handles state mutations during test execution.
@@ -64,7 +76,7 @@ type StateManager interface {
 	GetGovernanceState() *GovernanceState
 
 	// SetRewardBalances sets the reward account balances.
-	// Used by the harness to provide adjusted balances for withdrawal validation.
+	// Retained for explicit callers; the harness does not inject reward balances.
 	SetRewardBalances(balances map[common.Blake2b224]uint64)
 
 	// GetProtocolParameters returns the current protocol parameters.
@@ -73,6 +85,51 @@ type StateManager interface {
 
 	// Reset clears all state for the next test vector.
 	Reset() error
+}
+
+// StateSnapshot is the canonical observable state used to compare a
+// StateManager's result with a vector's final_state. It intentionally contains
+// only state that the conformance manager must expose to validation and
+// downstream consumers; opaque ledger implementation details are excluded.
+type StateSnapshot struct {
+	CurrentEpoch                   uint64
+	UtxoIDs                        []string
+	StakeRegistrationsByCredential map[ledger.RewardAccountKey]bool
+	RewardAccountBalances          map[ledger.RewardAccountKey]uint64
+	StakeCredentialDeposits        map[ledger.RewardAccountKey]uint64
+	PoolRegistrations              map[common.Blake2b224]bool
+	Governance                     *GovernanceState
+}
+
+// SnapshotFromParsedState converts the parser's canonical state projection
+// into the comparable snapshot contract.
+func SnapshotFromParsedState(state *ParsedInitialState) *StateSnapshot {
+	ids := make([]string, 0, len(state.Utxos))
+	for id := range state.Utxos {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	registrations := maps.Clone(state.StakeRegistrationsByCredential)
+	if len(registrations) == 0 {
+		registrations = make(map[ledger.RewardAccountKey]bool)
+		for hash, registered := range state.StakeRegistrations {
+			registrations[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: hash,
+			}] = registered
+		}
+	}
+	governance := NewGovernanceState()
+	governance.LoadFromParsedState(state)
+	return &StateSnapshot{
+		CurrentEpoch:                   state.CurrentEpoch,
+		UtxoIDs:                        ids,
+		StakeRegistrationsByCredential: registrations,
+		RewardAccountBalances:          maps.Clone(state.RewardAccountBalances),
+		StakeCredentialDeposits:        maps.Clone(state.StakeCredentialDeposits),
+		PoolRegistrations:              maps.Clone(state.PoolRegistrations),
+		Governance:                     governance,
+	}
 }
 
 // GovernanceState tracks governance-related state during test execution.
@@ -852,6 +909,13 @@ func (g *GovernanceState) DeregisterDRepCredential(
 	key := ledger.NewRewardAccountKey(credential)
 	delete(g.DRepRegistrationsByCredential, key)
 	delete(g.DRepExpiries, key)
+	for stake, delegation := range g.DRepDelegationsByCredential {
+		if delegation.Type == int(credential.CredType) &&
+			bytes.Equal(delegation.Credential, credential.Credential[:]) {
+			delete(g.DRepDelegationsByCredential, stake)
+		}
+	}
+	g.DRepDelegations = drepDelegationsByHash(g.DRepDelegationsByCredential)
 	for other, registered := range g.DRepRegistrationsByCredential {
 		if registered && other.Credential == credential.Credential {
 			g.DRepRegistrations[credential.Credential] = true

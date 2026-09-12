@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
 	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -135,14 +136,12 @@ func (m *MockStateManager) LoadInitialState(
 			}] = state.RewardAccounts[hash]
 		}
 	}
-	// Initial snapshots may carry the original registration deposit in each
-	// account tuple. Fall back to the current key deposit for older snapshots
-	// that do not record it.
+	// Preserve the parsed registration deposit when the initial state exposes
+	// it. Do not fabricate a current-parameter value for older state formats;
+	// the original deposit is not recoverable from registration alone.
 	for credential := range m.stakeRegistrations {
-		if deposit, exists := state.StakeCredentialDeposits[credential]; exists {
+		if deposit, ok := state.StakeCredentialDeposits[credential]; ok {
 			m.stakeCredentialDeposits[credential] = deposit
-		} else {
-			m.stakeCredentialDeposits[credential] = keyDepositAmount(pp)
 		}
 	}
 	if len(state.RewardAccountBalances) > 0 {
@@ -281,6 +280,41 @@ func (m *MockStateManager) ApplyTransaction(
 	txHash := tx.Hash()
 	txHashStr := hex.EncodeToString(txHash.Bytes())
 
+	// Validate withdrawals before mutating any UTxO or certificate state.
+	withdrawals := make(map[ledger.RewardAccountKey]uint64)
+	deregistered := make(map[ledger.RewardAccountKey]bool)
+	for _, cert := range tx.Certificates() {
+		switch cert := cert.(type) {
+		case *common.StakeDeregistrationCertificate:
+			deregistered[ledger.NewRewardAccountKey(cert.StakeCredential)] = true
+		case *common.DeregistrationCertificate:
+			deregistered[ledger.NewRewardAccountKey(cert.StakeCredential)] = true
+		}
+	}
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		withdrawals[key] += amount.Uint64()
+	}
+	for key, withdrawal := range withdrawals {
+		if deregistered[key] {
+			continue
+		}
+		balance, exists := m.rewardAccounts[key]
+		if exists && withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+	}
+
 	// Process consumed UTxOs (inputs)
 	inputs := tx.Inputs()
 	for _, input := range inputs {
@@ -317,6 +351,31 @@ func (m *MockStateManager) ApplyTransaction(
 		m.processCertificate(cert)
 	}
 
+	// Process withdrawals against balances derived from initial state and
+	// previously applied events, after pre-validation above.
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		balance, exists := m.rewardAccounts[key]
+		if !exists {
+			continue
+		}
+		withdrawal := amount.Uint64()
+		if withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+		m.rewardAccounts[key] = balance - withdrawal
+	}
+	m.syncRewardBalanceMirrors()
 	// Process governance proposals
 	proposals := tx.ProposalProcedures()
 	for idx, proposal := range proposals {
@@ -660,6 +719,9 @@ func (m *MockStateManager) deregisterStakeCredential(
 }
 
 func keyDepositAmount(pp common.ProtocolParameters) uint64 {
+	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok && conwayPP != nil {
+		return uint64(conwayPP.KeyDeposit)
+	}
 	provider, ok := pp.(interface{ KeyDepositAmount() *big.Int })
 	if !ok || provider.KeyDepositAmount() == nil || !provider.KeyDepositAmount().IsUint64() {
 		return 0
@@ -889,7 +951,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 	cloned.ProposedMembersByCredential = maps.Clone(
 		proposal.ProposedMembersByCredential,
 	)
-	cloned.PolicyHash = append([]byte(nil), proposal.PolicyHash...)
+	cloned.PolicyHash = slices.Clone(proposal.PolicyHash)
 	if proposal.ParentActionId != nil {
 		parentActionID := *proposal.ParentActionId
 		cloned.ParentActionId = &parentActionID
@@ -910,10 +972,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 				len(proposal.ParameterUpdate.CostModels),
 			)
 			for version, costModel := range proposal.ParameterUpdate.CostModels {
-				parameterUpdate.CostModels[version] = append(
-					[]int64(nil),
-					costModel...,
-				)
+				parameterUpdate.CostModels[version] = slices.Clone(costModel)
 			}
 		}
 		cloned.ParameterUpdate = &parameterUpdate
@@ -951,8 +1010,8 @@ func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
 		return nil
 	}
 	cloned := *constitution
-	cloned.AnchorHash = append([]byte(nil), constitution.AnchorHash...)
-	cloned.PolicyHash = append([]byte(nil), constitution.PolicyHash...)
+	cloned.AnchorHash = slices.Clone(constitution.AnchorHash)
+	cloned.PolicyHash = slices.Clone(constitution.PolicyHash)
 	return &cloned
 }
 
@@ -1376,6 +1435,28 @@ func (m *MockStateManager) GetStateProvider() StateProvider {
 // GetGovernanceState implements StateManager.GetGovernanceState.
 func (m *MockStateManager) GetGovernanceState() *GovernanceState {
 	return m.govState
+}
+
+// GetStateSnapshot implements StateSnapshotProvider.
+func (m *MockStateManager) GetStateSnapshot() *StateSnapshot {
+	utxoIDs := make([]string, 0, len(m.utxos))
+	for id := range m.utxos {
+		utxoIDs = append(utxoIDs, id)
+	}
+	sort.Strings(utxoIDs)
+	registrations := make(map[ledger.RewardAccountKey]bool, len(m.stakeRegistrations))
+	for credential := range m.stakeRegistrations {
+		registrations[credential] = true
+	}
+	return &StateSnapshot{
+		CurrentEpoch:                   m.currentEpoch,
+		UtxoIDs:                        utxoIDs,
+		StakeRegistrationsByCredential: registrations,
+		RewardAccountBalances:          maps.Clone(m.rewardAccounts),
+		StakeCredentialDeposits:        maps.Clone(m.stakeCredentialDeposits),
+		PoolRegistrations:              maps.Clone(m.poolRegistrations),
+		Governance:                     cloneGovernanceState(m.govState),
+	}
 }
 
 // SetRewardBalances implements StateManager.SetRewardBalances.

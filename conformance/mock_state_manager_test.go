@@ -18,7 +18,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -71,29 +70,114 @@ func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
 	assert.Equal(t, uint64(11), *deposit)
 }
 
-func TestMockStateManagerLoadsHistoricalStakeCredentialDeposit(t *testing.T) {
-	// Conway AccountState is [reward, deposit, pool-delegation,
-	// drep-delegation]. The recorded deposit predates the current parameter.
-	hash := filledBlake2b224(0x03)
-	delegation := "a1" +
-		"8200581c" + strings.Repeat("03", common.Blake2b224Size) +
-		"840b078080"
-	state := parseSyntheticInitialState(t, "", "", "81"+delegation, "")
+func TestMockStateManagerLoadsOriginalStakeCredentialDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x03},
+	}
+	key := ledger.NewRewardAccountKey(credential)
 	manager := NewMockStateManager()
-	pp := &conway.ConwayProtocolParameters{KeyDeposit: 99}
-
-	require.NoError(t, manager.LoadInitialState(state, pp))
-	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(
-		common.Credential{
-			CredType:   common.CredentialTypeAddrKeyHash,
-			Credential: hash,
+	state := &ParsedInitialState{
+		StakeRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
+			key: true,
 		},
-	)
+		RewardAccountBalances: map[ledger.RewardAccountKey]uint64{
+			key: 7,
+		},
+		StakeCredentialDeposits: map[ledger.RewardAccountKey]uint64{
+			key: 2,
+		},
+	}
+	require.NoError(t, manager.LoadInitialState(
+		state,
+		&conway.ConwayProtocolParameters{KeyDeposit: 11},
+	))
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
 	require.NoError(t, err)
 	require.NotNil(t, deposit)
-	assert.Equal(t, uint64(7), *deposit)
+	assert.Equal(t, uint64(2), *deposit)
+}
+func TestApplyTransactionValidatesWithdrawalsBeforeMutatingState(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x03},
+	}
+	key := ledger.NewRewardAccountKey(credential)
+	address, err := common.NewAddressFromParts(
+		common.AddressTypeNoneKey,
+		common.AddressNetworkTestnet,
+		nil,
+		credential.Credential[:],
+	)
+	require.NoError(t, err)
+	manager := NewMockStateManager()
+	manager.rewardAccounts[key] = 1
+	manager.stakeRegistrations[key] = 1
+	input, err := ledger.NewTransactionInputBuilder().
+		WithTxId([]byte{0x01}).WithIndex(0).Build()
+	require.NoError(t, err)
+	manager.utxos[fmt.Sprintf("%s#0", hex.EncodeToString(input.Id().Bytes()))] = common.Utxo{
+		Id: input,
+	}
+	output, err := ledger.NewTransactionOutputBuilder().
+		WithAddress(address.String()).WithLovelace(1).Build()
+	require.NoError(t, err)
+	cert := &common.RegistrationCertificate{
+		CertType:        uint(common.CertificateTypeRegistration),
+		StakeCredential: common.Credential{Credential: common.Blake2b224{0x04}},
+		Amount:          1,
+	}
+	txBuilder := ledger.NewTransactionBuilder().
+		WithCertificates(cert).
+		WithWithdrawals(map[*common.Address]uint64{&address: 2})
+	txBuilder.WithId([]byte{0x02}).WithInputs(input).WithOutputs(output)
+	tx := txBuilder
+	_, err = tx.Build()
+	require.NoError(t, err)
+
+	err = manager.ApplyTransaction(tx, 0)
+	require.ErrorContains(t, err, "exceeds reward account balance")
+	assert.Contains(t, manager.utxos, fmt.Sprintf("%s#0", hex.EncodeToString(input.Id().Bytes())))
+	assert.NotContains(t, manager.stakeRegistrations, ledger.NewRewardAccountKey(cert.StakeCredential))
 }
 
+func TestApplyTransactionAllowsWithdrawalWithStakeDeregistration(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x05},
+	}
+	key := ledger.NewRewardAccountKey(credential)
+	address, err := common.NewAddressFromParts(
+		common.AddressTypeNoneKey,
+		common.AddressNetworkTestnet,
+		nil,
+		credential.Credential[:],
+	)
+	require.NoError(t, err)
+	manager := NewMockStateManager()
+	manager.rewardAccounts[key] = 1
+	manager.stakeRegistrations[key] = 1
+	input, err := ledger.NewTransactionInputBuilder().
+		WithTxId([]byte{0x05}).WithIndex(0).Build()
+	require.NoError(t, err)
+	output, err := ledger.NewTransactionOutputBuilder().
+		WithAddress(address.String()).WithLovelace(1).Build()
+	require.NoError(t, err)
+	tx := ledger.NewTransactionBuilder().
+		WithCertificates(&common.StakeDeregistrationCertificate{
+			CertType:        uint(common.CertificateTypeStakeDeregistration),
+			StakeCredential: credential,
+		}).
+		WithWithdrawals(map[*common.Address]uint64{&address: 2}).
+		WithInputs(input).WithOutputs(output)
+
+	built, err := tx.Build()
+	require.NoError(t, err)
+	require.NoError(t, manager.ApplyTransaction(built, 0))
+	assert.NotContains(t, manager.rewardAccounts, key)
+	assert.NotContains(t, manager.stakeRegistrations, key)
+}
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
 	coldCredential := common.Credential{

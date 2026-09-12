@@ -69,7 +69,9 @@ type ParsedInitialState struct {
 	RewardAccountBalances map[mockledger.RewardAccountKey]uint64
 
 	// StakeCredentialDeposits maps registered stake credentials to their
-	// original registration deposits.
+	// original registration deposits. Missing entries mean that the original
+	// deposit is unknown and must not be replaced with the current protocol
+	// parameter value.
 	StakeCredentialDeposits map[mockledger.RewardAccountKey]uint64
 
 	// PoolRegistrations tracks which pools are registered (by pool key hash).
@@ -412,6 +414,7 @@ func parseCertStateFromRawCBOR(
 			clear(state.StakeRegistrationsByCredential)
 			clear(state.RewardAccounts)
 			clear(state.RewardAccountBalances)
+			clear(state.StakeCredentialDeposits)
 			clear(state.PoolDelegationsByCredential)
 			clear(state.DRepDelegations)
 			clear(state.DRepDelegationsByCredential)
@@ -1257,7 +1260,7 @@ func parseDelegationState(
 			if cred == nil {
 				continue
 			}
-			balance, deposit, hasDeposit, registered := extractRewardAccount(v)
+			balance, deposit, hasDeposit, registered := extractRewardAccountState(v)
 			if !registered {
 				continue
 			}
@@ -1272,7 +1275,9 @@ func parseDelegationState(
 
 			// Current AccountState values place stake-pool delegation third.
 			if vArr, ok := v.([]any); ok && len(vArr) > 2 {
-				if pool := extractBlake2b224(unwrapPointer(vArr[2])); pool != nil {
+				if pool := extractBlake2b224(
+					unwrapSingleton(unwrapPointer(vArr[2])),
+				); pool != nil {
 					state.PoolDelegationsByCredential[accountKey] = *pool
 				}
 			}
@@ -1284,7 +1289,7 @@ func parseDelegationState(
 					if len(vArr) <= idx {
 						continue
 					}
-					if drep := extractDRepDelegation(vArr[idx]); drep != nil {
+					if drep := extractDRepDelegation(unwrapPointer(vArr[idx])); drep != nil {
 						if state.DRepDelegationsByCredential == nil {
 							state.DRepDelegationsByCredential = make(
 								map[mockledger.RewardAccountKey]common.Drep,
@@ -1316,17 +1321,9 @@ func parseDelegationState(
 	return nil
 }
 
-// extractRewardAccountBalance reads reward balances from the account layouts
-// used by conformance vectors. Vendored UMap values wrap [reward, deposit] in
-// an optional account state, while modern Conway AccountState values expose
-// balance and deposit directly. The historical rewards-map form remains
-// supported for synthetic and downstream fixtures.
-func extractRewardAccountBalance(raw any) (uint64, bool) {
-	balance, _, _, registered := extractRewardAccount(raw)
-	return balance, registered
-}
-
-func extractRewardAccount(raw any) (uint64, uint64, bool, bool) {
+func extractRewardAccountState(
+	raw any,
+) (balance, deposit uint64, hasDeposit, registered bool) {
 	account, ok := raw.([]any)
 	if !ok || len(account) == 0 {
 		return 0, 0, false, false
@@ -1334,8 +1331,6 @@ func extractRewardAccount(raw any) (uint64, uint64, bool, bool) {
 
 	switch balanceState := account[0].(type) {
 	case uint64:
-		var deposit uint64
-		hasDeposit := false
 		if len(account) > 1 {
 			deposit, hasDeposit = account[1].(uint64)
 		}
@@ -1349,15 +1344,10 @@ func extractRewardAccount(raw any) (uint64, uint64, bool, bool) {
 			return 0, 0, false, false
 		}
 		balance, ok := legacyAccount[0].(uint64)
-		if !ok {
-			return 0, 0, false, false
-		}
-		var deposit uint64
-		hasDeposit := false
 		if len(legacyAccount) > 1 {
 			deposit, hasDeposit = legacyAccount[1].(uint64)
 		}
-		return balance, deposit, hasDeposit, true
+		return balance, deposit, hasDeposit, ok
 	case map[any]any:
 		if len(balanceState) == 0 {
 			return 0, 0, false, true
@@ -1386,14 +1376,14 @@ func extractDRepDelegation(raw any) *common.Drep {
 		}
 	}
 	items, ok := raw.([]any)
-	if !ok || len(items) != 1 {
+	if !ok {
 		return nil
-	}
-	if wrapped, ok := items[0].([]any); ok {
-		items = wrapped
 	}
 	if len(items) != 1 {
 		return nil
+	}
+	if wrapped, ok := items[0].([]any); ok {
+		return extractDRepDelegation(wrapped)
 	}
 	drepType, ok := items[0].(uint64)
 	if !ok || (drepType != common.DrepTypeAbstain &&
@@ -1806,6 +1796,7 @@ func extractProposalInfo(raw any) GovActionInfo {
 		info.ProposedMembers = committeeMembersByHash(
 			info.ProposedMembersByCredential,
 		)
+		extractProposalPayload(&info, procedure)
 	}
 
 	// proposed_in at arr[5]
@@ -1819,6 +1810,72 @@ func extractProposalInfo(raw any) GovActionInfo {
 	}
 
 	return info
+}
+
+// extractProposalPayload preserves governance fields encoded inside the action
+// payload rather than in the surrounding proposal record.
+func extractProposalPayload(info *GovActionInfo, procedure []any) {
+	if info == nil {
+		return
+	}
+	var action []any
+	for i := 2; i < len(procedure) && i <= 4; i++ {
+		candidate, ok := procedure[i].([]any)
+		if ok && len(candidate) > 0 {
+			if _, ok := candidate[0].(uint64); ok {
+				action = candidate
+				break
+			}
+		}
+	}
+	if len(action) == 0 {
+		return
+	}
+	if len(action) > 1 {
+		if parent := extractGovActionId(action[1]); parent != "" {
+			info.ParentActionId = &parent
+		}
+	}
+	if len(action) < 3 {
+		return
+	}
+	switch info.ActionType {
+	case common.GovActionTypeNewConstitution:
+		constitution, ok := action[2].([]any)
+		if !ok || len(constitution) < 2 {
+			return
+		}
+		if policyHash := rawBytes(constitution[1]); len(policyHash) > 0 {
+			info.PolicyHash = policyHash
+		}
+	case common.GovActionTypeParameterChange:
+		encoded, err := cbor.Encode(action[2])
+		if err != nil {
+			return
+		}
+		var update conway.ConwayProtocolParameterUpdate
+		if _, err := cbor.Decode(encoded, &update); err == nil {
+			info.ParameterUpdate = &update
+		}
+	case common.GovActionTypeHardForkInitiation,
+		common.GovActionTypeTreasuryWithdrawal,
+		common.GovActionTypeNoConfidence,
+		common.GovActionTypeUpdateCommittee,
+		common.GovActionTypeInfo:
+		// These action payloads do not expose additional fields that this
+		// parser needs to preserve for final-state comparison.
+	}
+}
+
+func rawBytes(raw any) []byte {
+	switch value := raw.(type) {
+	case []byte:
+		return append([]byte(nil), value...)
+	case cbor.ByteString:
+		return append([]byte(nil), value.Bytes()...)
+	default:
+		return nil
+	}
 }
 
 func extractProposalStake(
@@ -1861,6 +1918,10 @@ func extractVotes(votes map[string]uint8, votesRaw any, voterTypeBase uint8) {
 			// Raw bytes - assume key hash (type 0)
 			credHash = hex.EncodeToString(key.Bytes())
 			credType = 0
+		case stakeCredential:
+			credHash = hex.EncodeToString(key.Hash[:])
+			//nolint:gosec // CredType is 0 or 1
+			credType = uint8(key.Type)
 		case []any:
 			// [type, hash] credential - extract actual credential type
 			if cred := extractCredentialHash(key); cred != nil {
@@ -2180,6 +2241,13 @@ func unwrapPointer(v any) any {
 	// If it's a pointer to any, dereference once
 	if ptr, ok := v.(*any); ok && ptr != nil {
 		return *ptr
+	}
+	return v
+}
+
+func unwrapSingleton(v any) any {
+	if items, ok := v.([]any); ok && len(items) == 1 {
+		return items[0]
 	}
 	return v
 }

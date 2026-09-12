@@ -76,7 +76,7 @@ The harness reads `start_slot` (index 0) and `epoch_length` (index 2) from confi
 
 ## NewEpochState Structure (initial\_state and final\_state)
 
-Both `initial_state` and `final_state` are 7-element CBOR arrays representing a Cardano `NewEpochState`. The harness reads from `initial_state`; `final_state` is used to extract final reward balances.
+Both `initial_state` and `final_state` encode Cardano ledger state. The harness loads `initial_state` before execution and compares the resulting snapshot with `final_state` afterward. Expected final-state values are not execution inputs.
 
 ```
 NewEpochState = [

@@ -18,11 +18,15 @@
 package conformance
 
 import (
+	"encoding/hex"
 	"maps"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -245,7 +249,9 @@ func TestVectorStructure(t *testing.T) {
 			t.Errorf("%s: empty initial state", path)
 		}
 		if len(vector.FinalState) == 0 {
-			t.Errorf("%s: empty final state", path)
+			if hasSuccessfulTransaction(vector.Events) {
+				t.Errorf("%s: successful vector missing final state", path)
+			}
 		}
 		if vector.FilePath != path {
 			t.Errorf("%s: FilePath mismatch: %s", path, vector.FilePath)
@@ -453,8 +459,8 @@ func bytesToHex(b []byte) string {
 //   - Runs all vectors and collects pass/fail statistics
 //   - Logs the first few failures for debugging
 //
-// This test verifies that MockStateManager processes every conformance vector
-// successfully.
+// This test verifies that MockStateManager reaches the canonical final state
+// for every conformance vector.
 func TestMockStateManager(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	// Create a MockStateManager
@@ -466,8 +472,7 @@ func TestMockStateManager(t *testing.T) {
 		Debug:        false,
 	})
 
-	// Run every collected vector to verify the harness and aggregate failure
-	// reporting.
+	// Run every collected vector to verify the harness works.
 	results, err := harness.RunAllVectorsWithResults()
 	if err != nil {
 		t.Fatalf("failed to run vectors: %v", err)
@@ -496,7 +501,226 @@ func TestMockStateManager(t *testing.T) {
 			failCount++
 		}
 	}
+
 	require.Zero(t, failures, "MockStateManager conformance vectors failed")
+}
+
+type noOpStateManager struct {
+	*MockStateManager
+}
+
+func (m *noOpStateManager) ApplyTransaction(common.Transaction, uint64) error {
+	return nil
+}
+
+func TestFinalStateComparisonRejectsNoOpStateManager(t *testing.T) {
+	sm := &noOpStateManager{MockStateManager: NewMockStateManager()}
+	harness := NewHarness(sm, HarnessConfig{TestdataRoot: "testdata"})
+	results, err := harness.RunAllVectorsWithResults()
+	require.NoError(t, err)
+
+	failed := 0
+	for _, result := range results {
+		if !result.Success && result.Error != nil &&
+			strings.Contains(result.Error.Error(), "final state comparison failed") {
+			failed++
+		}
+	}
+	require.Positive(t, failed, "no-op StateManager must fail final-state comparison")
+}
+
+func TestSuccessfulVectorRequiresFinalState(t *testing.T) {
+	harness := NewHarness(NewMockStateManager(), HarnessConfig{})
+	require.ErrorContains(
+		t,
+		harness.compareFinalStateForVector(nil, true),
+		"successful vector is missing final_state",
+	)
+	require.NoError(t, harness.compareFinalStateForVector(nil, false))
+}
+
+func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
+	parent := "parent#0"
+	base := GovActionInfo{
+		ActionType:      common.GovActionTypeNoConfidence,
+		SubmittedEpoch:  1,
+		ExpiresAfter:    5,
+		ParentActionId:  &parent,
+		Votes:           map[string]uint8{"drep:key": 1},
+		PolicyHash:      []byte{1, 2, 3},
+		ParameterUpdate: &conway.ConwayProtocolParameterUpdate{},
+	}
+
+	for name, mutate := range map[string]func(*GovActionInfo){
+		"parent": func(info *GovActionInfo) {
+			other := "other#0"
+			info.ParentActionId = &other
+		},
+		"votes": func(info *GovActionInfo) {
+			info.Votes["drep:key"] = 2
+		},
+		"policy hash": func(info *GovActionInfo) {
+			info.PolicyHash = []byte{4, 5, 6}
+		},
+		"parameter update": func(info *GovActionInfo) {
+			value := uint(2)
+			info.ParameterUpdate.MinFeeA = &value
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gotInfo := base
+			gotInfo.Votes = maps.Clone(base.Votes)
+			if base.ParameterUpdate != nil {
+				update := *base.ParameterUpdate
+				gotInfo.ParameterUpdate = &update
+			}
+			mutate(&gotInfo)
+			got := map[string]*ProposalState{"proposal#0": {GovActionInfo: gotInfo}}
+			want := map[string]*ProposalState{"proposal#0": {GovActionInfo: base}}
+			require.False(t, proposalStatesEqual(got, want, 1))
+		})
+	}
+}
+
+func TestProposalEpochsEqualChecksObservedSubmission(t *testing.T) {
+	got := GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8}
+	want := GovActionInfo{SubmittedEpoch: 10, ExpiresAfter: 15}
+	assert.True(t, proposalEpochsEqual(got, want, 7))
+	assert.False(t, proposalEpochsEqual(
+		GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8},
+		GovActionInfo{SubmittedEpoch: 4, ExpiresAfter: 10}, 7,
+	))
+	assert.False(t, proposalEpochsEqual(
+		GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 9}, want, 7,
+	))
+	assert.False(t, proposalEpochsEqual(
+		GovActionInfo{SubmittedEpoch: 3, ExpiresAfter: 8},
+		GovActionInfo{SubmittedEpoch: 4, ExpiresAfter: 9}, 7,
+	))
+}
+
+func TestHasSuccessfulTransactionIncludesEpochEvents(t *testing.T) {
+	assert.True(t, hasSuccessfulTransaction([]VectorEvent{{
+		Type: EventTypePassEpoch,
+	}}))
+	assert.False(t, hasSuccessfulTransaction([]VectorEvent{{
+		Type: EventTypePassTick,
+	}}))
+}
+
+func TestDRepExpiriesEqualComparesExpiredValues(t *testing.T) {
+	key := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{1},
+	})
+	got := map[ledger.RewardAccountKey]uint64{key: 3}
+	want := map[ledger.RewardAccountKey]uint64{key: 5}
+	require.False(t, drepExpiriesEqual(got, want, 4))
+}
+
+func TestDeregisterDRepCredentialCleansSameHashDelegations(t *testing.T) {
+	hash := common.Blake2b224{1}
+	keyDRep := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	}
+	scriptDRep := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	stake := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{2},
+	})
+	g := NewGovernanceState()
+	g.DRepRegistrationsByCredential[ledger.NewRewardAccountKey(keyDRep)] = true
+	g.DRepRegistrationsByCredential[ledger.NewRewardAccountKey(scriptDRep)] = true
+	g.DRepRegistrations[hash] = true
+	g.DRepDelegationsByCredential[stake] = common.Drep{
+		Type:       common.DrepTypeAddrKeyHash,
+		Credential: hash[:],
+	}
+	g.DeregisterDRepCredential(keyDRep)
+	_, ok := g.DRepDelegationsByCredential[stake]
+	assert.False(t, ok)
+	assert.True(t, g.IsDRepCredentialRegistered(scriptDRep))
+}
+
+type fixedSnapshotStateManager struct {
+	*MockStateManager
+	snapshot *StateSnapshot
+}
+
+func (m *fixedSnapshotStateManager) GetStateSnapshot() *StateSnapshot {
+	return m.snapshot
+}
+
+func TestCompareFinalStateChecksRewardAccountBalances(t *testing.T) {
+	paths, err := CollectVectorFiles("testdata/eras")
+	require.NoError(t, err)
+	var vector *TestVector
+	for _, path := range paths {
+		candidate, decodeErr := DecodeTestVector(path)
+		if decodeErr != nil || len(candidate.FinalState) < 2 {
+			continue
+		}
+		finalState, parseErr := ParseInitialState(candidate.FinalState)
+		if parseErr == nil && len(finalState.RewardAccountBalances) > 0 {
+			vector = candidate
+			break
+		}
+	}
+	require.NotNil(t, vector)
+
+	finalState, err := ParseInitialState(vector.FinalState)
+	require.NoError(t, err)
+	snapshot := SnapshotFromParsedState(finalState)
+	for credential, balance := range snapshot.RewardAccountBalances {
+		snapshot.RewardAccountBalances[credential] = balance + 1
+		break
+	}
+	harness := NewHarness(&fixedSnapshotStateManager{
+		MockStateManager: NewMockStateManager(),
+		snapshot:         snapshot,
+	}, HarnessConfig{})
+	err = harness.compareFinalState(vector.FinalState)
+	require.ErrorContains(t, err, "reward account balances")
+}
+
+func TestCompareFinalStateChecksStakeCredentialDeposits(t *testing.T) {
+	delegation := "a1" +
+		"8200581c" + strings.Repeat("03", common.Blake2b224Size) +
+		"840b078080"
+	rawHex := "8400f6f682f68283" +
+		"82a0a0" + "81a0" + "81" + delegation +
+		"84a0a0f683" + "85a0f6f6f6f6" + "8182a0f681f6"
+	raw, err := hex.DecodeString(rawHex)
+	require.NoError(t, err)
+	finalState, err := ParseInitialState(cbor.RawMessage(raw))
+	require.NoError(t, err)
+	require.Len(t, finalState.StakeCredentialDeposits, 1)
+	snapshot := SnapshotFromParsedState(finalState)
+	for credential, deposit := range snapshot.StakeCredentialDeposits {
+		snapshot.StakeCredentialDeposits[credential] = deposit + 1
+		break
+	}
+	harness := NewHarness(&fixedSnapshotStateManager{
+		MockStateManager: NewMockStateManager(),
+		snapshot:         snapshot,
+	}, HarnessConfig{})
+	err = harness.compareFinalState(cbor.RawMessage(raw))
+	require.ErrorContains(t, err, "stake credential deposits")
+}
+
+func TestSnapshotIncludesStakeCredentialDeposits(t *testing.T) {
+	key := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x06},
+	}
+	snapshot := SnapshotFromParsedState(&ParsedInitialState{
+		StakeCredentialDeposits: map[ledger.RewardAccountKey]uint64{key: 7},
+	})
+	require.Equal(t, map[ledger.RewardAccountKey]uint64{key: 7}, snapshot.StakeCredentialDeposits)
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering
@@ -608,124 +832,39 @@ func (r *recordingStateManager) SetRewardAccountBalances(
 	r.MockStateManager.SetRewardAccountBalances(balances)
 }
 
-// TestHarnessRollbackReappliesRewardBalances guards against the
-// retained-tx-replay bug where SetRewardBalances was not re-applied
-// during rollback replay. A retained transaction that performs a reward
-// withdrawal validates against the harness's "final state plus future
-// withdrawals" view of the balance, not the bare LoadInitialState
-// figure, so the replay path must re-apply the adjustment using the
-// journaled originalIdx.
-func TestHarnessRollbackReappliesRewardBalances(t *testing.T) {
+// Rollback must restore initial reward state even when a retained transaction
+// is invalid. Full successful transaction replay is also covered by the corpus.
+func TestHarnessRollbackRestoresInitialRewardBalances(t *testing.T) {
 	sm := &recordingStateManager{MockStateManager: NewMockStateManager()}
 	h := NewHarness(sm, HarnessConfig{})
-
-	h.initialState = &ParsedInitialState{CurrentEpoch: 0}
-	h.initialProtocolParams = nil
-	h.startSlot = 100
-	h.currentSlot = 105
-	h.initialEpoch = 0
-	h.currentEpoch = 0
-
 	cred := ledger.RewardAccountKey{
 		CredType:   common.CredentialTypeAddrKeyHash,
-		Credential: common.NewBlake2b224(make([]byte, 28)),
+		Credential: common.Blake2b224{1},
 	}
-	h.finalStateBalances = map[ledger.RewardAccountKey]uint64{cred: 1000}
-	// futureWithdrawals[i] is the cumulative withdrawal from event i to
-	// the end (inclusive of i). adjustRewardBalances looks up index i.
-	// Indices 1 and 2 hold distinct values so the assertion below
-	// differentiates between the journaled originalIdx (correct) and the
-	// replay-loop index (buggy) being used to look up the adjustment.
-	h.futureWithdrawals = []map[ledger.RewardAccountKey]uint64{
-		{cred: 900},
-		{cred: 900},
-		{cred: 500},
-		{cred: 0},
-		{cred: 0},
+	h.initialState = &ParsedInitialState{
+		CurrentEpoch:          0,
+		RewardAccountBalances: map[ledger.RewardAccountKey]uint64{cred: 1500},
 	}
-
-	// Pre-seed the journal with two retained events:
-	//   [0] PassTick at slot 101 (originalIdx=0) — adjustRewardBalances
-	//       skips non-transaction events, so it does not call SetRewardBalances.
-	//   [1] Transaction at slot 105 (originalIdx=2) — replay-loop index 1
-	//       differs from originalIdx 2, so the lookup index used can be
-	//       inferred from which futureWithdrawals slot the call reads.
-	// Empty TxBytes combined with Success=false makes
-	// processTransactionEventWithoutT return nil after the decode failure,
-	// so the test exercises the pre-decode SetRewardBalances call without
-	// needing a valid Conway transaction.
+	h.startSlot = 100
+	h.currentSlot = 105
 	h.appliedEvents = []appliedEvent{
+		{event: VectorEvent{Type: EventTypePassTick, TickSlot: 101}, slot: 101},
 		{
 			event: VectorEvent{
-				Type:     EventTypePassTick,
-				TickSlot: 101,
+				Type: EventTypeTransaction, Success: false, Slot: 105,
 			},
-			slot:        101,
-			originalIdx: 0,
-		},
-		{
-			event: VectorEvent{
-				Type:    EventTypeTransaction,
-				TxBytes: nil,
-				Success: false,
-				Slot:    105,
-			},
-			slot:        105,
-			originalIdx: 2,
+			slot: 105,
 		},
 	}
-
-	if err := h.rollback(200); err != nil {
-		t.Fatalf("rollback failed: %v", err)
-	}
-
-	if len(sm.setRewardAccountBalanceCalls) != 1 {
-		t.Fatalf(
-			"expected 1 SetRewardAccountBalances call during replay, got %d",
-			len(sm.setRewardAccountBalanceCalls),
-		)
-	}
-	got := sm.setRewardAccountBalanceCalls[0][cred]
-	// Correct path uses originalIdx=2 → futureWithdrawals[2]={cred:500}
-	// → adjusted balance = 1000 + 500 = 1500.
-	// A bug that uses the replay-loop index i=1 would read
-	// futureWithdrawals[1]={cred:900} → 1900, failing this assertion.
-	const want uint64 = 1500
-	if got != want {
-		t.Errorf("replay adjusted balance: got %d, want %d", got, want)
-	}
-}
-
-func TestHarnessAdjustRewardBalancesPreservesCredentialIdentity(t *testing.T) {
-	sm := &recordingStateManager{MockStateManager: NewMockStateManager()}
-	h := NewHarness(sm, HarnessConfig{})
-	hash := common.NewBlake2b224(make([]byte, 28))
-	keyAccount := ledger.RewardAccountKey{
-		CredType:   common.CredentialTypeAddrKeyHash,
-		Credential: hash,
-	}
-	scriptAccount := ledger.RewardAccountKey{
-		CredType:   common.CredentialTypeScriptHash,
-		Credential: hash,
-	}
-	h.finalStateBalances = map[ledger.RewardAccountKey]uint64{
-		scriptAccount: 2,
-	}
-	h.futureWithdrawals = []map[ledger.RewardAccountKey]uint64{
-		{keyAccount: 3},
-		{},
-	}
-
-	h.adjustRewardBalances(0, VectorEvent{Type: EventTypeTransaction})
-
-	require.Len(t, sm.setRewardAccountBalanceCalls, 1)
-	assert.Equal(t, uint64(3), sm.setRewardAccountBalanceCalls[0][keyAccount])
-	assert.Equal(
-		t,
-		uint64(2),
-		sm.setRewardAccountBalanceCalls[0][scriptAccount],
+	require.NoError(t, sm.LoadInitialState(h.initialState, nil))
+	sm.rewardAccounts[cred] = 1
+	require.NoError(t, h.rollback(105))
+	require.Equal(
+		t, uint64(1500), sm.GetStateSnapshot().RewardAccountBalances[cred],
 	)
-	assert.Empty(t, sm.setRewardBalancesCalls)
+	require.Empty(t, sm.setRewardAccountBalanceCalls)
+	require.Empty(t, sm.setRewardBalancesCalls)
+	require.Len(t, h.appliedEvents, 2)
 }
 
 func TestMockStateManagerRewardAdjustmentPreservesRegistrationState(
