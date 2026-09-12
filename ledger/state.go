@@ -141,7 +141,8 @@ type MockLedgerState struct {
 
 	// CertState callbacks and state
 	StakeRegistrationCallback StakeRegistrationFunc
-	stakeRegistrations        map[RewardAccountKey]bool // credential -> registered
+	stakeRegistrations        map[RewardAccountKey]bool   // credential -> registered
+	stakeCredentialDeposits   map[RewardAccountKey]uint64 // credential -> original deposit
 
 	// SlotState callbacks
 	SlotToTimeCallback SlotToTimeFunc
@@ -208,6 +209,22 @@ func (ls *MockLedgerState) StakeRegistration(
 		return ls.StakeRegistrationCallback(stakingKey)
 	}
 	return []lcommon.StakeRegistrationCertificate{}, nil
+}
+
+// StakeCredentialDeposit returns the deposit recorded when a stake credential
+// was registered. A nil result means the provider has no stored deposit for
+// the credential.
+func (ls *MockLedgerState) StakeCredentialDeposit(
+	cred lcommon.Credential,
+) (*uint64, error) {
+	if ls.stakeCredentialDeposits == nil {
+		return nil, nil
+	}
+	deposit, exists := ls.stakeCredentialDeposits[NewRewardAccountKey(cred)]
+	if !exists {
+		return nil, nil
+	}
+	return &deposit, nil
 }
 
 // IsStakeCredentialRegistered checks if a stake credential is currently registered
@@ -563,6 +580,7 @@ func NewLedgerStateBuilder() *LedgerStateBuilder {
 	return &LedgerStateBuilder{
 		state: &MockLedgerState{
 			stakeRegistrations:       make(map[RewardAccountKey]bool),
+			stakeCredentialDeposits:  make(map[RewardAccountKey]uint64),
 			rewardAccounts:           make(map[RewardAccountKey]uint64),
 			govActions:               make(map[string]*lcommon.GovActionState),
 			proposedCommitteeMembers: make(map[RewardAccountKey]uint64),
@@ -981,6 +999,17 @@ func (b *LedgerStateBuilder) WithStakeRegistrations(
 	for _, cert := range certs {
 		b.state.stakeRegistrations[NewRewardAccountKey(cert.StakeCredential)] = true
 		b.withRewardAccountRegistration(cert.StakeCredential, true)
+	}
+	return b
+}
+
+// WithStakeCredentialDeposits configures the original deposit for each
+// registered stake credential. Credential type is part of the lookup key.
+func (b *LedgerStateBuilder) WithStakeCredentialDeposits(
+	deposits map[RewardAccountKey]uint64,
+) *LedgerStateBuilder {
+	for credential, deposit := range deposits {
+		b.state.stakeCredentialDeposits[credential] = deposit
 	}
 	return b
 }

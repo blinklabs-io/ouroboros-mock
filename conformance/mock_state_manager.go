@@ -47,6 +47,11 @@ type MockStateManager struct {
 	// stakeRegistrations tracks registered stake credentials and their balances
 	stakeRegistrations map[ledger.RewardAccountKey]uint64
 
+	// stakeCredentialDeposits tracks the original registration deposit. It is
+	// intentionally separate from reward balances because protocol parameters
+	// may change after registration.
+	stakeCredentialDeposits map[ledger.RewardAccountKey]uint64
+
 	// rewardAccounts tracks balances by full credential identity.
 	rewardAccounts map[ledger.RewardAccountKey]uint64
 
@@ -88,13 +93,14 @@ func drepSeedDeposit(
 // NewMockStateManager creates a new MockStateManager.
 func NewMockStateManager() *MockStateManager {
 	return &MockStateManager{
-		govState:           NewGovernanceState(),
-		utxos:              make(map[string]common.Utxo),
-		stakeRegistrations: make(map[ledger.RewardAccountKey]uint64),
-		rewardAccounts:     make(map[ledger.RewardAccountKey]uint64),
-		poolRegistrations:  make(map[common.Blake2b224]bool),
-		drepRegistrations:  make(map[ledger.RewardAccountKey]*uint64),
-		committeeMembers:   make(map[ledger.RewardAccountKey]uint64),
+		govState:                NewGovernanceState(),
+		utxos:                   make(map[string]common.Utxo),
+		stakeRegistrations:      make(map[ledger.RewardAccountKey]uint64),
+		stakeCredentialDeposits: make(map[ledger.RewardAccountKey]uint64),
+		rewardAccounts:          make(map[ledger.RewardAccountKey]uint64),
+		poolRegistrations:       make(map[common.Blake2b224]bool),
+		drepRegistrations:       make(map[ledger.RewardAccountKey]*uint64),
+		committeeMembers:        make(map[ledger.RewardAccountKey]uint64),
 		hotKeyAuthorizations: make(
 			map[ledger.RewardAccountKey]common.Credential,
 		),
@@ -113,6 +119,7 @@ func (m *MockStateManager) LoadInitialState(
 	// Clear existing state
 	m.utxos = make(map[string]common.Utxo)
 	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
+	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
 	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
@@ -144,6 +151,16 @@ func (m *MockStateManager) LoadInitialState(
 				CredType:   common.CredentialTypeAddrKeyHash,
 				Credential: hash,
 			}] = state.RewardAccounts[hash]
+		}
+	}
+	// Initial snapshots may carry the original registration deposit in each
+	// account tuple. Fall back to the current key deposit for older snapshots
+	// that do not record it.
+	for credential := range m.stakeRegistrations {
+		if deposit, exists := state.StakeCredentialDeposits[credential]; exists {
+			m.stakeCredentialDeposits[credential] = deposit
+		} else {
+			m.stakeCredentialDeposits[credential] = keyDepositAmount(pp)
 		}
 	}
 	if len(state.RewardAccountBalances) > 0 {
@@ -453,7 +470,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeStakeRegistration:
 		if regCert, ok := cert.(*common.StakeRegistrationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = keyDepositAmount(m.protocolParams)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -461,7 +480,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeRegistration:
 		if regCert, ok := cert.(*common.RegistrationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -470,7 +491,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + delegation (Conway)
 		if regCert, ok := cert.(*common.StakeRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
@@ -480,7 +503,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + vote delegation (Conway)
 		if regCert, ok := cert.(*common.VoteRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -493,8 +518,10 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + stake + vote delegation (Conway)
 		if regCert, ok := cert.(*common.StakeVoteRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
-			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.rewardAccounts[key] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
 				credential,
@@ -664,7 +691,23 @@ func (m *MockStateManager) deregisterStakeCredential(
 	credentialKey := ledger.NewRewardAccountKey(credential)
 	delete(m.rewardAccounts, credentialKey)
 	delete(m.stakeRegistrations, credentialKey)
+	delete(m.stakeCredentialDeposits, credentialKey)
 	m.govState.DeregisterStakeCredential(credential)
+}
+
+func keyDepositAmount(pp common.ProtocolParameters) uint64 {
+	provider, ok := pp.(interface{ KeyDepositAmount() *big.Int })
+	if !ok || provider.KeyDepositAmount() == nil || !provider.KeyDepositAmount().IsUint64() {
+		return 0
+	}
+	return provider.KeyDepositAmount().Uint64()
+}
+
+func nonNegativeDeposit(amount int64) uint64 {
+	if amount < 0 {
+		return 0
+	}
+	return uint64(amount)
 }
 
 func drepDelegation(drep common.Drep) common.Drep {
@@ -756,6 +799,7 @@ func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
 	staged.protocolParams = deepCopyPParams(m.protocolParams)
 	staged.govState = cloneGovernanceState(m.govState)
 	staged.poolRegistrations = maps.Clone(m.poolRegistrations)
+	staged.stakeCredentialDeposits = maps.Clone(m.stakeCredentialDeposits)
 	staged.committeeMembers = maps.Clone(m.committeeMembers)
 	staged.hotKeyAuthorizations = maps.Clone(m.hotKeyAuthorizations)
 	staged.committeeResignations = maps.Clone(m.committeeResignations)
@@ -765,6 +809,7 @@ func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
 func (m *MockStateManager) commitEpochBoundary(staged *MockStateManager) {
 	m.currentEpoch = staged.currentEpoch
 	m.poolRegistrations = staged.poolRegistrations
+	m.stakeCredentialDeposits = staged.stakeCredentialDeposits
 	m.committeeMembers = staged.committeeMembers
 	m.hotKeyAuthorizations = staged.hotKeyAuthorizations
 	m.committeeResignations = staged.committeeResignations
@@ -1418,6 +1463,7 @@ func (m *MockStateManager) Reset() error {
 	m.currentEpoch = 0
 	m.utxos = make(map[string]common.Utxo)
 	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
+	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
 	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
@@ -1452,6 +1498,7 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	// accounts, so using the credential-aware builder avoids fabricating a
 	// key credential for a registered script account.
 	builder.WithRewardAccountCredentialBalances(m.rewardAccounts)
+	builder.WithStakeCredentialDeposits(m.stakeCredentialDeposits)
 
 	// Set up pool lookup callback
 	// Pool is considered registered if:
