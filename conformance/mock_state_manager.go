@@ -191,10 +191,16 @@ func (m *MockStateManager) LoadInitialState(
 	// Load DRep registrations. The typed set is authoritative; the legacy
 	// hash list is its key-hash compatibility projection, matching
 	// GovernanceState.RegisterDRep.
-	for key := range state.DRepRegistrationsByCredential {
+	for key, registered := range state.DRepRegistrationsByCredential {
+		if !registered {
+			continue
+		}
 		m.drepRegistrations[key] = drepSeedDeposit(state, key)
 	}
 	for _, hash := range state.DRepRegistrations {
+		if hasCredentialHash(state.DRepRegistrationsByCredential, hash) {
+			continue
+		}
 		key := ledger.RewardAccountKey{
 			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hash,
@@ -613,6 +619,15 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			m.govState.DeregisterDRepCredential(credential)
 			if !m.govState.IsDRepCredentialRegistered(credential) {
 				delete(m.drepRegistrations, key)
+				if !hasRegisteredCredentialHash(
+					m.govState.DRepRegistrationsByCredential,
+					credential.Credential,
+				) {
+					delete(m.drepRegistrations, ledger.RewardAccountKey{
+						CredType:   common.CredentialTypeAddrKeyHash,
+						Credential: credential.Credential,
+					})
+				}
 			}
 		}
 

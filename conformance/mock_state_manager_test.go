@@ -1439,6 +1439,32 @@ func TestApplyTransactionDeregistersExactDRepCredential(t *testing.T) {
 	require.Contains(t, stateManager.drepRegistrations, keyKey)
 }
 
+func TestApplyTransactionDeregistersLegacyDRepProjection(t *testing.T) {
+	hash := common.Blake2b224{0x73}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	legacyKey := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	})
+	scriptKey := ledger.NewRewardAccountKey(scriptCredential)
+	stateManager := NewMockStateManager()
+	stateManager.drepRegistrations[legacyKey] = nil
+	stateManager.drepRegistrations[scriptKey] = nil
+	stateManager.govState.RegisterDRepCredentialUntil(scriptCredential, 10)
+	tx := ledger.NewTransactionBuilder().WithCertificates(
+		&common.DeregistrationDrepCertificate{
+			CertType:       uint(common.CertificateTypeDeregistrationDrep),
+			DrepCredential: scriptCredential,
+		},
+	)
+
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.NotContains(t, stateManager.drepRegistrations, legacyKey)
+}
+
 func TestDRepVoteRefreshesExactCredentialForRatification(t *testing.T) {
 	const (
 		currentEpoch = uint64(5)
@@ -1835,6 +1861,45 @@ func TestLoadInitialStateMergesLegacyAndTypedCommitteeState(t *testing.T) {
 		stateManager.govState.HotKeyAuthorizationsByCredential,
 		typedScript,
 	)
+}
+
+func TestLoadInitialStateSkipsUnregisteredDRepEntries(t *testing.T) {
+	hash := common.Blake2b224{0x71}
+	key := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	})
+	initialState := &ParsedInitialState{
+		DRepRegistrations: []common.Blake2b224{hash},
+		DRepRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
+			key: false,
+		},
+	}
+	stateManager := NewMockStateManager()
+	require.NoError(t, stateManager.LoadInitialState(initialState, nil))
+	require.Empty(t, stateManager.drepRegistrations)
+}
+
+func TestLoadInitialStateDoesNotPromoteScriptDRepProjection(t *testing.T) {
+	hash := common.Blake2b224{0x72}
+	scriptKey := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	})
+	keyKey := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	})
+	initialState := &ParsedInitialState{
+		DRepRegistrations: []common.Blake2b224{hash},
+		DRepRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
+			scriptKey: true,
+		},
+	}
+	stateManager := NewMockStateManager()
+	require.NoError(t, stateManager.LoadInitialState(initialState, nil))
+	require.Contains(t, stateManager.drepRegistrations, scriptKey)
+	require.NotContains(t, stateManager.drepRegistrations, keyKey)
 }
 
 func TestLoadInitialStateDoesNotPromoteTypedProjection(t *testing.T) {
