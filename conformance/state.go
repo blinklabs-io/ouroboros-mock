@@ -31,9 +31,8 @@ import (
 type StateProvider = ledger.StateProvider
 
 // RewardAccountBalanceSetter is an optional StateManager extension for
-// preserving the full reward-account credential identity. The harness falls
-// back to StateManager.SetRewardBalances for implementations that have not yet
-// adopted it.
+// preserving the full reward-account credential identity for explicit callers.
+// The harness derives rewards from initial state and applied events, not setters.
 type RewardAccountBalanceSetter interface {
 	// SetRewardAccountBalances updates balances for accounts already registered
 	// by the state manager. It must not create or remove registrations.
@@ -77,7 +76,7 @@ type StateManager interface {
 	GetGovernanceState() *GovernanceState
 
 	// SetRewardBalances sets the reward account balances.
-	// Used by the harness to provide adjusted balances for withdrawal validation.
+	// Retained for explicit callers; the harness does not inject reward balances.
 	SetRewardBalances(balances map[common.Blake2b224]uint64)
 
 	// GetProtocolParameters returns the current protocol parameters.

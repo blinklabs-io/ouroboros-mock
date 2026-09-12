@@ -302,51 +302,6 @@ func TestParseSyntheticCardanoWireOffsetsRejectShiftedFields(t *testing.T) {
 	}
 }
 
-func TestParseStakeCredentialMapRewardAccountLayouts(t *testing.T) {
-	hash := common.NewBlake2b224(make([]byte, 28))
-	tests := []struct {
-		name    string
-		account []any
-	}{
-		{
-			name: "vendored legacy UMap",
-			account: []any{
-				[]any{[]any{uint64(11), uint64(2)}},
-				[]any{},
-				[]any{},
-				[]any{},
-			},
-		},
-		{
-			name: "modern Conway account state",
-			account: []any{
-				uint64(11),
-				uint64(2),
-				[]any{},
-				[]any{},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			encodedAccount, err := cbor.Encode(test.account)
-			require.NoError(t, err)
-			encodedMap := []byte{0xa1, 0x82, 0x00, 0x58, 0x1c}
-			encodedMap = append(encodedMap, hash.Bytes()...)
-			encodedMap = append(encodedMap, encodedAccount...)
-
-			entries := parseStakeCredentialMap(encodedMap)
-
-			require.Len(t, entries, 1)
-			require.Equal(t, uint64(11), entries[0].Balance)
-			require.Equal(t, uint64(2), entries[0].Deposit)
-			require.Equal(t, uint64(0), entries[0].CredType)
-			require.Equal(t, hash.Bytes(), entries[0].Hash)
-		})
-	}
-}
-
 func TestExtractDRepDelegationPreservesType(t *testing.T) {
 	tests := []struct {
 		name     string

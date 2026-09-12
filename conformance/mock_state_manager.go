@@ -351,9 +351,8 @@ func (m *MockStateManager) ApplyTransaction(
 		m.processCertificate(cert)
 	}
 
-	// Process withdrawals against the reward-account balances. The harness
-	// seeds balances with the final value plus future withdrawals so that
-	// transaction validation sees the pre-withdrawal balance.
+	// Process withdrawals against balances derived from initial state and
+	// previously applied events, after pre-validation above.
 	for rewardAccount, amount := range tx.Withdrawals() {
 		if rewardAccount == nil || amount == nil {
 			continue

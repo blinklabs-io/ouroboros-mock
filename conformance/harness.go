@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -61,13 +60,6 @@ type Harness struct {
 	// debug enables verbose logging.
 	debug bool
 
-	// futureWithdrawals contains cumulative withdrawals from each event to end.
-	// Used to compute accurate reward balance at each transaction.
-	futureWithdrawals []map[ledger.RewardAccountKey]uint64
-
-	// finalStateBalances contains reward balances from the final state.
-	finalStateBalances map[ledger.RewardAccountKey]uint64
-
 	// epochLength is the number of slots per epoch from the vector config.
 	epochLength uint64
 
@@ -94,22 +86,16 @@ type Harness struct {
 	appliedEvents []appliedEvent
 
 	// replaying is true while the harness is re-applying journaled events
-	// after a rollback. Event handlers skip journaling and skip stateful
-	// side-effects that are unsafe to repeat (e.g., reward-balance updates
-	// that depend on the original future-withdrawal precomputation).
+	// after a rollback. Event handlers skip journaling during replay.
 	replaying bool
 }
 
 // appliedEvent is a journaled event together with the slot at which it
 // was applied. The slot is what rollback semantics filter on: entries
-// whose slot is > the rollback target are discarded. originalIdx is the
-// event's position in the active vector's Events slice; the rollback
-// replay path uses it to look up the per-tx reward-balance adjustment
-// computed from futureWithdrawals.
+// whose slot is > the rollback target are discarded.
 type appliedEvent struct {
-	event       VectorEvent
-	slot        uint64
-	originalIdx int
+	event VectorEvent
+	slot  uint64
 }
 
 // HarnessConfig configures the test harness.
@@ -254,15 +240,8 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 	h.initialEpoch = initialState.CurrentEpoch
 	h.currentSlot = h.startSlot
 
-	// Extract reward balances from final_state and compute future withdrawals
-	// This allows accurate withdrawal validation at each transaction
-	h.finalStateBalances = extractFinalStateBalances(vector.FinalState)
-	h.futureWithdrawals = h.computeFutureWithdrawals(vector.Events)
-
 	// Process events
 	for i, event := range vector.Events {
-		h.adjustRewardBalances(i, event)
-
 		if err := h.processEvent(t, i, event); err != nil {
 			t.Errorf("event %d failed: %v", i, err)
 		}
@@ -541,9 +520,9 @@ func (h *Harness) processEvent(
 	case EventTypeTransaction:
 		return h.processTransactionEvent(t, eventIdx, event)
 	case EventTypePassTick:
-		return h.processPassTickEvent(eventIdx, event)
+		return h.processPassTickEvent(event)
 	case EventTypePassEpoch:
-		return h.processPassEpochEvent(eventIdx, event)
+		return h.processPassEpochEvent(event)
 	case EventTypeRollback:
 		return h.processRollbackEvent(t, event)
 	default:
@@ -603,25 +582,19 @@ func (h *Harness) processTransactionEvent(
 		}
 	}
 
-	h.journal(eventIdx, event, event.Slot)
+	h.journal(event, event.Slot)
 	return nil
 }
 
 // processPassTickEvent processes a pass tick event.
-func (h *Harness) processPassTickEvent(
-	eventIdx int,
-	event VectorEvent,
-) error {
+func (h *Harness) processPassTickEvent(event VectorEvent) error {
 	h.currentSlot = event.TickSlot
-	h.journal(eventIdx, event, event.TickSlot)
+	h.journal(event, event.TickSlot)
 	return nil
 }
 
 // processPassEpochEvent processes a pass epoch event.
-func (h *Harness) processPassEpochEvent(
-	eventIdx int,
-	event VectorEvent,
-) error {
+func (h *Harness) processPassEpochEvent(event VectorEvent) error {
 	// Advance epoch
 	h.currentEpoch += event.EpochDelta
 
@@ -635,7 +608,7 @@ func (h *Harness) processPassEpochEvent(
 
 	// Epoch events have no native slot; journal them at the prevailing
 	// current slot so rollback decisions can compare consistently.
-	h.journal(eventIdx, event, h.currentSlot)
+	h.journal(event, h.currentSlot)
 
 	return nil
 }
@@ -802,15 +775,8 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 	h.initialEpoch = initialState.CurrentEpoch
 	h.currentSlot = h.startSlot
 
-	// Extract reward balances from final_state and compute future withdrawals
-	// This allows accurate withdrawal validation at each transaction
-	h.finalStateBalances = extractFinalStateBalances(vector.FinalState)
-	h.futureWithdrawals = h.computeFutureWithdrawals(vector.Events)
-
 	// Process events
 	for i, event := range vector.Events {
-		h.adjustRewardBalances(i, event)
-
 		if err := h.processEventWithoutT(i, event); err != nil {
 			result.Error = err
 			result.FailedEvent = i
@@ -845,9 +811,9 @@ func (h *Harness) processEventWithoutT(eventIdx int, event VectorEvent) error {
 	case EventTypeTransaction:
 		return h.processTransactionEventWithoutT(eventIdx, event)
 	case EventTypePassTick:
-		return h.processPassTickEvent(eventIdx, event)
+		return h.processPassTickEvent(event)
 	case EventTypePassEpoch:
-		return h.processPassEpochEvent(eventIdx, event)
+		return h.processPassEpochEvent(event)
 	case EventTypeRollback:
 		return h.processRollbackEventWithoutT(event)
 	default:
@@ -890,21 +856,20 @@ func (h *Harness) processTransactionEventWithoutT(
 		}
 	}
 
-	h.journal(eventIdx, event, event.Slot)
+	h.journal(event, event.Slot)
 	return nil
 }
 
 // journal appends an event to the replay log keyed by the slot at which
-// it was applied and its index in the active vector's Events slice.
+// it was applied.
 // Suppressed during a replay so the log is not duplicated.
-func (h *Harness) journal(eventIdx int, event VectorEvent, slot uint64) {
+func (h *Harness) journal(event VectorEvent, slot uint64) {
 	if h.replaying {
 		return
 	}
 	h.appliedEvents = append(h.appliedEvents, appliedEvent{
-		event:       event,
-		slot:        slot,
-		originalIdx: eventIdx,
+		event: event,
+		slot:  slot,
 	})
 }
 
@@ -963,13 +928,6 @@ func (h *Harness) rollback(targetSlot uint64) error {
 	h.replaying = true
 	defer func() { h.replaying = false }()
 	for i, ae := range retained {
-		// Re-apply the per-tx reward-balance adjustment that the main
-		// runVector loop applied on first execution. Without this,
-		// retained txs validate against the bare LoadInitialState
-		// balances, which differ from the harness's "final state plus
-		// future withdrawals" view and will reject any withdrawal that
-		// depends on the adjusted figure.
-		h.adjustRewardBalances(ae.originalIdx, ae.event)
 		if err := h.processEventWithoutT(i, ae.event); err != nil {
 			return fmt.Errorf(
 				"rollback: replay of event %d (slot %d) failed: %w",
@@ -981,171 +939,6 @@ func (h *Harness) rollback(targetSlot uint64) error {
 	h.appliedEvents = append(h.appliedEvents[:0], retained...)
 	h.currentSlot = targetSlot
 	return nil
-}
-
-// adjustRewardBalances applies the per-tx reward-balance hack derived
-// from finalStateBalances and futureWithdrawals to the state manager.
-// Called both from the main vector loop (with the linear event index)
-// and from the rollback replay loop (with the journaled originalIdx)
-// so retained txs see the same adjusted balances on every execution.
-func (h *Harness) adjustRewardBalances(eventIdx int, event VectorEvent) {
-	if event.Type != EventTypeTransaction {
-		return
-	}
-	if eventIdx >= len(h.futureWithdrawals) {
-		return
-	}
-	future := h.futureWithdrawals[eventIdx]
-	if len(h.finalStateBalances) == 0 && len(future) == 0 {
-		return
-	}
-	adjusted := make(
-		map[ledger.RewardAccountKey]uint64,
-		len(h.finalStateBalances)+len(future),
-	)
-	for cred, balance := range h.finalStateBalances {
-		adjusted[cred] = balance
-	}
-	for cred, balance := range future {
-		adjusted[cred] += balance
-	}
-	if setter, ok := h.stateManager.(RewardAccountBalanceSetter); ok {
-		setter.SetRewardAccountBalances(adjusted)
-		return
-	}
-	h.stateManager.SetRewardBalances(rewardBalancesByHash(adjusted))
-}
-
-// computeFutureWithdrawals computes cumulative withdrawals from each TX index to the end.
-// Returns a slice where futureWithdrawals[i] contains the sum of successful withdrawals
-// from events[i] to the end (inclusive). This allows computing balance at TX i as:
-// balance_at_i = final_state_balance + futureWithdrawals[i]
-func (h *Harness) computeFutureWithdrawals(
-	events []VectorEvent,
-) []map[ledger.RewardAccountKey]uint64 {
-	n := len(events)
-	result := make([]map[ledger.RewardAccountKey]uint64, n+1)
-
-	// Initialize the last entry (after all events) to empty
-	result[n] = make(map[ledger.RewardAccountKey]uint64)
-
-	// Work backwards from the end
-	for i := n - 1; i >= 0; i-- {
-		// Copy previous (next in order) cumulative
-		result[i] = make(map[ledger.RewardAccountKey]uint64)
-		maps.Copy(result[i], result[i+1])
-
-		event := events[i]
-		if event.Type != EventTypeTransaction || !event.Success {
-			continue
-		}
-
-		tx, err := h.decodeTransaction(event.TxBytes)
-		if err != nil || tx == nil {
-			continue
-		}
-
-		// Skip withdrawals for phase-2 invalid transactions (IsValid=false)
-		// These transactions are accepted but their effects are reverted
-		if !tx.IsValid() {
-			continue
-		}
-
-		for addr, amount := range tx.Withdrawals() {
-			if addr == nil || amount == nil {
-				continue
-			}
-			withdrawAmount := amount.Uint64()
-			if withdrawAmount == 0 {
-				continue
-			}
-			credential, ok := addr.StakeCredential()
-			if !ok {
-				continue
-			}
-			accountKey := ledger.NewRewardAccountKey(credential)
-			result[i][accountKey] += withdrawAmount
-		}
-	}
-
-	return result
-}
-
-// extractFinalStateBalances extracts reward account balances from final_state.
-// These balances reflect state AFTER all transactions have been applied.
-// Structure: final_state[3][1][0][2][0][0] = stake credentials map
-func extractFinalStateBalances(
-	finalState cbor.RawMessage,
-) map[ledger.RewardAccountKey]uint64 {
-	result := make(map[ledger.RewardAccountKey]uint64)
-
-	// Navigate: final_state[3] = begin_epoch_state
-	var stateArr []cbor.RawMessage
-	if _, err := cbor.Decode(finalState, &stateArr); err != nil {
-		return result
-	}
-	if len(stateArr) < 4 {
-		return result
-	}
-
-	// bes[1] = ledger_state
-	var bes []cbor.RawMessage
-	if _, err := cbor.Decode(stateArr[3], &bes); err != nil {
-		return result
-	}
-	if len(bes) < 2 {
-		return result
-	}
-
-	// ls[0] = cert_state
-	var ls []cbor.RawMessage
-	if _, err := cbor.Decode(bes[1], &ls); err != nil {
-		return result
-	}
-	if len(ls) < 1 {
-		return result
-	}
-
-	// cert_state[2] = delegation_state
-	var certState []cbor.RawMessage
-	if _, err := cbor.Decode(ls[0], &certState); err != nil {
-		return result
-	}
-	if len(certState) < 3 {
-		return result
-	}
-
-	// dstate = [unified_map_wrapper, ...]
-	var dstate []cbor.RawMessage
-	if _, err := cbor.Decode(certState[2], &dstate); err != nil {
-		return result
-	}
-	if len(dstate) < 1 {
-		return result
-	}
-
-	// dstate[0] is an array [stake_creds_map, ...]
-	var ds0 []cbor.RawMessage
-	if _, err := cbor.Decode(dstate[0], &ds0); err != nil {
-		return result
-	}
-	if len(ds0) < 1 {
-		return result
-	}
-
-	// ds0[0] is the stake credentials map - parse manually due to non-hashable CBOR map keys
-	rawMap := []byte(ds0[0])
-	entries := parseStakeCredentialMap(rawMap)
-
-	for _, entry := range entries {
-		credHash := common.NewBlake2b224(entry.Hash)
-		result[ledger.RewardAccountKey{
-			CredType:   uint(entry.CredType),
-			Credential: credHash,
-		}] = entry.Balance
-	}
-
-	return result
 }
 
 // rewardBalancesByHash converts full reward-account identities for legacy
@@ -1163,115 +956,6 @@ func rewardBalancesByHash(
 		}
 	}
 	return result
-}
-
-// stakeCredEntry represents a parsed stake credential map entry
-type stakeCredEntry struct {
-	CredType uint64
-	Hash     []byte
-	Balance  uint64
-	Deposit  uint64
-}
-
-// parseStakeCredentialMap manually parses a CBOR map with credential keys
-// because Go's CBOR library wraps non-hashable keys in pointers
-func parseStakeCredentialMap(data []byte) []stakeCredEntry {
-	if len(data) == 0 {
-		return nil
-	}
-
-	pos := 0
-	// Check for map major type (0xa0-0xbf for small maps, 0xb9 for 2-byte length)
-	major := data[pos] & 0xe0
-	if major != 0xa0 {
-		return nil
-	}
-
-	info := data[pos] & 0x1f
-	var mapLen int
-	if info < 24 {
-		mapLen = int(info)
-		pos++
-	} else if info == 24 {
-		if pos+1 >= len(data) {
-			return nil
-		}
-		mapLen = int(data[pos+1])
-		pos += 2
-	} else if info == 25 {
-		if pos+2 >= len(data) {
-			return nil
-		}
-		mapLen = int(data[pos+1])<<8 | int(data[pos+2])
-		pos += 3
-	} else {
-		// Indefinite length not supported
-		return nil
-	}
-
-	var entries []stakeCredEntry
-	for i := 0; i < mapLen; i++ {
-		entry, newPos := parseStakeCredEntry(data, pos)
-		if entry != nil {
-			entries = append(entries, *entry)
-		}
-		pos = newPos
-	}
-
-	return entries
-}
-
-func parseStakeCredEntry(data []byte, pos int) (*stakeCredEntry, int) {
-	if pos >= len(data) {
-		return nil, pos
-	}
-
-	// Parse key (credential = [type, hash])
-	if data[pos]&0xe0 != 0x80 { // Array major type
-		return nil, skipCborItem(data, pos)
-	}
-	keyArrayLen := int(data[pos] & 0x1f)
-	pos++
-	if keyArrayLen != 2 {
-		for range keyArrayLen {
-			pos = skipCborItem(data, pos)
-		}
-		pos = skipCborItem(data, pos)
-		return nil, pos
-	}
-
-	// Parse credential type (uint)
-	credType, n := parseCborUint(data, pos)
-	pos += n
-
-	// Parse hash (byte string)
-	hash, n := parseCborBytes(data, pos)
-	pos += n
-	if len(hash) != 28 {
-		pos = skipCborItem(data, pos)
-		return nil, pos
-	}
-
-	// Decode the account value independently after manually parsing the
-	// non-hashable credential key. This supports both the vendored UMap layout
-	// and the modern Conway AccountState layout.
-	var accountValue cbor.Value
-	consumed, err := cbor.Decode(data[pos:], &accountValue)
-	if err != nil || consumed <= 0 {
-		return nil, skipCborItem(data, pos)
-	}
-	pos += consumed
-	balance, deposit, _, registered := extractRewardAccountState(accountValue.Value())
-	if !registered {
-		return nil, pos
-	}
-
-	return &stakeCredEntry{
-		CredType: credType,
-		Hash:     hash,
-		Balance:  balance,
-		Deposit:  deposit,
-	}, pos
 }
 
 func parseCborUint(data []byte, pos int) (uint64, int) {
@@ -1332,45 +1016,6 @@ func parseCborUint(data []byte, pos int) (uint64, int) {
 		return v, 9
 	}
 	return 0, 1
-}
-
-func parseCborBytes(data []byte, pos int) ([]byte, int) {
-	if pos >= len(data) {
-		return nil, 1 // Return 1 to allow forward progress on malformed data
-	}
-	major := data[pos] & 0xe0
-	info := data[pos] & 0x1f
-
-	if major != 0x40 {
-		return nil, 1
-	}
-
-	var length int
-	var headerLen int
-	if info < 24 {
-		length = int(info)
-		headerLen = 1
-	} else if info == 24 {
-		if pos+2 > len(data) {
-			return nil, 1 // Return 1 to allow forward progress
-		}
-		length = int(data[pos+1])
-		headerLen = 2
-	} else if info == 25 {
-		if pos+3 > len(data) {
-			return nil, 1 // Return 1 to allow forward progress
-		}
-		length = int(data[pos+1])<<8 | int(data[pos+2])
-		headerLen = 3
-	} else {
-		return nil, 1
-	}
-
-	if pos+headerLen+length > len(data) {
-		return nil, headerLen // Return header length to skip past malformed item
-	}
-
-	return data[pos+headerLen : pos+headerLen+length], headerLen + length
 }
 
 func skipCborItem(data []byte, pos int) int {
