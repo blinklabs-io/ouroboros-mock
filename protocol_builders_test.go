@@ -9,6 +9,7 @@
 package ouroboros_mock
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
+	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
 
@@ -49,7 +51,7 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 		BlockFetchNoBlocks(),
 		BlockFetchBlock([]byte{0x80}),
 		TxSubmissionRequestTxIds(true, 0, 1),
-		TxSubmissionRequestTxs(nil),
+		TxSubmissionRequestTxs([]txsubmission.TxId{}),
 		TxSubmissionReplyTxIds(nil),
 		TxSubmissionReplyTxs(nil),
 		LocalTxMonitorAcquire(),
@@ -106,6 +108,13 @@ func assertMessageRoundTrips(t *testing.T, entry ConversationEntryInput) {
 	}
 	if reflect.TypeOf(decoded) != reflect.TypeOf(entry.Message) {
 		t.Fatalf("decoded message type = %T, want %T", decoded, entry.Message)
+	}
+	reencoded, err := cbor.Encode(decoded)
+	if err != nil {
+		t.Fatalf("re-encode %T: %v", decoded, err)
+	}
+	if !bytes.Equal(reencoded, encoded) {
+		t.Fatalf("decoded message does not round-trip: got %x, want %x", reencoded, encoded)
 	}
 }
 

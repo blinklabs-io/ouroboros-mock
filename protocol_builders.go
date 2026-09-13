@@ -138,9 +138,7 @@ func BlockFetchNoBlocks() ConversationEntryOutput {
 		ProtocolId: blockfetch.ProtocolId,
 		IsResponse: true,
 		Messages: []protocol.Message{
-			blockfetch.NewMsgStartBatch(),
 			blockfetch.NewMsgNoBlocks(),
-			blockfetch.NewMsgBatchDone(),
 		},
 	}
 }
