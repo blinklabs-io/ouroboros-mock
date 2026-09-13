@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -27,6 +28,71 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	manager := NewMockStateManager()
+	manager.protocolParams = &conway.ConwayProtocolParameters{KeyDeposit: 2}
+	manager.processCertificate(&common.RegistrationCertificate{
+		CertType:        uint(common.CertificateTypeRegistration),
+		StakeCredential: credential,
+		Amount:          7,
+	})
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(7), *deposit)
+
+	manager.deregisterStakeCredential(credential)
+	deposit, err = manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	assert.Nil(t, deposit)
+}
+
+func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	manager := NewMockStateManager()
+	manager.protocolParams = &conway.ConwayProtocolParameters{KeyDeposit: 11}
+	manager.processCertificate(&common.StakeRegistrationCertificate{
+		CertType:        uint(common.CertificateTypeStakeRegistration),
+		StakeCredential: credential,
+	})
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(11), *deposit)
+}
+
+func TestMockStateManagerLoadsHistoricalStakeCredentialDeposit(t *testing.T) {
+	// Conway AccountState is [reward, deposit, pool-delegation,
+	// drep-delegation]. The recorded deposit predates the current parameter.
+	hash := filledBlake2b224(0x03)
+	delegation := "a1" +
+		"8200581c" + strings.Repeat("03", common.Blake2b224Size) +
+		"840b078080"
+	state := parseSyntheticInitialState(t, "", "", "81"+delegation, "")
+	manager := NewMockStateManager()
+	pp := &conway.ConwayProtocolParameters{KeyDeposit: 99}
+
+	require.NoError(t, manager.LoadInitialState(state, pp))
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(
+		common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(7), *deposit)
+}
 
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 )
 
 func TestConsensusEnvelopeKindGuards(t *testing.T) {
@@ -106,7 +107,7 @@ func TestClassifyFixtureCanonicalTransactionUsesConwayEra(t *testing.T) {
 	}
 }
 
-func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(
+func TestDecodeDijkstraProtocolParametersMapsRefScriptFields(
 	t *testing.T,
 ) {
 	harness := NewHarness(HarnessConfig{})
@@ -117,11 +118,16 @@ func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(
 	if err != nil {
 		t.Fatalf("Fixture failed: %v", err)
 	}
-	if _, err := paramsFixture.DecodeProtocolParameters(); !errors.Is(
-		err,
-		errUnsupportedDijkstraRefScriptFields,
-	) {
-		t.Fatalf("expected unsupported Dijkstra ref-script error, got %v", err)
+	params, err := paramsFixture.DecodeProtocolParameters()
+	if err != nil {
+		t.Fatalf("DecodeProtocolParameters failed: %v", err)
+	}
+	dijkstraParams, ok := params.(*dijkstra.DijkstraProtocolParameters)
+	if !ok {
+		t.Fatalf("expected Dijkstra parameters, got %T", params)
+	}
+	if dijkstraParams.MaxRefScriptSizePerBlock == 0 || dijkstraParams.MaxRefScriptSizePerTx == 0 || dijkstraParams.RefScriptCostStride == 0 || dijkstraParams.RefScriptCostMultiplier == nil {
+		t.Fatal("expected Dijkstra ref-script fields to be mapped")
 	}
 
 	updateFixture, err := harness.Fixture(
@@ -130,15 +136,16 @@ func TestDecodeDijkstraProtocolParametersRejectsUnsupportedRefScriptFields(
 	if err != nil {
 		t.Fatalf("Fixture failed: %v", err)
 	}
-	if _, err := updateFixture.DecodeProtocolParameterUpdate(); !errors.Is(
-		err,
-		errUnsupportedDijkstraRefScriptFields,
-	) {
-		t.Fatalf("expected unsupported Dijkstra ref-script error, got %v", err)
+	update, err := updateFixture.DecodeProtocolParameterUpdate()
+	if err != nil {
+		t.Fatalf("DecodeProtocolParameterUpdate failed: %v", err)
+	}
+	if _, ok := update.Value().(*dijkstra.DijkstraProtocolParameterUpdate); !ok {
+		t.Fatalf("expected Dijkstra update, got %T", update.Value())
 	}
 }
 
-func TestDecodeDijkstraConwayNamedProtocolParametersRejectsUnsupportedRefScriptFields(
+func TestDecodeDijkstraConwayNamedProtocolParametersMapsRefScriptFields(
 	t *testing.T,
 ) {
 	fixture := writeTempJSONFixture(
@@ -183,15 +190,17 @@ func TestDecodeDijkstraConwayNamedProtocolParametersRejectsUnsupportedRefScriptF
 			}
 		}`,
 	)
-	if _, err := fixture.DecodeProtocolParameters(); !errors.Is(
-		err,
-		errUnsupportedDijkstraRefScriptFields,
-	) {
-		t.Fatalf("expected unsupported Dijkstra ref-script error, got %v", err)
+	params, err := fixture.DecodeProtocolParameters()
+	if err != nil {
+		t.Fatalf("DecodeProtocolParameters failed: %v", err)
+	}
+	dijkstraParams, ok := params.(*dijkstra.DijkstraProtocolParameters)
+	if !ok || dijkstraParams.MaxRefScriptSizePerBlock != 1 {
+		t.Fatalf("expected mapped Dijkstra parameters, got %#v", params)
 	}
 }
 
-func TestExecuteProtocolParametersUpdateFixtureIgnoresUnsupportedDijkstraBaseRefScriptFields(
+func TestExecuteProtocolParametersUpdateFixtureMapsDijkstraBaseRefScriptFields(
 	t *testing.T,
 ) {
 	rootDir := t.TempDir()
@@ -261,7 +270,7 @@ func TestExecuteProtocolParametersUpdateFixtureIgnoresUnsupportedDijkstraBaseRef
 	)
 	if err != nil {
 		t.Fatalf(
-			"expected unsupported Dijkstra paired-base fixture to be ignored, got %v",
+			"expected Dijkstra paired-base fixture to execute, got %v",
 			err,
 		)
 	}

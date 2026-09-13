@@ -68,6 +68,10 @@ type ParsedInitialState struct {
 	// RewardAccountBalances maps full credential identities to reward balances.
 	RewardAccountBalances map[mockledger.RewardAccountKey]uint64
 
+	// StakeCredentialDeposits maps registered stake credentials to their
+	// original registration deposits.
+	StakeCredentialDeposits map[mockledger.RewardAccountKey]uint64
+
 	// PoolRegistrations tracks which pools are registered (by pool key hash).
 	PoolRegistrations map[common.Blake2b224]bool
 
@@ -212,7 +216,10 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		),
 		RewardAccounts:        make(map[common.Blake2b224]uint64),
 		RewardAccountBalances: make(map[mockledger.RewardAccountKey]uint64),
-		PoolRegistrations:     make(map[common.Blake2b224]bool),
+		StakeCredentialDeposits: make(
+			map[mockledger.RewardAccountKey]uint64,
+		),
+		PoolRegistrations: make(map[common.Blake2b224]bool),
 		PoolRewardAccounts: make(
 			map[common.PoolKeyHash]mockledger.RewardAccountKey,
 		),
@@ -1250,7 +1257,7 @@ func parseDelegationState(
 			if cred == nil {
 				continue
 			}
-			balance, registered := extractRewardAccountBalance(v)
+			balance, deposit, hasDeposit, registered := extractRewardAccount(v)
 			if !registered {
 				continue
 			}
@@ -1294,6 +1301,9 @@ func parseDelegationState(
 			}
 
 			state.RewardAccountBalances[accountKey] = balance
+			if hasDeposit {
+				state.StakeCredentialDeposits[accountKey] = deposit
+			}
 			// Keep the legacy hash-only view deterministic: prefer a key-hash
 			// credential if both credential types carry the same hash.
 			if _, exists := state.RewardAccounts[cred.Credential]; !exists ||
@@ -1312,27 +1322,45 @@ func parseDelegationState(
 // balance and deposit directly. The historical rewards-map form remains
 // supported for synthetic and downstream fixtures.
 func extractRewardAccountBalance(raw any) (uint64, bool) {
+	balance, _, _, registered := extractRewardAccount(raw)
+	return balance, registered
+}
+
+func extractRewardAccount(raw any) (uint64, uint64, bool, bool) {
 	account, ok := raw.([]any)
 	if !ok || len(account) == 0 {
-		return 0, false
+		return 0, 0, false, false
 	}
 
 	switch balanceState := account[0].(type) {
 	case uint64:
-		return balanceState, true
+		var deposit uint64
+		hasDeposit := false
+		if len(account) > 1 {
+			deposit, hasDeposit = account[1].(uint64)
+		}
+		return balanceState, deposit, hasDeposit, true
 	case []any:
 		if len(balanceState) == 0 {
-			return 0, false
+			return 0, 0, false, false
 		}
 		legacyAccount, ok := balanceState[0].([]any)
 		if !ok || len(legacyAccount) == 0 {
-			return 0, false
+			return 0, 0, false, false
 		}
 		balance, ok := legacyAccount[0].(uint64)
-		return balance, ok
+		if !ok {
+			return 0, 0, false, false
+		}
+		var deposit uint64
+		hasDeposit := false
+		if len(legacyAccount) > 1 {
+			deposit, hasDeposit = legacyAccount[1].(uint64)
+		}
+		return balance, deposit, hasDeposit, true
 	case map[any]any:
 		if len(balanceState) == 0 {
-			return 0, true
+			return 0, 0, false, true
 		}
 		for _, reward := range balanceState {
 			rewardPair, ok := reward.([]any)
@@ -1341,13 +1369,13 @@ func extractRewardAccountBalance(raw any) (uint64, bool) {
 			}
 			balance, ok := rewardPair[1].(uint64)
 			if ok {
-				return balance, true
+				return balance, 0, false, true
 			}
 		}
-		return 0, true
+		return 0, 0, false, true
 	}
 
-	return 0, false
+	return 0, 0, false, false
 }
 
 func extractDRepDelegation(raw any) *common.Drep {
