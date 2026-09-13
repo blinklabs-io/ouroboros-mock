@@ -218,6 +218,18 @@ func hasCredentialHash[V any](
 	return false
 }
 
+func hasRegisteredCredentialHash(
+	values map[ledger.RewardAccountKey]bool,
+	hash common.Blake2b224,
+) bool {
+	for credential, registered := range values {
+		if registered && credential.Credential == hash {
+			return true
+		}
+	}
+	return false
+}
+
 // LoadFromParsedState loads governance state from a parsed initial state.
 func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.CurrentEpoch = state.CurrentEpoch

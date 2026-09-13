@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -27,6 +28,71 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: common.Blake2b224{0x01},
+	}
+	manager := NewMockStateManager()
+	manager.protocolParams = &conway.ConwayProtocolParameters{KeyDeposit: 2}
+	manager.processCertificate(&common.RegistrationCertificate{
+		CertType:        uint(common.CertificateTypeRegistration),
+		StakeCredential: credential,
+		Amount:          7,
+	})
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(7), *deposit)
+
+	manager.deregisterStakeCredential(credential)
+	deposit, err = manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	assert.Nil(t, deposit)
+}
+
+func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x02},
+	}
+	manager := NewMockStateManager()
+	manager.protocolParams = &conway.ConwayProtocolParameters{KeyDeposit: 11}
+	manager.processCertificate(&common.StakeRegistrationCertificate{
+		CertType:        uint(common.CertificateTypeStakeRegistration),
+		StakeCredential: credential,
+	})
+
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(11), *deposit)
+}
+
+func TestMockStateManagerLoadsHistoricalStakeCredentialDeposit(t *testing.T) {
+	// Conway AccountState is [reward, deposit, pool-delegation,
+	// drep-delegation]. The recorded deposit predates the current parameter.
+	hash := filledBlake2b224(0x03)
+	delegation := "a1" +
+		"8200581c" + strings.Repeat("03", common.Blake2b224Size) +
+		"840b078080"
+	state := parseSyntheticInitialState(t, "", "", "81"+delegation, "")
+	manager := NewMockStateManager()
+	pp := &conway.ConwayProtocolParameters{KeyDeposit: 99}
+
+	require.NoError(t, manager.LoadInitialState(state, pp))
+	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(
+		common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, deposit)
+	assert.Equal(t, uint64(7), *deposit)
+}
 
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
@@ -1373,6 +1439,32 @@ func TestApplyTransactionDeregistersExactDRepCredential(t *testing.T) {
 	require.Contains(t, stateManager.drepRegistrations, keyKey)
 }
 
+func TestApplyTransactionDeregistersLegacyDRepProjection(t *testing.T) {
+	hash := common.Blake2b224{0x73}
+	scriptCredential := common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	}
+	legacyKey := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	})
+	scriptKey := ledger.NewRewardAccountKey(scriptCredential)
+	stateManager := NewMockStateManager()
+	stateManager.drepRegistrations[legacyKey] = nil
+	stateManager.drepRegistrations[scriptKey] = nil
+	stateManager.govState.RegisterDRepCredentialUntil(scriptCredential, 10)
+	tx := ledger.NewTransactionBuilder().WithCertificates(
+		&common.DeregistrationDrepCertificate{
+			CertType:       uint(common.CertificateTypeDeregistrationDrep),
+			DrepCredential: scriptCredential,
+		},
+	)
+
+	require.NoError(t, stateManager.ApplyTransaction(tx, 0))
+	require.NotContains(t, stateManager.drepRegistrations, legacyKey)
+}
+
 func TestDRepVoteRefreshesExactCredentialForRatification(t *testing.T) {
 	const (
 		currentEpoch = uint64(5)
@@ -1769,6 +1861,45 @@ func TestLoadInitialStateMergesLegacyAndTypedCommitteeState(t *testing.T) {
 		stateManager.govState.HotKeyAuthorizationsByCredential,
 		typedScript,
 	)
+}
+
+func TestLoadInitialStateSkipsUnregisteredDRepEntries(t *testing.T) {
+	hash := common.Blake2b224{0x71}
+	key := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	})
+	initialState := &ParsedInitialState{
+		DRepRegistrations: []common.Blake2b224{hash},
+		DRepRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
+			key: false,
+		},
+	}
+	stateManager := NewMockStateManager()
+	require.NoError(t, stateManager.LoadInitialState(initialState, nil))
+	require.Empty(t, stateManager.drepRegistrations)
+}
+
+func TestLoadInitialStateDoesNotPromoteScriptDRepProjection(t *testing.T) {
+	hash := common.Blake2b224{0x72}
+	scriptKey := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: hash,
+	})
+	keyKey := ledger.NewRewardAccountKey(common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: hash,
+	})
+	initialState := &ParsedInitialState{
+		DRepRegistrations: []common.Blake2b224{hash},
+		DRepRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
+			scriptKey: true,
+		},
+	}
+	stateManager := NewMockStateManager()
+	require.NoError(t, stateManager.LoadInitialState(initialState, nil))
+	require.Contains(t, stateManager.drepRegistrations, scriptKey)
+	require.NotContains(t, stateManager.drepRegistrations, keyKey)
 }
 
 func TestLoadInitialStateDoesNotPromoteTypedProjection(t *testing.T) {

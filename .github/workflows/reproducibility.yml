@@ -1,0 +1,73 @@
+name: reproducibility
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify immutable sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: verify immutable sources
+        env:
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request_target" ]]; then
+            if [[ -z "${PR_HEAD_REPOSITORY}" || -z "${PR_HEAD_SHA}" ]]; then
+              echo "pull request head metadata is unavailable" >&2
+              exit 1
+            fi
+            git fetch --no-tags --depth=1 \
+              "https://github.com/${PR_HEAD_REPOSITORY}.git" "${PR_HEAD_SHA}"
+            pr_root="${RUNNER_TEMP}/reproducibility-pr"
+            mkdir -p "${pr_root}"
+            if ! git ls-tree -r --full-tree "${PR_HEAD_SHA}" | \
+              awk '$1 == "120000" { found=1 } END { exit found }'; then
+              echo "pull request contains symbolic links" >&2
+              exit 1
+            fi
+            git ls-tree -r -z --full-tree "${PR_HEAD_SHA}" | \
+            while IFS= read -r -d '' tree_record; do
+              tree_entry="${tree_record%%$'\t'*}"
+              path="${tree_record#*$'\t'}"
+              mode="${tree_entry%% *}"
+              if [[ "${mode}" == "160000" ]]; then
+                continue
+              fi
+              destination="${pr_root}/${path}"
+              resolved_destination=$(realpath -m -- "${destination}")
+              case "${resolved_destination}" in
+                "${pr_root}"/*) ;;
+                *)
+                  echo "pull request path escapes reconstruction root: ${path}" >&2
+                  exit 1
+                  ;;
+              esac
+              mkdir -p -- "$(dirname -- "${destination}")"
+              git cat-file blob "${PR_HEAD_SHA}:${path}" > "${destination}"
+            done
+            if ! git cat-file -e HEAD:scripts/check-reproducibility.sh 2>/dev/null; then
+              echo "trusted reproducibility checker is missing from the base branch" >&2
+              exit 1
+            fi
+            trusted_checker="${RUNNER_TEMP}/check-reproducibility.sh"
+            git show HEAD:scripts/check-reproducibility.sh > "${trusted_checker}"
+            chmod +x "${trusted_checker}"
+            trusted_parser="${RUNNER_TEMP}/check-workflow-actions.go"
+            git show HEAD:scripts/check-workflow-actions.go > "${trusted_parser}"
+            CHECK_WORKFLOW_ACTIONS_PARSER="${trusted_parser}" \
+              "${trusted_checker}" "${pr_root}"
+          else
+            scripts/check-reproducibility.sh "$GITHUB_WORKSPACE"
+          fi

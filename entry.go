@@ -20,6 +20,9 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/handshake"
 	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
+	"github.com/blinklabs-io/gouroboros/protocol/leiosfetch"
+	"github.com/blinklabs-io/gouroboros/protocol/leiosnotify"
+	"github.com/blinklabs-io/gouroboros/protocol/leiosvotes"
 )
 
 const (
@@ -192,4 +195,100 @@ var ConversationKeepAliveClose = []ConversationEntry{
 	ConversationEntryHandshakeNtNResponse,
 	ConversationEntryKeepAliveRequest,
 	ConversationEntryClose{},
+}
+
+// NewConversationEntryLeiosFetchRequest builds a client request entry for the
+// Leios fetch mini-protocol.
+func NewConversationEntryLeiosFetchRequest(
+	message protocol.Message,
+) ConversationEntryInput {
+	return ConversationEntryInput{
+		ProtocolId:      leiosfetch.ProtocolId,
+		Message:         message,
+		MsgFromCborFunc: leiosfetch.NewMsgFromCbor,
+	}
+}
+
+// NewConversationEntryLeiosFetchResponse builds a server response entry for
+// the Leios fetch mini-protocol.
+func NewConversationEntryLeiosFetchResponse(
+	messages ...protocol.Message,
+) ConversationEntryOutput {
+	return ConversationEntryOutput{
+		ProtocolId: leiosfetch.ProtocolId,
+		IsResponse: true,
+		Messages:   messages,
+	}
+}
+
+// NewConversationEntryLeiosNotifyRequest builds a client request entry for the
+// Leios notify mini-protocol.
+func NewConversationEntryLeiosNotifyRequest(
+	message protocol.Message,
+) ConversationEntryInput {
+	return ConversationEntryInput{
+		ProtocolId:      leiosnotify.ProtocolId,
+		Message:         message,
+		MsgFromCborFunc: leiosnotify.NewMsgFromCbor,
+	}
+}
+
+// NewConversationEntryLeiosNotifyResponse builds a server response entry for
+// the Leios notify mini-protocol.
+func NewConversationEntryLeiosNotifyResponse(
+	messages ...protocol.Message,
+) ConversationEntryOutput {
+	return ConversationEntryOutput{
+		ProtocolId: leiosnotify.ProtocolId,
+		IsResponse: true,
+		Messages:   messages,
+	}
+}
+
+// NewConversationEntryLeiosVotesRequest builds a client request entry for the
+// Leios votes mini-protocol.
+func NewConversationEntryLeiosVotesRequest(
+	message protocol.Message,
+) ConversationEntryInput {
+	return ConversationEntryInput{
+		ProtocolId:      leiosvotes.ProtocolId,
+		Message:         message,
+		MsgFromCborFunc: leiosvotes.NewMsgFromCbor,
+	}
+}
+
+// NewConversationEntryLeiosVotesResponse builds a server response entry for
+// the Leios votes mini-protocol.
+func NewConversationEntryLeiosVotesResponse(
+	messages ...protocol.Message,
+) ConversationEntryOutput {
+	return ConversationEntryOutput{
+		ProtocolId: leiosvotes.ProtocolId,
+		IsResponse: true,
+		Messages:   messages,
+	}
+}
+
+// ConversationLeiosFetch is a minimal Leios fetch conversation that performs
+// the handshake, then completes the protocol from the client with Done.
+var ConversationLeiosFetch = []ConversationEntry{
+	ConversationEntryHandshakeRequestGeneric,
+	ConversationEntryHandshakeNtNResponse,
+	NewConversationEntryLeiosFetchRequest(leiosfetch.NewMsgDone()),
+}
+
+// ConversationLeiosNotify is a minimal Leios notify conversation that performs
+// the handshake, then completes the protocol from the client with Done.
+var ConversationLeiosNotify = []ConversationEntry{
+	ConversationEntryHandshakeRequestGeneric,
+	ConversationEntryHandshakeNtNResponse,
+	NewConversationEntryLeiosNotifyRequest(leiosnotify.NewMsgDone()),
+}
+
+// ConversationLeiosVotes is a minimal Leios votes conversation that performs
+// the handshake, then completes the protocol from the client with Done.
+var ConversationLeiosVotes = []ConversationEntry{
+	ConversationEntryHandshakeRequestGeneric,
+	ConversationEntryHandshakeNtNResponse,
+	NewConversationEntryLeiosVotesRequest(leiosvotes.NewMsgDone()),
 }
