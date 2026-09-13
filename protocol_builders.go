@@ -15,6 +15,9 @@
 package ouroboros_mock
 
 import (
+	"errors"
+
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
@@ -87,10 +90,23 @@ func ChainSyncRollForwardNtC(blockType uint, block []byte, tip chainsync.Tip) (C
 	}, nil
 }
 
-// ChainSyncRollBackward builds a rollback output entry.
-func ChainSyncRollBackward(point pcommon.Point, tip chainsync.Tip) ConversationEntryOutput {
+// chainSyncMode returns the protocol ID and message decoder for the
+// negotiated chain-sync mode. Node-to-node and node-to-client chain-sync
+// run on different mini-protocol IDs, so an entry built for one mode is
+// not interchangeable with the other.
+func chainSyncMode(nodeToClient bool) (uint16, protocol.MessageFromCborFunc) {
+	if nodeToClient {
+		return chainsync.ProtocolIdNtC, chainsync.NewMsgFromCborNtC
+	}
+	return chainsync.ProtocolIdNtN, chainsync.NewMsgFromCborNtN
+}
+
+// ChainSyncRollBackward builds a rollback output entry. nodeToClient
+// selects the mini-protocol the segment is sent on.
+func ChainSyncRollBackward(nodeToClient bool, point pcommon.Point, tip chainsync.Tip) ConversationEntryOutput {
+	protocolID, _ := chainSyncMode(nodeToClient)
 	return ConversationEntryOutput{
-		ProtocolId: chainsync.ProtocolIdNtN,
+		ProtocolId: protocolID,
 		IsResponse: true,
 		Messages: []protocol.Message{
 			chainsync.NewMsgRollBackward(point, tip),
@@ -98,13 +114,18 @@ func ChainSyncRollBackward(point pcommon.Point, tip chainsync.Tip) ConversationE
 	}
 }
 
-// ChainSyncFindIntersect builds a find-intersect input entry.
-func ChainSyncFindIntersect(points []pcommon.Point) ConversationEntryInput {
+// ChainSyncFindIntersect builds a find-intersect input entry. nodeToClient
+// selects the mini-protocol and decoder for the negotiated mode.
+func ChainSyncFindIntersect(nodeToClient bool, points []pcommon.Point) ConversationEntryInput {
+	protocolID, messageFromCbor := chainSyncMode(nodeToClient)
+	if points == nil {
+		points = []pcommon.Point{}
+	}
 	return ConversationEntryInput{
-		ProtocolId:      chainsync.ProtocolIdNtN,
+		ProtocolId:      protocolID,
 		Message:         chainsync.NewMsgFindIntersect(points),
 		MessageType:     chainsync.MessageTypeFindIntersect,
-		MsgFromCborFunc: chainsync.NewMsgFromCborNtN,
+		MsgFromCborFunc: messageFromCbor,
 	}
 }
 
@@ -156,45 +177,70 @@ func BlockFetchBlock(block []byte) ConversationEntryOutput {
 	}
 }
 
-// TxSubmissionRequestTxIds builds a transaction-ID request input entry.
-func TxSubmissionRequestTxIds(blocking bool, ack, request uint16) ConversationEntryInput {
+// TxSubmissionInit builds the init input entry that opens a
+// transaction-submission conversation. The client holds agency in the
+// Init state and sends this message before the server may request
+// transaction IDs.
+func TxSubmissionInit() ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId:      txsubmission.ProtocolId,
-		Message:         txsubmission.NewMsgRequestTxIds(blocking, ack, request),
-		MessageType:     txsubmission.MessageTypeRequestTxIds,
+		Message:         txsubmission.NewMsgInit(),
+		MessageType:     txsubmission.MessageTypeInit,
 		MsgFromCborFunc: txsubmission.NewMsgFromCbor,
 	}
 }
 
-// TxSubmissionRequestTxs builds a transaction request input entry.
-func TxSubmissionRequestTxs(ids []txsubmission.TxId) ConversationEntryInput {
+// TxSubmissionRequestTxIds builds a transaction-ID request output entry.
+// The server holds agency in the Idle state, so the mock sends this
+// message and the client answers with a reply.
+func TxSubmissionRequestTxIds(blocking bool, ack, request uint16) ConversationEntryOutput {
+	return ConversationEntryOutput{
+		ProtocolId: txsubmission.ProtocolId,
+		IsResponse: true,
+		Messages: []protocol.Message{
+			txsubmission.NewMsgRequestTxIds(blocking, ack, request),
+		},
+	}
+}
+
+// TxSubmissionRequestTxs builds a transaction request output entry. The
+// server holds agency in the Idle state, so the mock sends this message.
+func TxSubmissionRequestTxs(ids []txsubmission.TxId) ConversationEntryOutput {
+	return ConversationEntryOutput{
+		ProtocolId: txsubmission.ProtocolId,
+		IsResponse: true,
+		Messages: []protocol.Message{
+			txsubmission.NewMsgRequestTxs(ids),
+		},
+	}
+}
+
+// TxSubmissionReplyTxIds builds a transaction-ID reply input entry. The
+// client holds agency in both TxIds states, so the mock receives this
+// message in answer to a request.
+func TxSubmissionReplyTxIds(ids []txsubmission.TxIdAndSize) ConversationEntryInput {
+	if ids == nil {
+		ids = []txsubmission.TxIdAndSize{}
+	}
 	return ConversationEntryInput{
 		ProtocolId:      txsubmission.ProtocolId,
-		Message:         txsubmission.NewMsgRequestTxs(ids),
-		MessageType:     txsubmission.MessageTypeRequestTxs,
+		Message:         txsubmission.NewMsgReplyTxIds(ids),
+		MessageType:     txsubmission.MessageTypeReplyTxIds,
 		MsgFromCborFunc: txsubmission.NewMsgFromCbor,
 	}
 }
 
-// TxSubmissionReplyTxIds builds a transaction-ID reply output entry.
-func TxSubmissionReplyTxIds(ids []txsubmission.TxIdAndSize) ConversationEntryOutput {
-	return ConversationEntryOutput{
-		ProtocolId: txsubmission.ProtocolId,
-		IsResponse: true,
-		Messages: []protocol.Message{
-			txsubmission.NewMsgReplyTxIds(ids),
-		},
+// TxSubmissionReplyTxs builds a transaction reply input entry. The client
+// holds agency in the Txs state, so the mock receives this message.
+func TxSubmissionReplyTxs(txs []txsubmission.TxBody) ConversationEntryInput {
+	if txs == nil {
+		txs = []txsubmission.TxBody{}
 	}
-}
-
-// TxSubmissionReplyTxs builds a transaction reply output entry.
-func TxSubmissionReplyTxs(txs []txsubmission.TxBody) ConversationEntryOutput {
-	return ConversationEntryOutput{
-		ProtocolId: txsubmission.ProtocolId,
-		IsResponse: true,
-		Messages: []protocol.Message{
-			txsubmission.NewMsgReplyTxs(txs),
-		},
+	return ConversationEntryInput{
+		ProtocolId:      txsubmission.ProtocolId,
+		Message:         txsubmission.NewMsgReplyTxs(txs),
+		MessageType:     txsubmission.MessageTypeReplyTxs,
+		MsgFromCborFunc: txsubmission.NewMsgFromCbor,
 	}
 }
 
@@ -268,14 +314,35 @@ func LocalStateQueryReAcquire(point pcommon.Point) ConversationEntryInput {
 	}
 }
 
-// LocalStateQueryQuery builds a query input entry.
-func LocalStateQueryQuery(query any) ConversationEntryInput {
+// LocalStateQueryQuery builds a query input entry. The expected message is
+// normalized through CBOR because localstatequery.QueryWrapper keeps its own
+// stored CBOR and decodes the payload into a typed query. A message built
+// directly from NewMsgQuery carries neither, so it never compares equal to a
+// message decoded from the wire.
+func LocalStateQueryQuery(query any) (ConversationEntryInput, error) {
+	encoded, err := cbor.Encode(localstatequery.NewMsgQuery(query))
+	if err != nil {
+		return ConversationEntryInput{}, err
+	}
+	message, err := localstatequery.NewMsgFromCbor(
+		localstatequery.MessageTypeQuery,
+		encoded,
+	)
+	if err != nil {
+		return ConversationEntryInput{}, err
+	}
+	if message == nil {
+		return ConversationEntryInput{}, errors.New(
+			"local state query message type was not recognized",
+		)
+	}
+	message.SetCbor(nil)
 	return ConversationEntryInput{
 		ProtocolId:      localstatequery.ProtocolId,
-		Message:         localstatequery.NewMsgQuery(query),
+		Message:         message,
 		MessageType:     localstatequery.MessageTypeQuery,
 		MsgFromCborFunc: localstatequery.NewMsgFromCbor,
-	}
+	}, nil
 }
 
 // LocalStateQueryRelease builds a release input entry.

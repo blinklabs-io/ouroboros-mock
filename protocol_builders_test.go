@@ -41,15 +41,25 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	query, err := LocalStateQueryQuery(
+		[]any{localstatequery.QueryTypeSystemStart},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	entries := []ConversationEntry{
 		ChainSyncRequestNext(false),
+		ChainSyncRequestNext(true),
 		ntn,
 		ntc,
-		ChainSyncRollBackward(point, tip),
-		ChainSyncFindIntersect([]pcommon.Point{point}),
+		ChainSyncRollBackward(false, point, tip),
+		ChainSyncRollBackward(true, point, tip),
+		ChainSyncFindIntersect(false, []pcommon.Point{point}),
+		ChainSyncFindIntersect(true, nil),
 		BlockFetchRequestRange(point, point),
 		BlockFetchNoBlocks(),
 		BlockFetchBlock([]byte{0x80}),
+		TxSubmissionInit(),
 		TxSubmissionRequestTxIds(true, 0, 1),
 		TxSubmissionRequestTxs([]txsubmission.TxId{}),
 		TxSubmissionReplyTxIds(nil),
@@ -61,7 +71,7 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 		LocalTxMonitorRelease(),
 		LocalStateQueryAcquire(point),
 		LocalStateQueryReAcquire(point),
-		LocalStateQueryQuery([]any{localstatequery.QueryTypeSystemStart}),
+		query,
 		LocalStateQueryRelease(),
 	}
 	if ChainSyncRequestNext(true).IsResponse {
@@ -115,6 +125,79 @@ func assertMessageRoundTrips(t *testing.T, entry ConversationEntryInput) {
 	}
 	if !bytes.Equal(reencoded, encoded) {
 		t.Fatalf("decoded message does not round-trip: got %x, want %x", reencoded, encoded)
+	}
+	// Connection.processInputEntry clears the CBOR of the received message
+	// and compares it to the expected message with reflect.DeepEqual. An
+	// expected message that does not survive that comparison rejects a
+	// protocol-correct client, so assert the same condition here.
+	decoded.SetCbor(nil)
+	if !reflect.DeepEqual(decoded, entry.Message) {
+		t.Fatalf(
+			"decoded message does not match expected message:\n got %#v\nwant %#v",
+			decoded,
+			entry.Message,
+		)
+	}
+}
+
+// TestChainSyncBuildersUseNegotiatedProtocolId pins every mode-aware
+// chain-sync builder to the mini-protocol of the negotiated mode. A
+// node-to-client conversation carrying a node-to-node protocol ID is sent
+// on a mini-protocol the client is not listening on.
+func TestChainSyncBuildersUseNegotiatedProtocolId(t *testing.T) {
+	point := NewPoint(42, make([]byte, common.Blake2b256Size))
+	tip := NewTip(point, 7)
+	tests := []struct {
+		name       string
+		protocolID uint16
+		want       uint16
+	}{
+		{"request-next NtN", ChainSyncRequestNext(false).ProtocolId, chainsync.ProtocolIdNtN},
+		{"request-next NtC", ChainSyncRequestNext(true).ProtocolId, chainsync.ProtocolIdNtC},
+		{"roll-backward NtN", ChainSyncRollBackward(false, point, tip).ProtocolId, chainsync.ProtocolIdNtN},
+		{"roll-backward NtC", ChainSyncRollBackward(true, point, tip).ProtocolId, chainsync.ProtocolIdNtC},
+		{"find-intersect NtN", ChainSyncFindIntersect(false, nil).ProtocolId, chainsync.ProtocolIdNtN},
+		{"find-intersect NtC", ChainSyncFindIntersect(true, nil).ProtocolId, chainsync.ProtocolIdNtC},
+	}
+	for _, test := range tests {
+		if test.protocolID != test.want {
+			t.Errorf("%s protocol ID = %d, want %d", test.name, test.protocolID, test.want)
+		}
+	}
+}
+
+// TestTxSubmissionBuilderDirectionsFollowAgency checks each builder against
+// the agency gouroboros assigns in txsubmission.StateMap. The mock acts as
+// the server, so it sends the messages the server has agency for and
+// receives the ones the client has agency for. A builder on the wrong side
+// stalls the conversation against a conforming client.
+func TestTxSubmissionBuilderDirectionsFollowAgency(t *testing.T) {
+	serverSends := []ConversationEntry{
+		TxSubmissionRequestTxIds(true, 0, 1),
+		TxSubmissionRequestTxs([]txsubmission.TxId{}),
+	}
+	clientSends := []ConversationEntry{
+		TxSubmissionInit(),
+		TxSubmissionReplyTxIds(nil),
+		TxSubmissionReplyTxs(nil),
+	}
+	for i, entry := range serverSends {
+		output, ok := entry.(ConversationEntryOutput)
+		if !ok {
+			t.Fatalf("server-agency entry %d is %T, want ConversationEntryOutput", i, entry)
+		}
+		if !output.IsResponse {
+			t.Errorf("server-agency entry %d is not marked as a response segment", i)
+		}
+	}
+	for i, entry := range clientSends {
+		input, ok := entry.(ConversationEntryInput)
+		if !ok {
+			t.Fatalf("client-agency entry %d is %T, want ConversationEntryInput", i, entry)
+		}
+		if input.IsResponse {
+			t.Errorf("client-agency entry %d is marked as a response segment", i)
+		}
 	}
 }
 
