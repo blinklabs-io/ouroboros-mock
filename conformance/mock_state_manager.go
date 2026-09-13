@@ -174,15 +174,24 @@ func (m *MockStateManager) LoadInitialState(
 	// Load DRep registrations. The typed set is authoritative; the legacy
 	// hash list is its key-hash compatibility projection, matching
 	// GovernanceState.RegisterDRep.
-	for key := range state.DRepRegistrationsByCredential {
-		m.drepRegistrations[key] = drepSeedDeposit(state, key)
+	for key, registered := range state.DRepRegistrationsByCredential {
+		if registered {
+			m.drepRegistrations[key] = drepSeedDeposit(state, key)
+		}
 	}
 	for _, hash := range state.DRepRegistrations {
 		key := ledger.RewardAccountKey{
 			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hash,
 		}
-		if _, found := m.drepRegistrations[key]; found {
+		typedRegistered := false
+		for typedKey, registered := range state.DRepRegistrationsByCredential {
+			if registered && typedKey.Credential == hash {
+				typedRegistered = true
+				break
+			}
+		}
+		if typedRegistered {
 			continue
 		}
 		m.drepRegistrations[key] = drepSeedDeposit(state, key)
@@ -1485,7 +1494,7 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 
 	// Set up DRep lookup callback
 	drepRegs := maps.Clone(m.drepRegistrations) // capture for closure
-	builder.WithDRepRegistration(
+	builder.WithDRepCredentialRegistration(
 		func(cred common.Credential) (*common.DRepRegistration, error) {
 			deposit, found := drepRegs[ledger.NewRewardAccountKey(cred)]
 			if !found {
