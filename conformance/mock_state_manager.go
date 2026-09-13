@@ -205,16 +205,6 @@ func (m *MockStateManager) LoadInitialState(
 			CredType:   common.CredentialTypeAddrKeyHash,
 			Credential: hash,
 		}
-		typedRegistered := false
-		for typedKey, registered := range state.DRepRegistrationsByCredential {
-			if registered && typedKey.Credential == hash {
-				typedRegistered = true
-				break
-			}
-		}
-		if typedRegistered {
-			continue
-		}
 		m.drepRegistrations[key] = drepSeedDeposit(state, key)
 	}
 	// Load committee members. Legacy entries represent key credentials, but a
