@@ -571,6 +571,20 @@ func TestMockStateManager(t *testing.T) {
 	t.Logf("  Passed: %d", successes)
 	t.Logf("  Failed: %d", failures)
 
+	t.Logf("Conformance coverage by era/rule family:")
+	coverage := SummarizeCoverage(results)
+	for _, key := range SortedCoverageKeys(coverage) {
+		counts := coverage[key]
+		t.Logf(
+			"  era=%s family=%s total=%d passed=%d failed=%d",
+			key.Era,
+			key.RuleFamily,
+			counts.Total,
+			counts.Passed,
+			counts.Failed,
+		)
+	}
+
 	// Log first few failures for debugging
 	failCount := 0
 	for _, result := range results {
