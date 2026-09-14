@@ -18,10 +18,13 @@
 package conformance
 
 import (
+	"errors"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/assert"
@@ -213,24 +216,47 @@ func TestHarnessIntegration(t *testing.T) {
 	})
 }
 
-// TestVectorStructure validates the internal structure of decoded test vectors.
-// For the first 10 vectors, it verifies:
-//   - Title is non-empty
-//   - InitialState and FinalState contain CBOR data
-//   - FilePath matches the source file path
-//   - Transaction events have non-empty TxBytes
-//   - All event types are recognized (Transaction, PassTick, PassEpoch)
+// TestVectorStructure validates the structure of every Cardano Blueprint
+// vector under testdata/eras rather than a prefix of them.
+//
+// Structural here means the properties a vector needs for its result to carry
+// information at all, independent of ledger semantics:
+//
+//   - it decodes, and carries a title and its own file path;
+//   - every event is a known type, and transaction events carry bytes;
+//   - the initial state is a usable NewEpochState, so a run starts from the
+//     state the vector names;
+//   - a vector whose transaction is expected to succeed carries a usable
+//     expected final state. Without one there is nothing to compare a run
+//     against, so the vector asserts a result it cannot check and scores as a
+//     silent pass.
+//
+// Usable is the NewEpochState envelope the harness navigates, not a length.
+// Blueprint's JSON supplies a bare LedgerState that the decoder wraps, so an
+// absent newLedgerState still yields a 13-byte NewEpochState wrapper around no
+// ledger state, which a len() check reads as present.
+//
+// A vector whose transaction is expected to be rejected carries no expected
+// final state and is exempt from the final-state rule.
 func TestVectorStructure(t *testing.T) {
 	root := filepath.Join("testdata", "eras")
 	vectors, err := CollectVectorFiles(root)
 	if err != nil {
 		t.Fatalf("CollectVectorFiles failed: %v", err)
 	}
-	if len(vectors) == 0 {
-		t.Fatal("no test vectors found")
+	// Floor so the check cannot narrow back to a handful of vectors without
+	// failing. The pinned corpus holds 2574 vectors, 2408 expecting success.
+	const minCorpusVectors = 2000
+	if len(vectors) < minCorpusVectors {
+		t.Fatalf(
+			"expected at least %d vectors, got %d",
+			minCorpusVectors,
+			len(vectors),
+		)
 	}
 
-	for _, path := range vectors[:min(10, len(vectors))] {
+	var withExpectedFinalState int
+	for _, path := range vectors {
 		vector, err := DecodeTestVector(path)
 		if err != nil {
 			t.Errorf("failed to decode %s: %v", path, err)
@@ -241,17 +267,15 @@ func TestVectorStructure(t *testing.T) {
 		if vector.Title == "" {
 			t.Errorf("%s: empty title", path)
 		}
-		if len(vector.InitialState) == 0 {
-			t.Errorf("%s: empty initial state", path)
-		}
-		if len(vector.FinalState) == 0 {
-			t.Errorf("%s: empty final state", path)
-		}
 		if vector.FilePath != path {
 			t.Errorf("%s: FilePath mismatch: %s", path, vector.FilePath)
 		}
+		if err := checkLedgerStateEnvelope(vector.InitialState); err != nil {
+			t.Errorf("%s: unusable initial state: %v", path, err)
+		}
 
 		// Validate events
+		var expectsFinalState bool
 		for i, event := range vector.Events {
 			switch event.Type {
 			case EventTypeTransaction:
@@ -262,15 +286,74 @@ func TestVectorStructure(t *testing.T) {
 						i,
 					)
 				}
+				if event.Success {
+					expectsFinalState = true
+				}
 			case EventTypePassTick:
 				// TickSlot can be 0, so no validation needed
 			case EventTypePassEpoch:
 				// EpochDelta can be 0, so no validation needed
+			case EventTypeRollback:
+				// RollbackSlot can be 0, so no validation needed
 			default:
 				t.Errorf("%s: event %d: unknown type %d", path, i, event.Type)
 			}
 		}
+		if !expectsFinalState {
+			continue
+		}
+		withExpectedFinalState++
+		if err := checkLedgerStateEnvelope(vector.FinalState); err != nil {
+			t.Errorf(
+				"%s: vector expects a successful transaction but carries no usable final state: %v",
+				path,
+				err,
+			)
+		}
 	}
+
+	if withExpectedFinalState < minCorpusVectors {
+		t.Errorf(
+			"expected at least %d vectors with an expected final state, got %d",
+			minCorpusVectors,
+			withExpectedFinalState,
+		)
+	}
+}
+
+// checkLedgerStateEnvelope reports whether raw is a NewEpochState carrying a
+// non-empty LedgerState where the harness reads it from, NewEpochState[3][1].
+// Only the envelope is decoded, which keeps the check cheap enough to run over
+// the whole corpus.
+func checkLedgerStateEnvelope(raw cbor.RawMessage) error {
+	var newEpochState []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &newEpochState); err != nil {
+		return fmt.Errorf("decode NewEpochState: %w", err)
+	}
+	if len(newEpochState) < 4 {
+		return fmt.Errorf(
+			"NewEpochState has %d elements, want at least 4",
+			len(newEpochState),
+		)
+	}
+	var beginEpochState []cbor.RawMessage
+	if _, err := cbor.Decode(newEpochState[3], &beginEpochState); err != nil {
+		return fmt.Errorf("decode begin epoch state: %w", err)
+	}
+	if len(beginEpochState) < 2 {
+		return fmt.Errorf(
+			"begin epoch state has %d elements, want at least 2",
+			len(beginEpochState),
+		)
+	}
+	var ledgerState []cbor.RawMessage
+	if _, err := cbor.Decode(beginEpochState[1], &ledgerState); err != nil {
+		return fmt.Errorf("decode LedgerState: %w", err)
+	}
+	if len(ledgerState) == 0 {
+		return errors.New("LedgerState is empty")
+	}
+	return nil
 }
 
 // TestEventTypeDistribution analyzes the distribution of event types across
