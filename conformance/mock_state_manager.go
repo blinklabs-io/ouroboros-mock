@@ -281,16 +281,15 @@ func (m *MockStateManager) ApplyTransaction(
 	txHashStr := hex.EncodeToString(txHash.Bytes())
 
 	// Validate withdrawals before mutating any UTxO or certificate state.
+	//
+	// Withdrawals are applied after this transaction's certificates, so the
+	// balance a withdrawal is checked against is the one left by the
+	// certificate sequence: a deregistration removes the account and a
+	// registration resets it to zero. Project those effects here so an
+	// insufficient withdrawal is rejected before anything is mutated, rather
+	// than part-way through.
+	projected := m.projectedRewardAccounts(tx.Certificates())
 	withdrawals := make(map[ledger.RewardAccountKey]uint64)
-	deregistered := make(map[ledger.RewardAccountKey]bool)
-	for _, cert := range tx.Certificates() {
-		switch cert := cert.(type) {
-		case *common.StakeDeregistrationCertificate:
-			deregistered[ledger.NewRewardAccountKey(cert.StakeCredential)] = true
-		case *common.DeregistrationCertificate:
-			deregistered[ledger.NewRewardAccountKey(cert.StakeCredential)] = true
-		}
-	}
 	for rewardAccount, amount := range tx.Withdrawals() {
 		if rewardAccount == nil || amount == nil {
 			continue
@@ -303,10 +302,7 @@ func (m *MockStateManager) ApplyTransaction(
 		withdrawals[key] += amount.Uint64()
 	}
 	for key, withdrawal := range withdrawals {
-		if deregistered[key] {
-			continue
-		}
-		balance, exists := m.rewardAccounts[key]
+		balance, exists := projected(key)
 		if exists && withdrawal > balance {
 			return fmt.Errorf(
 				"withdrawal amount %d exceeds reward account balance %d",
@@ -706,6 +702,54 @@ func (m *MockStateManager) refreshDRepVoter(voter *common.Voter) {
 		credential,
 		m.drepActivityExpiry(),
 	)
+}
+
+// projectedRewardAccounts returns a lookup for the reward-account balance each
+// credential will hold once certs have been applied by processCertificate.
+// It mirrors the reward-account effects of that function: every registration
+// form resets the balance to zero and every deregistration form removes the
+// account. Credentials the certificates do not touch keep their current
+// balance.
+func (m *MockStateManager) projectedRewardAccounts(
+	certs []common.Certificate,
+) func(ledger.RewardAccountKey) (uint64, bool) {
+	type projectedBalance struct {
+		balance uint64
+		exists  bool
+	}
+	projected := make(map[ledger.RewardAccountKey]projectedBalance)
+	for _, cert := range certs {
+		var credential common.Credential
+		registered := false
+		switch cert := cert.(type) {
+		case *common.StakeRegistrationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.RegistrationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.VoteRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeVoteRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeDeregistrationCertificate:
+			credential = cert.StakeCredential
+		case *common.DeregistrationCertificate:
+			credential = cert.StakeCredential
+		default:
+			continue
+		}
+		projected[ledger.NewRewardAccountKey(credential)] = projectedBalance{
+			exists: registered,
+		}
+	}
+	return func(key ledger.RewardAccountKey) (uint64, bool) {
+		if entry, ok := projected[key]; ok {
+			return entry.balance, entry.exists
+		}
+		balance, exists := m.rewardAccounts[key]
+		return balance, exists
+	}
 }
 
 func (m *MockStateManager) deregisterStakeCredential(
