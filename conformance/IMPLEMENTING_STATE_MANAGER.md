@@ -88,6 +88,7 @@ Called once per vector, before any events are processed. Your job is to hydrate 
 | `StakeRegistrations` | `map[Blake2b224]bool` | Deprecated hash-only compatibility view |
 | `RewardAccountBalances` | `map[ledger.RewardAccountKey]uint64` | Reward balances keyed by credential type and hash |
 | `RewardAccounts` | `map[Blake2b224]uint64` | Deprecated hash-only compatibility view |
+| `StakeCredentialDeposits` | `map[ledger.RewardAccountKey]uint64` | Original registration deposits; missing entries are unknown and must not be replaced with the current protocol-parameter deposit |
 | `PoolRegistrations` | `map[Blake2b224]bool` | Registered pools |
 | `CommitteeMembers` | `map[Blake2b224]uint64` | Cold key → expiry epoch |
 | `HotKeyAuthorizations` | `map[Blake2b224]Blake2b224` | Cold key → hot key |
@@ -105,6 +106,10 @@ Each `ParsedUtxo` carries the full `common.TransactionOutput` (decoded as `babba
 The `pp` parameter is a deep copy of the protocol parameters loaded from `pparams-by-hash/` using `PParamsHash`. Store it; it may be updated later when `ParameterChange` proposals are enacted.
 
 **Also initialize `GovernanceState` here.** The easiest way is to call `GovernanceState.LoadFromParsedState(state)` on a `NewGovernanceState()` instance — this populates all the committee, DRep, stake, pool, proposal, and root fields needed for harness pre-validation.
+
+Implement `StateSnapshotProvider` when the manager supports final-state
+comparison. Vectors with a `final_state` require `GetStateSnapshot` so the
+harness can compare the complete observable state.
 
 ### `ApplyTransaction(tx common.Transaction, slot uint64) error`
 
@@ -166,34 +171,16 @@ Return a pointer to your current `conformance.GovernanceState`. The harness uses
 
 The simplest approach: maintain a `*GovernanceState` alongside your database and keep it in sync inside `ApplyTransaction` and `ProcessEpochBoundary`.
 
-### Reward balance setters
+### Reward balances
 
-The harness calls a reward balance setter before each transaction with the
-pre-transaction balances needed for withdrawal validation. The adjustment
-accounts for the current and future withdrawals within the same vector:
+Load reward balances from `ParsedInitialState.RewardAccountBalances` and update
+them through transaction and epoch transitions. Expected final state is used
+only for comparison after execution, never to seed or correct the backend.
 
-```text
-adjusted[cred] = finalStateBalance[cred] + sum(withdrawals[cred] from tx onward)
-```
-
-Implement the optional `conformance.RewardAccountBalanceSetter` interface to
-receive `map[ledger.RewardAccountKey]uint64`. `RewardAccountKey` preserves the
-credential type as well as its hash, so key and script credentials with the
-same hash remain distinct. Write these values into
-`GovernanceState.RewardAccountBalances` and into the backend used by
-`RewardAccountBalance`. Treat the map as balance updates for accounts that are
-already registered: ignore credentials that are not registered yet, and keep
-currently registered accounts unchanged when they are absent from the map.
-
-Existing state managers remain compatible through
-`SetRewardBalances(map[Blake2b224]uint64)`. The harness collapses the full map
-to that legacy view and deterministically prefers the key credential when both
-credential types carry the same hash. That fallback cannot represent a
-collision, so state managers that validate script withdrawals should adopt
-`RewardAccountBalanceSetter`.
-
-Do not use an inferred balance to create or remove a registration. Certificate
-processing remains the source of truth for reward-account registration.
+The existing reward setter interfaces remain available to explicit callers,
+but the harness does not call them. Credential-aware callers should use
+`RewardAccountBalanceSetter`; the hash-only setter cannot represent a key
+credential and a script credential sharing a hash.
 
 ### `GetProtocolParameters() common.ProtocolParameters`
 
@@ -247,13 +234,9 @@ Start with `ApplyTransaction` → UTxO changes → certificates → governance. 
 
 ## Key behaviors to match
 
-**Reward balance injection** — the credential-aware setter is preferred before
-every transaction, with `SetRewardBalances` retained as a compatibility
-fallback. The values represent the balance before the current transaction and
-already account for its withdrawal plus later withdrawals. Withdrawal
-validation must use these values rather than a post-transaction balance. Apply
-only updates for accounts already registered in your state; do not infer
-registration from the adjustment map.
+**Reward state isolation** — withdrawal validation reads balances derived from
+initial state and applied events. Rollback resets to initial state and replays
+retained events. Expected final-state balances must not influence execution.
 
 **Phase-2 invalid transactions** — `ApplyTransaction` is called even when `tx.IsValid() == false`. Apply only collateral effects; do not apply outputs or certificates.
 

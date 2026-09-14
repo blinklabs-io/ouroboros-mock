@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
 	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -47,14 +48,22 @@ type MockStateManager struct {
 	// stakeRegistrations tracks registered stake credentials and their balances
 	stakeRegistrations map[ledger.RewardAccountKey]uint64
 
+	// stakeCredentialDeposits tracks the original registration deposit. It is
+	// intentionally separate from reward balances because protocol parameters
+	// may change after registration.
+	stakeCredentialDeposits map[ledger.RewardAccountKey]uint64
+
 	// rewardAccounts tracks balances by full credential identity.
 	rewardAccounts map[ledger.RewardAccountKey]uint64
 
 	// poolRegistrations tracks registered pools
 	poolRegistrations map[common.Blake2b224]bool
 
-	// drepRegistrations tracks registered DReps
-	drepRegistrations map[common.Blake2b224]bool
+	// drepRegistrations tracks registered DReps by full credential
+	// identity, holding the deposit recorded against each registration. A
+	// nil value is a registration the fixture supplied no deposit for,
+	// which is distinct from a recorded deposit of zero.
+	drepRegistrations map[ledger.RewardAccountKey]*uint64
 
 	// committeeMembers tracks committee members (cold key -> expiry epoch)
 	committeeMembers map[ledger.RewardAccountKey]uint64
@@ -67,16 +76,32 @@ type MockStateManager struct {
 	committeeResignations map[ledger.RewardAccountKey]bool
 }
 
+// drepSeedDeposit returns the deposit the initial state records for a DRep
+// credential, or nil when the state supplies none. It is a pointer rather
+// than a zero default so an unsupplied deposit stays distinguishable from a
+// recorded deposit of zero.
+func drepSeedDeposit(
+	state *ParsedInitialState,
+	key ledger.RewardAccountKey,
+) *uint64 {
+	deposit, found := state.DRepDeposits[key]
+	if !found {
+		return nil
+	}
+	return &deposit
+}
+
 // NewMockStateManager creates a new MockStateManager.
 func NewMockStateManager() *MockStateManager {
 	return &MockStateManager{
-		govState:           NewGovernanceState(),
-		utxos:              make(map[string]common.Utxo),
-		stakeRegistrations: make(map[ledger.RewardAccountKey]uint64),
-		rewardAccounts:     make(map[ledger.RewardAccountKey]uint64),
-		poolRegistrations:  make(map[common.Blake2b224]bool),
-		drepRegistrations:  make(map[common.Blake2b224]bool),
-		committeeMembers:   make(map[ledger.RewardAccountKey]uint64),
+		govState:                NewGovernanceState(),
+		utxos:                   make(map[string]common.Utxo),
+		stakeRegistrations:      make(map[ledger.RewardAccountKey]uint64),
+		stakeCredentialDeposits: make(map[ledger.RewardAccountKey]uint64),
+		rewardAccounts:          make(map[ledger.RewardAccountKey]uint64),
+		poolRegistrations:       make(map[common.Blake2b224]bool),
+		drepRegistrations:       make(map[ledger.RewardAccountKey]*uint64),
+		committeeMembers:        make(map[ledger.RewardAccountKey]uint64),
 		hotKeyAuthorizations: make(
 			map[ledger.RewardAccountKey]common.Credential,
 		),
@@ -95,9 +120,10 @@ func (m *MockStateManager) LoadInitialState(
 	// Clear existing state
 	m.utxos = make(map[string]common.Utxo)
 	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
+	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
-	m.drepRegistrations = make(map[common.Blake2b224]bool)
+	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
 	m.committeeMembers = make(map[ledger.RewardAccountKey]uint64)
 	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
 	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
@@ -128,6 +154,14 @@ func (m *MockStateManager) LoadInitialState(
 			}] = state.RewardAccounts[hash]
 		}
 	}
+	// Preserve the parsed registration deposit when the initial state exposes
+	// it. Do not fabricate a current-parameter value for older state formats;
+	// the original deposit is not recoverable from registration alone.
+	for credential := range m.stakeRegistrations {
+		if deposit, ok := state.StakeCredentialDeposits[credential]; ok {
+			m.stakeCredentialDeposits[credential] = deposit
+		}
+	}
 	if len(state.RewardAccountBalances) > 0 {
 		maps.Copy(m.rewardAccounts, state.RewardAccountBalances)
 	} else {
@@ -153,9 +187,24 @@ func (m *MockStateManager) LoadInitialState(
 		}
 	}
 
-	// Load DRep registrations
+	// Load DRep registrations. The typed set is authoritative; the legacy
+	// hash list is its key-hash compatibility projection, matching
+	// GovernanceState.RegisterDRep.
+	for key, registered := range state.DRepRegistrationsByCredential {
+		if !registered {
+			continue
+		}
+		m.drepRegistrations[key] = drepSeedDeposit(state, key)
+	}
 	for _, hash := range state.DRepRegistrations {
-		m.drepRegistrations[hash] = true
+		if hasCredentialHash(state.DRepRegistrationsByCredential, hash) {
+			continue
+		}
+		key := ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}
+		m.drepRegistrations[key] = drepSeedDeposit(state, key)
 	}
 	// Load committee members. Legacy entries represent key credentials, but a
 	// hash already present in the typed state may be its compatibility projection.
@@ -264,6 +313,37 @@ func (m *MockStateManager) ApplyTransaction(
 	txHash := tx.Hash()
 	txHashStr := hex.EncodeToString(txHash.Bytes())
 
+	// Validate withdrawals before mutating any UTxO or certificate state.
+	//
+	// Withdrawals are applied after this transaction's certificates, so the
+	// balance a withdrawal is checked against is the one left by the
+	// certificate sequence: a deregistration removes the account and a
+	// registration resets it to zero. Project those effects here so an
+	// insufficient withdrawal is rejected before anything is mutated, rather
+	// than part-way through.
+	projected := m.projectedRewardAccounts(tx.Certificates())
+	withdrawals := make(map[ledger.RewardAccountKey]uint64)
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		withdrawals[key] += amount.Uint64()
+	}
+	for key, withdrawal := range withdrawals {
+		balance, exists := projected(key)
+		if exists && withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+	}
+
 	// Process consumed UTxOs (inputs)
 	inputs := tx.Inputs()
 	for _, input := range inputs {
@@ -300,6 +380,31 @@ func (m *MockStateManager) ApplyTransaction(
 		m.processCertificate(cert)
 	}
 
+	// Process withdrawals against balances derived from initial state and
+	// previously applied events, after pre-validation above.
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		balance, exists := m.rewardAccounts[key]
+		if !exists {
+			continue
+		}
+		withdrawal := amount.Uint64()
+		if withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+		m.rewardAccounts[key] = balance - withdrawal
+	}
+	m.syncRewardBalanceMirrors()
 	// Process governance proposals
 	proposals := tx.ProposalProcedures()
 	for idx, proposal := range proposals {
@@ -423,7 +528,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeStakeRegistration:
 		if regCert, ok := cert.(*common.StakeRegistrationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = keyDepositAmount(m.protocolParams)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -431,7 +538,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeRegistration:
 		if regCert, ok := cert.(*common.RegistrationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -440,7 +549,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + delegation (Conway)
 		if regCert, ok := cert.(*common.StakeRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
@@ -450,7 +561,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + vote delegation (Conway)
 		if regCert, ok := cert.(*common.VoteRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -463,8 +576,10 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		// Combined registration + stake + vote delegation (Conway)
 		if regCert, ok := cert.(*common.StakeVoteRegistrationDelegationCertificate); ok {
 			credential := regCert.StakeCredential
-			m.stakeRegistrations[ledger.NewRewardAccountKey(credential)] = 0
-			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.rewardAccounts[key] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
 				credential,
@@ -536,7 +651,13 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeRegistrationDrep:
 		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
 			credential := drepCert.DrepCredential
-			m.drepRegistrations[credential.Credential] = true
+			// The certificate carries the deposit the DRep paid, and
+			// that is the amount its deregistration must refund.
+			deposit := uint64(0)
+			if drepCert.Amount >= 0 {
+				deposit = uint64(drepCert.Amount)
+			}
+			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
 				m.drepActivityExpiry(),
@@ -546,11 +667,19 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	case common.CertificateTypeDeregistrationDrep:
 		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
 			credential := drepCert.DrepCredential
+			key := ledger.NewRewardAccountKey(credential)
 			m.govState.DeregisterDRepCredential(credential)
-			if m.govState.IsDRepRegistered(credential.Credential) {
-				m.drepRegistrations[credential.Credential] = true
-			} else {
-				delete(m.drepRegistrations, credential.Credential)
+			if !m.govState.IsDRepCredentialRegistered(credential) {
+				delete(m.drepRegistrations, key)
+				if !hasRegisteredCredentialHash(
+					m.govState.DRepRegistrationsByCredential,
+					credential.Credential,
+				) {
+					delete(m.drepRegistrations, ledger.RewardAccountKey{
+						CredType:   common.CredentialTypeAddrKeyHash,
+						Credential: credential.Credential,
+					})
+				}
 			}
 		}
 
@@ -622,13 +751,80 @@ func (m *MockStateManager) refreshDRepVoter(voter *common.Voter) {
 	)
 }
 
+// projectedRewardAccounts returns a lookup for the reward-account balance each
+// credential will hold once certs have been applied by processCertificate.
+// It mirrors the reward-account effects of that function: every registration
+// form resets the balance to zero and every deregistration form removes the
+// account. Credentials the certificates do not touch keep their current
+// balance.
+func (m *MockStateManager) projectedRewardAccounts(
+	certs []common.Certificate,
+) func(ledger.RewardAccountKey) (uint64, bool) {
+	type projectedBalance struct {
+		balance uint64
+		exists  bool
+	}
+	projected := make(map[ledger.RewardAccountKey]projectedBalance)
+	for _, cert := range certs {
+		var credential common.Credential
+		registered := false
+		switch cert := cert.(type) {
+		case *common.StakeRegistrationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.RegistrationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.VoteRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeVoteRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeDeregistrationCertificate:
+			credential = cert.StakeCredential
+		case *common.DeregistrationCertificate:
+			credential = cert.StakeCredential
+		default:
+			continue
+		}
+		projected[ledger.NewRewardAccountKey(credential)] = projectedBalance{
+			exists: registered,
+		}
+	}
+	return func(key ledger.RewardAccountKey) (uint64, bool) {
+		if entry, ok := projected[key]; ok {
+			return entry.balance, entry.exists
+		}
+		balance, exists := m.rewardAccounts[key]
+		return balance, exists
+	}
+}
+
 func (m *MockStateManager) deregisterStakeCredential(
 	credential common.Credential,
 ) {
 	credentialKey := ledger.NewRewardAccountKey(credential)
 	delete(m.rewardAccounts, credentialKey)
 	delete(m.stakeRegistrations, credentialKey)
+	delete(m.stakeCredentialDeposits, credentialKey)
 	m.govState.DeregisterStakeCredential(credential)
+}
+
+func keyDepositAmount(pp common.ProtocolParameters) uint64 {
+	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok && conwayPP != nil {
+		return uint64(conwayPP.KeyDeposit)
+	}
+	provider, ok := pp.(interface{ KeyDepositAmount() *big.Int })
+	if !ok || provider.KeyDepositAmount() == nil || !provider.KeyDepositAmount().IsUint64() {
+		return 0
+	}
+	return provider.KeyDepositAmount().Uint64()
+}
+
+func nonNegativeDeposit(amount int64) uint64 {
+	if amount < 0 {
+		return 0
+	}
+	return uint64(amount)
 }
 
 func drepDelegation(drep common.Drep) common.Drep {
@@ -720,6 +916,7 @@ func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
 	staged.protocolParams = deepCopyPParams(m.protocolParams)
 	staged.govState = cloneGovernanceState(m.govState)
 	staged.poolRegistrations = maps.Clone(m.poolRegistrations)
+	staged.stakeCredentialDeposits = maps.Clone(m.stakeCredentialDeposits)
 	staged.committeeMembers = maps.Clone(m.committeeMembers)
 	staged.hotKeyAuthorizations = maps.Clone(m.hotKeyAuthorizations)
 	staged.committeeResignations = maps.Clone(m.committeeResignations)
@@ -729,6 +926,7 @@ func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
 func (m *MockStateManager) commitEpochBoundary(staged *MockStateManager) {
 	m.currentEpoch = staged.currentEpoch
 	m.poolRegistrations = staged.poolRegistrations
+	m.stakeCredentialDeposits = staged.stakeCredentialDeposits
 	m.committeeMembers = staged.committeeMembers
 	m.hotKeyAuthorizations = staged.hotKeyAuthorizations
 	m.committeeResignations = staged.committeeResignations
@@ -844,7 +1042,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 	cloned.ProposedMembersByCredential = maps.Clone(
 		proposal.ProposedMembersByCredential,
 	)
-	cloned.PolicyHash = append([]byte(nil), proposal.PolicyHash...)
+	cloned.PolicyHash = slices.Clone(proposal.PolicyHash)
 	if proposal.ParentActionId != nil {
 		parentActionID := *proposal.ParentActionId
 		cloned.ParentActionId = &parentActionID
@@ -865,10 +1063,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 				len(proposal.ParameterUpdate.CostModels),
 			)
 			for version, costModel := range proposal.ParameterUpdate.CostModels {
-				parameterUpdate.CostModels[version] = append(
-					[]int64(nil),
-					costModel...,
-				)
+				parameterUpdate.CostModels[version] = slices.Clone(costModel)
 			}
 		}
 		cloned.ParameterUpdate = &parameterUpdate
@@ -906,8 +1101,8 @@ func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
 		return nil
 	}
 	cloned := *constitution
-	cloned.AnchorHash = append([]byte(nil), constitution.AnchorHash...)
-	cloned.PolicyHash = append([]byte(nil), constitution.PolicyHash...)
+	cloned.AnchorHash = slices.Clone(constitution.AnchorHash)
+	cloned.PolicyHash = slices.Clone(constitution.PolicyHash)
 	return &cloned
 }
 
@@ -1333,6 +1528,28 @@ func (m *MockStateManager) GetGovernanceState() *GovernanceState {
 	return m.govState
 }
 
+// GetStateSnapshot implements StateSnapshotProvider.
+func (m *MockStateManager) GetStateSnapshot() *StateSnapshot {
+	utxoIDs := make([]string, 0, len(m.utxos))
+	for id := range m.utxos {
+		utxoIDs = append(utxoIDs, id)
+	}
+	sort.Strings(utxoIDs)
+	registrations := make(map[ledger.RewardAccountKey]bool, len(m.stakeRegistrations))
+	for credential := range m.stakeRegistrations {
+		registrations[credential] = true
+	}
+	return &StateSnapshot{
+		CurrentEpoch:                   m.currentEpoch,
+		UtxoIDs:                        utxoIDs,
+		StakeRegistrationsByCredential: registrations,
+		RewardAccountBalances:          maps.Clone(m.rewardAccounts),
+		StakeCredentialDeposits:        maps.Clone(m.stakeCredentialDeposits),
+		PoolRegistrations:              maps.Clone(m.poolRegistrations),
+		Governance:                     cloneGovernanceState(m.govState),
+	}
+}
+
 // SetRewardBalances implements StateManager.SetRewardBalances.
 func (m *MockStateManager) SetRewardBalances(
 	balances map[common.Blake2b224]uint64,
@@ -1382,9 +1599,10 @@ func (m *MockStateManager) Reset() error {
 	m.currentEpoch = 0
 	m.utxos = make(map[string]common.Utxo)
 	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
+	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
 	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
-	m.drepRegistrations = make(map[common.Blake2b224]bool)
+	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
 	m.committeeMembers = make(map[ledger.RewardAccountKey]uint64)
 	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
 	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
@@ -1416,6 +1634,7 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	// accounts, so using the credential-aware builder avoids fabricating a
 	// key credential for a registered script account.
 	builder.WithRewardAccountCredentialBalances(m.rewardAccounts)
+	builder.WithStakeCredentialDeposits(m.stakeCredentialDeposits)
 
 	// Set up pool lookup callback
 	// Pool is considered registered if:
@@ -1448,15 +1667,17 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	)
 
 	// Set up DRep lookup callback
-	drepRegs := m.drepRegistrations // capture for closure
-	builder.WithDRepRegistration(
-		func(cred common.Blake2b224) (*common.DRepRegistration, error) {
-			if drepRegs[cred] {
-				return &common.DRepRegistration{
-					Credential: cred,
-				}, nil
+	drepRegs := maps.Clone(m.drepRegistrations) // capture for closure
+	builder.WithDRepCredentialRegistration(
+		func(cred common.Credential) (*common.DRepRegistration, error) {
+			deposit, found := drepRegs[ledger.NewRewardAccountKey(cred)]
+			if !found {
+				return nil, nil
 			}
-			return nil, nil
+			return &common.DRepRegistration{
+				Credential: cred,
+				Deposit:    deposit,
+			}, nil
 		},
 	)
 	drepDelegations := m.govState.DRepDelegationsByCredential
