@@ -111,8 +111,13 @@ type CommitteeHotCredentialMemberFunc func(
 	lcommon.Credential,
 ) (*lcommon.CommitteeMember, error)
 
-// DRepRegistrationFunc is a callback for DRep registration lookups
+// DRepRegistrationFunc is the legacy callback for DRep registration lookups.
+// It receives only the credential hash for compatibility with existing callers.
 type DRepRegistrationFunc func(lcommon.Blake2b224) (*lcommon.DRepRegistration, error)
+
+// DRepCredentialRegistrationFunc preserves the full credential type when
+// looking up a DRep registration.
+type DRepCredentialRegistrationFunc func(lcommon.Credential) (*lcommon.DRepRegistration, error)
 
 // DRepDelegationFunc is a callback for DRep delegation lookups. It returns the
 // full DRep sum type so predefined DReps remain distinguishable from credential
@@ -162,6 +167,7 @@ type MockLedgerState struct {
 	CommitteeCredentialMemberCallback    CommitteeCredentialMemberFunc
 	CommitteeHotCredentialMemberCallback CommitteeHotCredentialMemberFunc
 	DRepRegistrationCallback             DRepRegistrationFunc
+	DRepCredentialRegistrationCallback   DRepCredentialRegistrationFunc
 	DRepDelegationCallback               DRepDelegationFunc
 	ConstitutionCallback                 ConstitutionFunc
 	TreasuryValueCallback                TreasuryValueFunc
@@ -461,16 +467,25 @@ func (ls *MockLedgerState) CommitteeMembers() ([]lcommon.CommitteeMember, error)
 	return ls.committeeMembers, nil
 }
 
-// DRepRegistration looks up a DRep registration by credential hash
+// DRepRegistration looks up a DRep registration by credential. Both the
+// credential type and the hash have to match: the same hash under a key-hash
+// and a script-hash credential identifies two different DReps.
 func (ls *MockLedgerState) DRepRegistration(
-	credential lcommon.Blake2b224,
+	credential lcommon.Credential,
 ) (*lcommon.DRepRegistration, error) {
-	if ls.DRepRegistrationCallback != nil {
-		return ls.DRepRegistrationCallback(credential)
+	if ls.DRepCredentialRegistrationCallback != nil {
+		return ls.DRepCredentialRegistrationCallback(credential)
 	}
-	// Search in stored DRep registrations
+	if ls.DRepRegistrationCallback != nil {
+		return ls.DRepRegistrationCallback(credential.Credential)
+	}
+	// Search in stored DRep registrations. lcommon.Credential embeds decoded
+	// CBOR state, so the identity comparison is on its fields rather than
+	// the struct.
 	for i := range ls.drepRegistrations {
-		if ls.drepRegistrations[i].Credential == credential {
+		stored := ls.drepRegistrations[i].Credential
+		if stored.CredType == credential.CredType &&
+			stored.Credential == credential.Credential {
 			return &ls.drepRegistrations[i], nil
 		}
 	}
@@ -826,6 +841,15 @@ func (b *LedgerStateBuilder) WithDRepRegistration(
 	fn DRepRegistrationFunc,
 ) *LedgerStateBuilder {
 	b.state.DRepRegistrationCallback = fn
+	return b
+}
+
+// WithDRepCredentialRegistration sets the credential-aware DRep lookup
+// callback while preserving the legacy hash-based callback contract.
+func (b *LedgerStateBuilder) WithDRepCredentialRegistration(
+	fn DRepCredentialRegistrationFunc,
+) *LedgerStateBuilder {
+	b.state.DRepCredentialRegistrationCallback = fn
 	return b
 }
 

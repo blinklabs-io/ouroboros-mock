@@ -91,6 +91,13 @@ type ParsedInitialState struct {
 	// DRepRegistrations contains registered DReps (credential hash).
 	DRepRegistrations []common.Blake2b224
 
+	// DRepDeposits holds the deposit recorded against each DRep's
+	// registration, as carried by the vector's DRepState (deposit is the
+	// third field of the ledger's DRepState record). A credential absent
+	// from this map is a registration whose recorded deposit the vector did
+	// not supply, which is not the same as a recorded deposit of zero.
+	DRepDeposits map[mockledger.RewardAccountKey]uint64
+
 	// DRepRegistrationsByCredential and DRepExpiries retain voter eligibility
 	// without conflating key and script credentials.
 	DRepRegistrationsByCredential map[mockledger.RewardAccountKey]bool
@@ -230,6 +237,7 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		CommitteeMembersByCredential: make(
 			map[mockledger.RewardAccountKey]uint64,
 		),
+		DRepDeposits: make(map[mockledger.RewardAccountKey]uint64),
 		DRepRegistrationsByCredential: make(
 			map[mockledger.RewardAccountKey]bool,
 		),
@@ -388,6 +396,7 @@ func parseCertStateFromRawCBOR(
 		if dreps, ok := decodeCredentialMapFromRawCBOR(votingState[0]); ok {
 			state.DRepRegistrations = state.DRepRegistrations[:0]
 			clear(state.DRepRegistrationsByCredential)
+			clear(state.DRepDeposits)
 			clear(state.DRepExpiries)
 			_ = parseVotingState(state, []any{dreps, nil})
 		}
@@ -1123,6 +1132,9 @@ func parseVotingState(state *ParsedInitialState, votingStateRaw any) error {
 				if expiry, ok := extractDRepExpiry(v); ok {
 					state.DRepExpiries[credentialKey] = expiry
 				}
+				if deposit, ok := extractDRepDeposit(v); ok {
+					state.DRepDeposits[credentialKey] = deposit
+				}
 			}
 		}
 	}
@@ -1195,6 +1207,19 @@ func extractDRepExpiry(raw any) (uint64, bool) {
 	}
 	expiry, ok := unwrapPointer(state[0]).(uint64)
 	return expiry, ok
+}
+
+// extractDRepDeposit reads the deposit a DRepState record carries. The
+// ledger encodes DRepState as [expiry, anchor, deposit, delegs], so the
+// deposit is the third element; older encodings without it report absence
+// rather than zero.
+func extractDRepDeposit(raw any) (uint64, bool) {
+	state, ok := unwrapPointer(raw).([]any)
+	if !ok || len(state) < 3 {
+		return 0, false
+	}
+	deposit, ok := unwrapPointer(state[2]).(uint64)
+	return deposit, ok
 }
 
 func extractPoolRewardAccount(raw any) *mockledger.RewardAccountKey {
