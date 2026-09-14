@@ -253,7 +253,7 @@ func (b *PoolRegistrationBuilder) WithMetadata(url string, hash []byte) *PoolReg
 		return b
 	}
 	metadataHash := lcommon.NewBlake2b256(hash)
-	b.metadata = &lcommon.PoolMetadata{Url: url, Hash: metadataHash}
+	b.metadata = &lcommon.PoolMetadata{Url: url, Hash: lcommon.PoolMetadataHash(metadataHash[:])}
 	b.metadataErr = nil
 	return b
 }
