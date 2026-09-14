@@ -60,7 +60,7 @@ func NewBlockEvent() Event { return newEvent(TypeBlock, BlockContext{}, BlockEve
 
 func BlockEventFromBlock(block ledger.Block, networkMagic uint32) Event {
 	ctx := BlockContext{Era: block.Era().Name, BlockNumber: block.BlockNumber(), SlotNumber: block.SlotNumber(), NetworkMagic: networkMagic}
-	payload := BlockEvent{Block: block, BlockHash: block.Hash().String(), BlockBodySize: block.BlockBodySize(), TransactionCount: uint64(len(block.Transactions()))}
+	payload := BlockEvent{Block: block, BlockHash: block.Hash().String(), BlockCbor: block.Cbor(), BlockBodySize: block.BlockBodySize(), TransactionCount: uint64(len(block.Transactions()))}
 	return newEvent(TypeBlock, ctx, payload)
 }
 
@@ -87,9 +87,9 @@ func NewTransactionEvent() Event {
 	return newEvent(TypeTransaction, TransactionContext{}, TransactionEvent{})
 }
 
-func TransactionEventFromTx(tx ledger.Transaction, blockNumber, slot uint64, txIdx uint32, networkMagic uint32) Event {
+func TransactionEventFromTx(tx ledger.Transaction, blockHash string, blockNumber, slot uint64, txIdx uint32, networkMagic uint32) Event {
 	ctx := TransactionContext{TransactionHash: tx.Hash().String(), BlockNumber: blockNumber, SlotNumber: slot, TransactionIdx: txIdx, NetworkMagic: networkMagic}
-	payload := TransactionEvent{Transaction: tx, Inputs: tx.Inputs(), Outputs: tx.Outputs(), Fee: tx.Fee().Uint64(), TTL: tx.TTL()}
+	payload := TransactionEvent{Transaction: tx, BlockHash: blockHash, Inputs: tx.Inputs(), Outputs: tx.Outputs(), Certificates: tx.Certificates(), TransactionCbor: tx.Cbor(), Fee: tx.Fee().Uint64(), TTL: tx.TTL()}
 	return newEvent(TypeTransaction, ctx, payload)
 }
 
@@ -123,7 +123,7 @@ func EventSequenceFromBlocks(blocks []ledger.Block, networkMagic uint32) EventSe
 	for _, block := range blocks {
 		seq.Add(BlockEventFromBlock(block, networkMagic))
 		for idx, tx := range block.Transactions() {
-			seq.Add(TransactionEventFromTx(tx, block.BlockNumber(), block.SlotNumber(), uint32(idx), networkMagic))
+			seq.Add(TransactionEventFromTx(tx, block.Hash().String(), block.BlockNumber(), block.SlotNumber(), uint32(idx), networkMagic))
 		}
 	}
 	return seq
