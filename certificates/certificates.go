@@ -277,7 +277,7 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 	if b.margin.Sign() < 0 || b.margin.Cmp(big.NewRat(1, 1)) > 0 {
 		return nil, errors.New("pool margin must be in the unit interval [0,1]")
 	}
-	return &lcommon.PoolRegistrationCertificate{
+	cert := &lcommon.PoolRegistrationCertificate{
 		CertType:      uint(lcommon.CertificateTypePoolRegistration),
 		Operator:      b.operator,
 		VrfKeyHash:    b.vrfKeyHash,
@@ -288,7 +288,14 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 		PoolOwners:    b.owners,
 		Relays:        b.relays,
 		PoolMetadata:  b.metadata,
-	}, nil
+	}
+	if err := cert.SetRewardAccountCredential(lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: lcommon.CredentialHash(cert.RewardAccount),
+	}, lcommon.AddressNetworkTestnet); err != nil {
+		return nil, err
+	}
+	return cert, nil
 }
 
 // PoolRetirementBuilder builds a stake pool retirement certificate.
