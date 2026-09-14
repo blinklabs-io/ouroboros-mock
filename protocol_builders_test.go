@@ -17,12 +17,23 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/gouroboros/protocol"
+	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 )
+
+func TestBlockFetchNoBlocksUsesOnlyNoBlocks(t *testing.T) {
+	entry := BlockFetchNoBlocks()
+	if len(entry.Messages) != 1 {
+		t.Fatalf("no-blocks response has %d messages, want 1", len(entry.Messages))
+	}
+	if _, ok := entry.Messages[0].(*blockfetch.MsgNoBlocks); !ok {
+		t.Fatalf("no-blocks response message = %T, want *blockfetch.MsgNoBlocks", entry.Messages[0])
+	}
+}
 
 func TestProtocolBuildersEncodeMessages(t *testing.T) {
 	point := NewPoint(42, make([]byte, common.Blake2b256Size))
