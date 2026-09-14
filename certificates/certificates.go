@@ -179,6 +179,7 @@ type PoolRegistrationBuilder struct {
 	cost          uint64
 	margin        cbor.Rat
 	owners        []lcommon.AddrKeyHash
+	ownersErr     error
 	rewardAccount lcommon.AddrKeyHash
 	rewardSet     bool
 	relays        []lcommon.PoolRelay
@@ -232,6 +233,10 @@ func (b *PoolRegistrationBuilder) WithRewardAccountKey(hash []byte) *PoolRegistr
 func (b *PoolRegistrationBuilder) WithOwners(hashes ...[]byte) *PoolRegistrationBuilder {
 	b.owners = make([]lcommon.AddrKeyHash, len(hashes))
 	for i, hash := range hashes {
+		if len(hash) != hashSize {
+			b.ownersErr = fmt.Errorf("pool owner hash must be exactly %d bytes", hashSize)
+			return b
+		}
 		b.owners[i] = lcommon.NewBlake2b224(hash)
 	}
 	return b
@@ -254,6 +259,9 @@ func (b *PoolRegistrationBuilder) WithMetadata(url string, hash []byte) *PoolReg
 }
 
 func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate, error) {
+	if b.ownersErr != nil {
+		return nil, b.ownersErr
+	}
 	switch {
 	case !b.operatorSet:
 		return nil, fmt.Errorf("pool operator hash must be exactly %d bytes", hashSize)
@@ -490,6 +498,7 @@ type drepBuilder struct {
 
 func (b *drepBuilder) WithDRep(drep lcommon.Drep) *drepBuilder {
 	b.drep = drep
+	b.drep.Credential = append([]byte(nil), drep.Credential...)
 	b.drepSet = true
 	return b
 }
@@ -510,8 +519,14 @@ func (b *drepBuilder) validateDRep() error {
 	if !b.drepSet {
 		return errors.New("DRep is required")
 	}
-	if (b.drep.Type == lcommon.DrepTypeAddrKeyHash || b.drep.Type == lcommon.DrepTypeScriptHash) && len(b.drep.Credential) != hashSize {
-		return fmt.Errorf("DRep hash must be exactly %d bytes", hashSize)
+	switch b.drep.Type {
+	case lcommon.DrepTypeAddrKeyHash, lcommon.DrepTypeScriptHash:
+		if len(b.drep.Credential) != hashSize {
+			return fmt.Errorf("DRep hash must be exactly %d bytes", hashSize)
+		}
+	case lcommon.DrepTypeAbstain, lcommon.DrepTypeNoConfidence:
+	default:
+		return fmt.Errorf("unsupported DRep type %d", b.drep.Type)
 	}
 	return nil
 }

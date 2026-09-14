@@ -98,9 +98,12 @@ func TestGovernanceBuildersReturnCertificatesUsableInTransactions(t *testing.T) 
 	}
 	tx.WithOutputs(output)
 	tx.WithCertificates(drepRegistration, voteDelegation, combined)
-	_, err = tx.Build()
+	built, err := tx.Build()
 	if err != nil {
 		t.Fatalf("transaction rejected certificates: %v", err)
+	}
+	if got := built.Certificates(); len(got) != 3 {
+		t.Fatalf("transaction certificates = %d, want 3", len(got))
 	}
 	assertCertificateRoundTrip(t, drepRegistration)
 	if _, err := voteDelegation.Utxorpc(); err != nil {
@@ -120,6 +123,12 @@ func TestBuildersRejectInvalidHashes(t *testing.T) {
 	}
 	if _, err := certificates.NewDRepRegistration().WithCredential(stakeHash).WithDeposit(^uint64(0)).Build(); err == nil {
 		t.Fatal("expected overflowing DRep deposit to be rejected")
+	}
+	if _, err := certificates.NewPoolRegistration().WithOwners([]byte{1}).Build(); err == nil {
+		t.Fatal("expected invalid pool owner hash to be rejected")
+	}
+	if _, err := certificates.NewVoteDelegation().WithCredential(stakeHash).WithDRep(lcommon.Drep{Type: 99}).Build(); err == nil {
+		t.Fatal("expected unknown DRep type to be rejected")
 	}
 }
 
