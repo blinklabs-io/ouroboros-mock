@@ -41,7 +41,10 @@ package conformance_test
 // 1.  Implement ledger.StateProvider with your real database reads.
 // 2.  Implement conformance.StateManager with your real transaction
 //     processing / epoch boundary logic.
-// 3.  Pass your StateManager to conformance.NewHarness.
+// 3.  Implement conformance.StateSnapshotProvider when running vectors with
+//     final_state; the harness reports an error rather than skipping that
+//     comparison when it is absent.
+// 4.  Pass your StateManager to conformance.NewHarness.
 //
 // The example below uses a stub that delegates everything to the built-in
 // MockStateManager so it compiles and runs without a real database.  A real
@@ -308,6 +311,10 @@ func (m *customStateManager) GetStateProvider() conformance.StateProvider {
 
 func (m *customStateManager) GetGovernanceState() *conformance.GovernanceState {
 	return m.inner.GetGovernanceState()
+}
+
+func (m *customStateManager) GetStateSnapshot() *conformance.StateSnapshot {
+	return m.inner.GetStateSnapshot()
 }
 
 func (m *customStateManager) SetRewardBalances(
