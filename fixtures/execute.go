@@ -27,6 +27,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	gcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
 
@@ -36,6 +37,12 @@ type ExecutionResult struct {
 	Fixture Fixture
 	Success bool
 	Error   error
+
+	// ExpectedStrictDecodeRejection reports that a preserved upstream fixture
+	// was rejected by strict hash decoding as documented compatibility data.
+	// The fixture remains in the corpus and its rejection is checked, rather
+	// than being omitted from execution.
+	ExpectedStrictDecodeRejection bool
 
 	// CaseCount is the number of executable cases covered by the fixture.
 	// Most fixtures contribute one case, while translation corpora contain many.
@@ -157,12 +164,62 @@ func executeFixtureWithIndex(
 		result.CaseCount = caseCount
 	}
 	if err != nil {
+		if isStrictDecodePlaceholderFixture(fixture) &&
+			isStrictDecodePlaceholderError(err) {
+			result.ExpectedStrictDecodeRejection = true
+			result.Success = true
+			return result
+		}
 		result.Error = err
 		return result
 	}
 
 	result.Success = true
 	return result
+}
+
+const (
+	consensusV2FixtureRoot = "ouroboros-consensus/ouroboros-consensus-cardano/" +
+		"golden/cardano/CardanoNodeToNodeVersion2/"
+)
+
+var strictDecodePlaceholderErrorTexts = map[string]struct{}{
+	"invalid blake2b-256 hash: expected 32 bytes, got 2":        {},
+	"invalid blake2b-256 hash length: expected 32 bytes, got 2": {},
+}
+
+// strictDecodePlaceholderFixtures identifies the preserved upstream captures
+// and ledger goldens whose two-byte hash placeholders are accepted by older
+// decoders but rejected by strict hash decoding. Keep this list explicit: new
+// fixtures must either decode normally or be reviewed and added deliberately.
+var strictDecodePlaceholderFixtures = func() map[string]struct{} {
+	fixtures := make(map[string]struct{})
+	fixtures["cardano-ledger/eras/alonzo/test-suite/golden/block.cbor"] = struct{}{}
+	fixtures["cardano-ledger/eras/alonzo/test-suite/golden/tx.cbor"] = struct{}{}
+	for _, era := range []string{
+		"Shelley", "Allegra", "Mary", "Alonzo", "Babbage", "Conway",
+	} {
+		for _, prefix := range []string{
+			"Block_", "Header_", "GenTx_", "GenTxId_",
+		} {
+			fixtures[consensusV2FixtureRoot+prefix+era] = struct{}{}
+		}
+	}
+	return fixtures
+}()
+
+func isStrictDecodePlaceholderFixture(fixture Fixture) bool {
+	_, ok := strictDecodePlaceholderFixtures[fixture.RelPath]
+	return ok
+}
+
+func isStrictDecodePlaceholderError(err error) bool {
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if _, ok := strictDecodePlaceholderErrorTexts[current.Error()]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func executeFixture(
@@ -601,10 +658,6 @@ func executeGenesisFixture(fixture Fixture) (int, error) {
 func executeProtocolParametersFixture(fixture Fixture) (int, error) {
 	params, err := fixture.DecodeProtocolParameters()
 	if err != nil {
-		if fixture.Era == "dijkstra" &&
-			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
-			return 1, nil
-		}
 		return 0, fmt.Errorf(
 			"failed to decode protocol-parameters fixture %s: %w",
 			fixture.RelPath,
@@ -627,10 +680,6 @@ func executeProtocolParametersUpdateFixture(
 ) (int, error) {
 	update, err := fixture.DecodeProtocolParameterUpdate()
 	if err != nil {
-		if fixture.Era == "dijkstra" &&
-			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
-			return 1, nil
-		}
 		return 0, fmt.Errorf(
 			"failed to decode protocol-parameters update fixture %s: %w",
 			fixture.RelPath,
@@ -647,10 +696,6 @@ func executeProtocolParametersUpdateFixture(
 	}
 	params, err := baseFixture.DecodeProtocolParameters()
 	if err != nil {
-		if baseFixture.Era == "dijkstra" &&
-			errors.Is(err, errUnsupportedDijkstraRefScriptFields) {
-			return 1, nil
-		}
 		return 0, fmt.Errorf(
 			"failed to decode paired protocol parameters fixture %s: %w",
 			baseFixture.RelPath,
@@ -1130,6 +1175,16 @@ func validateDecodedProtocolParameters(
 		}
 		if pp.ProtocolVersion.Major == 0 {
 			return errors.New("missing Conway protocol version")
+		}
+	case *dijkstra.DijkstraProtocolParameters:
+		if pp.A0 == nil || pp.Rho == nil || pp.Tau == nil {
+			return errors.New("missing Dijkstra rational parameters")
+		}
+		if pp.ExecutionCosts.MemPrice == nil || pp.ExecutionCosts.StepPrice == nil {
+			return errors.New("missing Dijkstra execution prices")
+		}
+		if pp.ProtocolVersion.Major == 0 {
+			return errors.New("missing Dijkstra protocol version")
 		}
 	default:
 		return fmt.Errorf("unsupported protocol parameters type %T", params)

@@ -41,6 +41,21 @@ type StateProvider interface {
 }
 ```
 
+Committee certificate validation also probes an optional authoritative
+committee capability. Backends that model committee state must implement the
+following methods, including when the modeled committee is empty:
+
+```go
+CommitteeStateAvailable() (bool, error)
+CommitteeCredentialMember(common.Credential) (*common.CommitteeMember, error)
+CommitteeHotCredentialMember(common.Credential) (*common.CommitteeMember, error)
+```
+
+The credential-aware methods must preserve key-versus-script credential types
+and return only active, non-resigned members. A backend without this optional
+capability fails closed for committee certificate validation; it must not
+silently fall back to hash-only lookups.
+
 Add a compile-time check to catch missing methods early:
 
 ```go
@@ -69,12 +84,17 @@ Called once per vector, before any events are processed. Your job is to hydrate 
 |-------|------|-------------|
 | `CurrentEpoch` | `uint64` | Epoch number at vector start |
 | `Utxos` | `map[string]ParsedUtxo` | UTxO set, keyed by `"txHash#index"` |
-| `StakeRegistrations` | `map[Blake2b224]bool` | Registered stake credentials |
-| `RewardAccounts` | `map[Blake2b224]uint64` | Reward account balances |
+| `StakeRegistrationsByCredential` | `map[ledger.RewardAccountKey]bool` | Registrations keyed by credential type and hash |
+| `StakeRegistrations` | `map[Blake2b224]bool` | Deprecated hash-only compatibility view |
+| `RewardAccountBalances` | `map[ledger.RewardAccountKey]uint64` | Reward balances keyed by credential type and hash |
+| `RewardAccounts` | `map[Blake2b224]uint64` | Deprecated hash-only compatibility view |
+| `StakeCredentialDeposits` | `map[ledger.RewardAccountKey]uint64` | Original registration deposits; missing entries are unknown and must not be replaced with the current protocol-parameter deposit |
 | `PoolRegistrations` | `map[Blake2b224]bool` | Registered pools |
 | `CommitteeMembers` | `map[Blake2b224]uint64` | Cold key → expiry epoch |
 | `HotKeyAuthorizations` | `map[Blake2b224]Blake2b224` | Cold key → hot key |
 | `DRepRegistrations` | `[]Blake2b224` | Registered DRep credential hashes |
+| `DRepDelegationsByCredential` | `map[ledger.RewardAccountKey]common.Drep` | Vote delegations keyed by full stake credential identity |
+| `DRepDelegations` | `map[Blake2b224]common.Drep` | Deprecated hash-only compatibility view |
 | `Proposals` | `map[string]GovActionInfo` | Active governance proposals |
 | `ProposalRoots` | `ProposalRoots` | Last-enacted root for each action type |
 | `Constitution` | `*ConstitutionInfo` | Current constitution (may be nil) |
@@ -86,6 +106,10 @@ Each `ParsedUtxo` carries the full `common.TransactionOutput` (decoded as `babba
 The `pp` parameter is a deep copy of the protocol parameters loaded from `pparams-by-hash/` using `PParamsHash`. Store it; it may be updated later when `ParameterChange` proposals are enacted.
 
 **Also initialize `GovernanceState` here.** The easiest way is to call `GovernanceState.LoadFromParsedState(state)` on a `NewGovernanceState()` instance — this populates all the committee, DRep, stake, pool, proposal, and root fields needed for harness pre-validation.
+
+Implement `StateSnapshotProvider` when the manager supports final-state
+comparison. Vectors with a `final_state` require `GetStateSnapshot` so the
+harness can compare the complete observable state.
 
 ### `ApplyTransaction(tx common.Transaction, slot uint64) error`
 
@@ -147,15 +171,16 @@ Return a pointer to your current `conformance.GovernanceState`. The harness uses
 
 The simplest approach: maintain a `*GovernanceState` alongside your database and keep it in sync inside `ApplyTransaction` and `ProcessEpochBoundary`.
 
-### `SetRewardBalances(balances map[Blake2b224]uint64)`
+### Reward balances
 
-The harness calls this before each transaction with adjusted reward balances for that transaction's withdrawal validation. The adjustment accounts for future withdrawals within the same vector:
+Load reward balances from `ParsedInitialState.RewardAccountBalances` and update
+them through transaction and epoch transitions. Expected final state is used
+only for comparison after execution, never to seed or correct the backend.
 
-```
-adjusted[cred] = finalStateBalance[cred] + sum(withdrawals[cred] from tx+1 onward)
-```
-
-Write these values into your `GovernanceState.RewardAccounts` map (and your database if your withdrawal validation reads from there). Do not persist them permanently; they are replaced before every transaction.
+The existing reward setter interfaces remain available to explicit callers,
+but the harness does not call them. Credential-aware callers should use
+`RewardAccountBalanceSetter`; the hash-only setter cannot represent a key
+credential and a script credential sharing a hash.
 
 ### `GetProtocolParameters() common.ProtocolParameters`
 
@@ -209,7 +234,9 @@ Start with `ApplyTransaction` → UTxO changes → certificates → governance. 
 
 ## Key behaviors to match
 
-**Reward balance injection** — `SetRewardBalances` is called by the harness before every transaction. The values already account for future withdrawals. Your withdrawal validation must use these values, not your database's current reward balance, or multi-withdrawal vectors will fail.
+**Reward state isolation** — withdrawal validation reads balances derived from
+initial state and applied events. Rollback resets to initial state and replays
+retained events. Expected final-state balances must not influence execution.
 
 **Phase-2 invalid transactions** — `ApplyTransaction` is called even when `tx.IsValid() == false`. Apply only collateral effects; do not apply outputs or certificates.
 

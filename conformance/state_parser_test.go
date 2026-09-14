@@ -15,13 +15,292 @@
 package conformance
 
 import (
+	"bytes"
+	"encoding/hex"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/shelley"
+	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
+
+func parseSyntheticInitialState(
+	t *testing.T,
+	votingStateHex string,
+	poolStateHex string,
+	delegationStateHex string,
+	proposalsHex string,
+) *ParsedInitialState {
+	t.Helper()
+	if votingStateHex == "" {
+		votingStateHex = "82a0a0"
+	}
+	if poolStateHex == "" {
+		poolStateHex = "81a0"
+	}
+	if delegationStateHex == "" {
+		delegationStateHex = "81a0"
+	}
+	if proposalsHex == "" {
+		proposalsHex = "85a0f6f6f6f6"
+	}
+	// InitialState[3].BeginEpochState[1].LedgerState contains CertState and
+	// UTxOState. The latter carries GovState at index 3. Empty surrounding
+	// fields are valid sentinels and keep every target fragment on its real
+	// exported ParseInitialState path.
+	rawHex := "8400f6f682f68283" +
+		votingStateHex + poolStateHex + delegationStateHex +
+		"84a0a0f683" + proposalsHex + "8182a0f681f6"
+	raw, err := hex.DecodeString(rawHex)
+	require.NoError(t, err)
+	state, err := ParseInitialState(cbor.RawMessage(raw))
+	require.NoError(t, err)
+	return state
+}
+
+func filledBlake2b224(fill byte) common.Blake2b224 {
+	var hash common.Blake2b224
+	for i := range hash {
+		hash[i] = fill
+	}
+	return hash
+}
+
+func TestParseVotingStateCardanoWireShapes(t *testing.T) {
+	// cardano-ledger encodes VState as [dreps, committee-authorizations].
+	// DRepState stores expiry at index 0. CommitteeAuthorization is the sum
+	// [0, hot-credential] | [1, anchor]. Distinct adjacent values ensure the
+	// parser cannot satisfy these assertions from a neighboring offset.
+	raw := "82" +
+		"a2" +
+		"8200581c" + strings.Repeat("11", common.Blake2b224Size) +
+		"82184d1863" +
+		"8201581c" + strings.Repeat("22", common.Blake2b224Size) +
+		"82184e1862" +
+		"a3" +
+		"8200581c" + strings.Repeat("33", common.Blake2b224Size) +
+		"82008201581c" + strings.Repeat("44", common.Blake2b224Size) +
+		"8201581c" + strings.Repeat("55", common.Blake2b224Size) +
+		"82008200581c" + strings.Repeat("66", common.Blake2b224Size) +
+		"8200581c" + strings.Repeat("77", common.Blake2b224Size) +
+		"8201f6"
+	state := parseSyntheticInitialState(t, raw, "", "", "")
+	drepKey := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0x11),
+	}
+	drepScript := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: filledBlake2b224(0x22),
+	}
+	require.True(t, state.DRepRegistrationsByCredential[drepKey])
+	require.True(t, state.DRepRegistrationsByCredential[drepScript])
+	require.Equal(t, uint64(77), state.DRepExpiries[drepKey])
+	require.Equal(t, uint64(78), state.DRepExpiries[drepScript])
+
+	keyCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0x33),
+	}
+	scriptCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: filledBlake2b224(0x55),
+	}
+	resignedCold := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0x77),
+	}
+	require.Equal(t, common.Credential{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: filledBlake2b224(0x44),
+	}, state.HotKeyAuthorizationsByCredential[keyCold])
+	require.Equal(t, common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0x66),
+	}, state.HotKeyAuthorizationsByCredential[scriptCold])
+	require.True(t, state.CommitteeResignations[resignedCold])
+	require.NotContains(t, state.HotKeyAuthorizationsByCredential, resignedCold)
+}
+
+func TestParsePoolStateRewardAccountWireOffset(t *testing.T) {
+	// PoolParams is [operator, vrf, pledge, cost, margin, reward-account,
+	// owners, ...]. The distinct margin and owners sentinels protect index 5.
+	raw := "81a1581c" + strings.Repeat("88", common.Blake2b224Size) +
+		"87" +
+		"581c" + strings.Repeat("89", common.Blake2b224Size) +
+		"5820" + strings.Repeat("8a", common.Blake2b256Size) +
+		"19012c190190820102" +
+		"581df0" + strings.Repeat("8b", common.Blake2b224Size) +
+		"81581c" + strings.Repeat("8c", common.Blake2b224Size)
+	poolID := filledBlake2b224(0x88)
+	state := parseSyntheticInitialState(t, "", raw, "", "")
+	require.True(t, state.PoolRegistrations[poolID])
+	require.Equal(t, ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: filledBlake2b224(0x8b),
+	}, state.PoolRewardAccounts[poolID])
+}
+
+func TestParseDelegationStateCardanoAccountWireOffsets(t *testing.T) {
+	// Conway AccountState is [reward, deposit, pool-delegation,
+	// drep-delegation]. Key and script stake credentials intentionally share a
+	// hash so assertions require the credential type to survive parsing.
+	raw := "81a2" +
+		"8200581c" + strings.Repeat("99", common.Blake2b224Size) +
+		"84186402581c" + strings.Repeat("aa", common.Blake2b224Size) +
+		"8201581c" + strings.Repeat("ab", common.Blake2b224Size) +
+		"8201581c" + strings.Repeat("99", common.Blake2b224Size) +
+		"8418c803581c" + strings.Repeat("ac", common.Blake2b224Size) +
+		"8200581c" + strings.Repeat("ad", common.Blake2b224Size)
+	sharedHash := filledBlake2b224(0x99)
+	keyAccount := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptAccount := ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	state := parseSyntheticInitialState(t, "", "", raw, "")
+	require.Len(t, state.RewardAccountBalances, 2)
+	require.Equal(t, uint64(100), state.RewardAccountBalances[keyAccount])
+	require.Equal(t, uint64(200), state.RewardAccountBalances[scriptAccount])
+	require.True(t, state.StakeRegistrationsByCredential[keyAccount])
+	require.True(t, state.StakeRegistrationsByCredential[scriptAccount])
+	require.Equal(t, uint64(100), state.RewardAccounts[sharedHash])
+	require.Equal(t, filledBlake2b224(0xaa), state.PoolDelegationsByCredential[keyAccount])
+	require.Equal(t, filledBlake2b224(0xac), state.PoolDelegationsByCredential[scriptAccount])
+	require.Equal(t, common.Drep{
+		Type:       int(common.CredentialTypeScriptHash),
+		Credential: bytes.Repeat([]byte{0xab}, common.Blake2b224Size),
+	}, state.DRepDelegationsByCredential[keyAccount])
+	require.Equal(t, common.Drep{
+		Type:       int(common.CredentialTypeAddrKeyHash),
+		Credential: bytes.Repeat([]byte{0xad}, common.Blake2b224Size),
+	}, state.DRepDelegationsByCredential[scriptAccount])
+}
+
+func TestParseProposalCardanoWireOffsets(t *testing.T) {
+	// GovActionState is [id, cc-votes, drep-votes, pool-votes, procedure,
+	// proposed-in, expires-after]. ProposalProcedure is [deposit,
+	// return-account, action, anchor], and UpdateCommittee is
+	// [4, previous, removed, added, threshold]. Raw CBOR and distinct adjacent
+	// sentinels keep the test independent from the production extractors.
+	txID := strings.Repeat("ee", common.Blake2b256Size)
+	raw := "85a1" +
+		"825820" + txID + "03" +
+		"87825820" + txID + "03a0a0a0" +
+		"841903e8581de0" + strings.Repeat("f1", common.Blake2b224Size) +
+		"8504f6d90102818200581c" + strings.Repeat("a1", common.Blake2b224Size) +
+		"a28200581c" + strings.Repeat("b1", common.Blake2b224Size) +
+		"1901f48201581c" + strings.Repeat("c1", common.Blake2b224Size) +
+		"1902588219012c190190" +
+		"8218771878" +
+		"18411863" +
+		"f6f6f6f6"
+	state := parseSyntheticInitialState(t, "", "", "", raw)
+	info, ok := state.Proposals[txID+"#3"]
+	require.True(t, ok)
+	require.Equal(t, common.GovActionTypeUpdateCommittee, info.ActionType)
+	require.Equal(t, uint64(1000), info.Deposit)
+	require.Equal(t, &ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0xf1),
+	}, info.ReturnAccount)
+	require.Equal(t, uint64(65), info.SubmittedEpoch)
+	require.Equal(t, uint64(99), info.ExpiresAfter)
+	require.True(t, info.RemovedMembers[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0xa1),
+	}])
+	require.Equal(t, uint64(500), info.ProposedMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: filledBlake2b224(0xb1),
+	}])
+	require.Equal(t, uint64(600), info.ProposedMembersByCredential[ledger.RewardAccountKey{
+		CredType:   common.CredentialTypeScriptHash,
+		Credential: filledBlake2b224(0xc1),
+	}])
+}
+
+func TestExtractVotesFromTypedCredentialMap(t *testing.T) {
+	hash := filledBlake2b224(0x42)
+	votes := make(map[string]uint8)
+	extractVotes(votes, map[any]any{
+		stakeCredential{Type: 1, Hash: hash}: uint64(1),
+	}, 0)
+	require.Equal(t, uint8(1), votes["1:"+hex.EncodeToString(hash[:])])
+}
+
+func TestParseSyntheticCardanoWireOffsetsRejectShiftedFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		voting     string
+		pool       string
+		proposals  string
+		assertions func(*testing.T, *ParsedInitialState)
+	}{
+		{
+			name: "DRep expiry moved from index zero",
+			voting: "82a18200581c" +
+				strings.Repeat("d1", common.Blake2b224Size) +
+				"82f6184da0",
+			assertions: func(t *testing.T, state *ParsedInitialState) {
+				key := ledger.RewardAccountKey{
+					CredType:   common.CredentialTypeAddrKeyHash,
+					Credential: filledBlake2b224(0xd1),
+				}
+				require.True(t, state.DRepRegistrationsByCredential[key])
+				require.NotContains(t, state.DRepExpiries, key)
+			},
+		},
+		{
+			name: "pool reward account moved from index five",
+			pool: "81a1581c" +
+				strings.Repeat("d2", common.Blake2b224Size) +
+				"87581c" + strings.Repeat("d3", common.Blake2b224Size) +
+				"5820" + strings.Repeat("d4", common.Blake2b256Size) +
+				"0102581de0" + strings.Repeat("d5", common.Blake2b224Size) +
+				"f68180",
+			assertions: func(t *testing.T, state *ParsedInitialState) {
+				poolID := filledBlake2b224(0xd2)
+				require.True(t, state.PoolRegistrations[poolID])
+				require.NotContains(t, state.PoolRewardAccounts, poolID)
+			},
+		},
+		{
+			name: "proposal deposit and return account shifted right",
+			proposals: "85a1825820" +
+				strings.Repeat("d6", common.Blake2b256Size) + "00" +
+				"87825820" + strings.Repeat("d6", common.Blake2b256Size) +
+				"00a0a0a084f61903e88106f60102f6f6f6f6",
+			assertions: func(t *testing.T, state *ParsedInitialState) {
+				info := state.Proposals[strings.Repeat("d6", common.Blake2b256Size)+"#0"]
+				require.Zero(t, info.Deposit)
+				require.Nil(t, info.ReturnAccount)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := parseSyntheticInitialState(
+				t,
+				test.voting,
+				test.pool,
+				"",
+				test.proposals,
+			)
+			test.assertions(t, state)
+		})
+	}
+}
 
 func TestExtractDRepDelegationPreservesType(t *testing.T) {
 	tests := []struct {
@@ -38,6 +317,13 @@ func TestExtractDRepDelegationPreservesType(t *testing.T) {
 			name:     "always no confidence",
 			raw:      []any{uint64(common.DrepTypeNoConfidence)},
 			expected: common.DrepTypeNoConfidence,
+		},
+		{
+			name: "wrapped always abstain",
+			raw: []any{
+				[]any{uint64(common.DrepTypeAbstain)},
+			},
+			expected: common.DrepTypeAbstain,
 		},
 	}
 
@@ -343,5 +629,38 @@ func TestExtractGovActionId(t *testing.T) {
 				t.Errorf("expected %q, got %q", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
+	raw, err := hex.DecodeString(
+		"001d6088028438394946279f9ed8d66d718679b82f26b75391cb6df8107c8f00cff7e8afb7928000",
+	)
+	require.NoError(t, err)
+	output, ok := decodeCompactTransactionOutput(raw)
+	require.True(t, ok)
+	shelleyOutput, ok := output.(*shelley.ShelleyTransactionOutput)
+	require.True(t, ok)
+	require.Equal(t, uint64(45000000000000000), shelleyOutput.OutputAmount)
+	require.Equal(t, "addr_test1vzyq9ppc89y5vfulnmvdvmt3seumstexkaferjmdlqg8ercx8lee2", shelleyOutput.OutputAddress.String())
+
+	_, ok = decodeCompactTransactionOutput(append([]byte{6}, raw[1:]...))
+	require.False(t, ok)
+
+	// The datum-hash and optimized Ada-only constructors are also emitted by
+	// the Blueprint corpus and must remain visible to the state provider.
+	for i, encoded := range []string{
+		"011d706ba8f502e9f994ed5518d3007f705452969a10b01901259a1141405600bce21ae88bd757ad5b9bedf372d8d3f0cf6c962a469db61a265f6418e1ffed86da29ec",
+		"020100adf84fd242cd66edf5d9c60026a50a521408eaf8a7fcfe833180779fb4faeb54dda0db6c564d59d7d9c4c909d5b698a681cbf0010000006a92d36a00cff7e8afa897db1e",
+	} {
+		compact, err := hex.DecodeString(encoded)
+		require.NoError(t, err)
+		output, ok := decodeCompactTransactionOutput(compact)
+		require.True(t, ok)
+		if i == 0 {
+			datummed, ok := output.(*alonzo.AlonzoTransactionOutput)
+			require.True(t, ok)
+			require.NotNil(t, datummed.OutputDatumHash)
+		}
 	}
 }

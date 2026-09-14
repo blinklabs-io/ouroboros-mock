@@ -15,19 +15,24 @@
 package conformance
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
-	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/gouroboros/ledger/mary"
+	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
+	mockledger "github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
 // ParsedUtxo contains a UTxO parsed from test vectors.
@@ -48,26 +53,77 @@ type ParsedInitialState struct {
 	Utxos map[string]ParsedUtxo
 
 	// StakeRegistrations tracks which stake credentials are registered.
+	// Deprecated: use StakeRegistrationsByCredential when credential type
+	// matters.
 	StakeRegistrations map[common.Blake2b224]bool
 
+	// StakeRegistrationsByCredential tracks registrations by full stake
+	// credential identity.
+	StakeRegistrationsByCredential map[mockledger.RewardAccountKey]bool
+
 	// RewardAccounts maps stake credentials to their reward balances.
+	// Deprecated: use RewardAccountBalances when credential type matters.
 	RewardAccounts map[common.Blake2b224]uint64
+
+	// RewardAccountBalances maps full credential identities to reward balances.
+	RewardAccountBalances map[mockledger.RewardAccountKey]uint64
+
+	// StakeCredentialDeposits maps registered stake credentials to their
+	// original registration deposits. Missing entries mean that the original
+	// deposit is unknown and must not be replaced with the current protocol
+	// parameter value.
+	StakeCredentialDeposits map[mockledger.RewardAccountKey]uint64
 
 	// PoolRegistrations tracks which pools are registered (by pool key hash).
 	PoolRegistrations map[common.Blake2b224]bool
 
+	// PoolRewardAccounts maps pools to reward-account credentials used for
+	// post-bootstrap default votes.
+	PoolRewardAccounts map[common.PoolKeyHash]mockledger.RewardAccountKey
+
+	// PoolDelegationsByCredential maps stake credentials to delegated pools.
+	PoolDelegationsByCredential map[mockledger.RewardAccountKey]common.PoolKeyHash
+
 	// CommitteeMembers contains the current constitutional committee (cold key -> expiry).
 	CommitteeMembers map[common.Blake2b224]uint64
+
+	// CommitteeMembersByCredential preserves the full cold credential identity.
+	CommitteeMembersByCredential map[mockledger.RewardAccountKey]uint64
 
 	// DRepRegistrations contains registered DReps (credential hash).
 	DRepRegistrations []common.Blake2b224
 
+	// DRepDeposits holds the deposit recorded against each DRep's
+	// registration, as carried by the vector's DRepState (deposit is the
+	// third field of the ledger's DRepState record). A credential absent
+	// from this map is a registration whose recorded deposit the vector did
+	// not supply, which is not the same as a recorded deposit of zero.
+	DRepDeposits map[mockledger.RewardAccountKey]uint64
+
+	// DRepRegistrationsByCredential and DRepExpiries retain voter eligibility
+	// without conflating key and script credentials.
+	DRepRegistrationsByCredential map[mockledger.RewardAccountKey]bool
+	DRepExpiries                  map[mockledger.RewardAccountKey]uint64
+
 	// DRepDelegations maps stake credentials to their delegated DRep, including
 	// the special always-abstain and always-no-confidence DReps.
+	// Deprecated: use DRepDelegationsByCredential when credential type matters.
 	DRepDelegations map[common.Blake2b224]common.Drep
+
+	// DRepDelegationsByCredential maps full stake credential identities to
+	// their delegated DRep.
+	DRepDelegationsByCredential map[mockledger.RewardAccountKey]common.Drep
 
 	// HotKeyAuthorizations maps cold keys to hot keys for committee members.
 	HotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
+
+	// HotKeyAuthorizationsByCredential preserves both cold and hot credential
+	// types.
+	HotKeyAuthorizationsByCredential map[mockledger.RewardAccountKey]common.Credential
+
+	// CommitteeResignations tracks current or pending-proposal committee
+	// credentials whose authorization state is a resignation.
+	CommitteeResignations map[mockledger.RewardAccountKey]bool
 
 	// Proposals maps GovActionId (as "txHash#index") to proposal info.
 	Proposals map[string]GovActionInfo
@@ -92,11 +148,16 @@ type GovActionInfo struct {
 	SubmittedEpoch  uint64
 	RatifiedEpoch   *uint64
 	ParentActionId  *string
-	Votes           map[string]uint8                      // "voterType:credHash" -> vote (0=No, 1=Yes, 2=Abstain)
-	ProposedMembers map[common.Blake2b224]uint64          // For UpdateCommittee: cold key -> expiry
-	ProtocolVersion *ProtocolVersionInfo                  // For HardFork
-	PolicyHash      []byte                                // For NewConstitution
-	ParameterUpdate *conway.ConwayProtocolParameterUpdate // For ParameterChange
+	Votes           map[string]uint8                     // "voterType:credHash" -> vote (0=No, 1=Yes, 2=Abstain)
+	Deposit         uint64                               // Proposal deposit contributing to active voting stake
+	ReturnAccount   *mockledger.RewardAccountKey         // Credential receiving the returned proposal deposit
+	RemovedMembers  map[mockledger.RewardAccountKey]bool // For UpdateCommittee: cold credentials to remove
+	ProposedMembers map[common.Blake2b224]uint64         // For UpdateCommittee: cold key -> expiry
+	// ProposedMembersByCredential preserves the full cold credential identity.
+	ProposedMembersByCredential map[mockledger.RewardAccountKey]uint64
+	ProtocolVersion             *ProtocolVersionInfo                  // For HardFork
+	PolicyHash                  []byte                                // For NewConstitution
+	ParameterUpdate             *conway.ConwayProtocolParameterUpdate // For ParameterChange
 }
 
 // ProtocolVersionInfo contains protocol version for HardFork proposals.
@@ -129,52 +190,136 @@ type stakeCredential struct {
 
 // ParseInitialState extracts state from a test vector's InitialState field.
 func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
-	var v cbor.Value
-	if _, err := cbor.Decode(raw, &v); err != nil {
+	var initialState []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &initialState); err != nil {
 		return nil, fmt.Errorf("failed to decode initial_state: %w", err)
 	}
-
-	stateArr, ok := v.Value().([]any)
-	if !ok || len(stateArr) < 4 {
+	if len(initialState) < 4 {
 		return nil, errors.New("unexpected initial_state shape")
+	}
+	// Blueprint states are LedgerState values wrapped by vector.go into the
+	// seven-field NewEpochState shape. Legacy vectors carry a configuration
+	// value in this position, while the Blueprint wrapper carries the empty
+	// blocks-made map.
+	isBlueprint := len(initialState) == 7 && bytes.Equal(
+		initialState[1], cbor.RawMessage{0x80},
+	)
+	stateArr := make([]any, 0)
+	if !isBlueprint {
+		var v cbor.Value
+		if _, err := cbor.Decode(raw, &v); err != nil {
+			return nil, fmt.Errorf("failed to decode initial_state: %w", err)
+		}
+		var ok bool
+		stateArr, ok = v.Value().([]any)
+		if !ok || len(stateArr) < 4 {
+			return nil, errors.New("unexpected initial_state shape")
+		}
 	}
 
 	state := &ParsedInitialState{
-		Utxos:                make(map[string]ParsedUtxo),
-		StakeRegistrations:   make(map[common.Blake2b224]bool),
-		RewardAccounts:       make(map[common.Blake2b224]uint64),
-		PoolRegistrations:    make(map[common.Blake2b224]bool),
-		CommitteeMembers:     make(map[common.Blake2b224]uint64),
-		DRepDelegations:      make(map[common.Blake2b224]common.Drep),
+		Utxos:              make(map[string]ParsedUtxo),
+		StakeRegistrations: make(map[common.Blake2b224]bool),
+		StakeRegistrationsByCredential: make(
+			map[mockledger.RewardAccountKey]bool,
+		),
+		RewardAccounts:        make(map[common.Blake2b224]uint64),
+		RewardAccountBalances: make(map[mockledger.RewardAccountKey]uint64),
+		StakeCredentialDeposits: make(
+			map[mockledger.RewardAccountKey]uint64,
+		),
+		PoolRegistrations: make(map[common.Blake2b224]bool),
+		PoolRewardAccounts: make(
+			map[common.PoolKeyHash]mockledger.RewardAccountKey,
+		),
+		PoolDelegationsByCredential: make(
+			map[mockledger.RewardAccountKey]common.PoolKeyHash,
+		),
+		CommitteeMembers: make(map[common.Blake2b224]uint64),
+		CommitteeMembersByCredential: make(
+			map[mockledger.RewardAccountKey]uint64,
+		),
+		DRepDeposits: make(map[mockledger.RewardAccountKey]uint64),
+		DRepRegistrationsByCredential: make(
+			map[mockledger.RewardAccountKey]bool,
+		),
+		DRepExpiries:    make(map[mockledger.RewardAccountKey]uint64),
+		DRepDelegations: make(map[common.Blake2b224]common.Drep),
+		DRepDelegationsByCredential: make(
+			map[mockledger.RewardAccountKey]common.Drep,
+		),
 		HotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
-		Proposals:            make(map[string]GovActionInfo),
-		CostModels:           make(map[uint][]int64),
+		HotKeyAuthorizationsByCredential: make(
+			map[mockledger.RewardAccountKey]common.Credential,
+		),
+		CommitteeResignations: make(
+			map[mockledger.RewardAccountKey]bool,
+		),
+		Proposals:  make(map[string]GovActionInfo),
+		CostModels: make(map[uint][]int64),
 	}
 
-	// Extract current epoch from stateArr[0]
-	if epoch, ok := stateArr[0].(uint64); ok {
-		state.CurrentEpoch = epoch
+	// Extract current epoch without materializing the complete state. Blueprint
+	// vectors can contain very large reference-script outputs.
+	if _, err := cbor.Decode(initialState[0], &state.CurrentEpoch); err != nil {
+		return nil, fmt.Errorf("failed to decode current epoch: %w", err)
+	}
+	if !isBlueprint {
+		bes, ok := stateArr[3].([]any)
+		if !ok || len(bes) < 2 {
+			return nil, errors.New("unexpected begin_epoch_state shape")
+		}
+		ls, ok := bes[1].([]any)
+		if !ok || len(ls) < 2 {
+			return nil, errors.New("unexpected ledger_state shape")
+		}
+		if err := parseCertState(state, ls[0]); err != nil {
+			return nil, fmt.Errorf("failed to parse cert_state: %w", err)
+		}
+		if err := parseUtxoState(state, ls[1]); err != nil {
+			return nil, fmt.Errorf("failed to parse utxo_state: %w", err)
+		}
+		state.PParamsHash = extractPParamsHash(ls)
 	}
 
-	// Navigate to begin_epoch_state[1] (ledger_state)
-	bes, ok := stateArr[3].([]any)
-	if !ok || len(bes) < 2 {
-		return nil, errors.New("unexpected begin_epoch_state shape")
+	// Parse the structural fields through raw CBOR slices. Decoding the full
+	// state into cbor.Value recurses through reference scripts and can overflow
+	// the Go stack on otherwise valid Blueprint vectors.
+	ls, err := rawLedgerState(raw)
+	if err != nil {
+		return nil, err
 	}
-
-	ls, ok := bes[1].([]any)
-	if !ok || len(ls) < 2 {
-		return nil, errors.New("unexpected ledger_state shape")
+	// The non-UTxO portions of the Blueprint ledger state are small enough to
+	// decode into cbor.Value. Keep this separate from the UTxO map: reference
+	// scripts in that map are what make whole-state decoding unsafe.
+	var certState []cbor.RawMessage
+	if _, err := cbor.Decode(ls[0], &certState); err == nil && len(certState) > 1 {
+		var poolState cbor.Value
+		if _, err := cbor.Decode(certState[1], &poolState); err == nil {
+			_ = parsePoolState(state, poolState.Value())
+		}
 	}
-
-	// Parse cert_state (ls[0])
-	if err := parseCertState(state, ls[0]); err != nil {
-		return nil, fmt.Errorf("failed to parse cert_state: %w", err)
-	}
-
-	// Parse utxo_state (ls[1]) for governance and cost models
-	if err := parseUtxoState(state, ls[1]); err != nil {
-		return nil, fmt.Errorf("failed to parse utxo_state: %w", err)
+	var utxoState []cbor.RawMessage
+	if _, err := cbor.Decode(ls[1], &utxoState); err == nil {
+		if len(utxoState) > 1 {
+			var pparams cbor.Value
+			if _, err := cbor.Decode(utxoState[1], &pparams); err == nil {
+				_ = parseCostModels(state, pparams.Value())
+			}
+		}
+		if len(utxoState) > 3 {
+			var govState []cbor.RawMessage
+			if _, err := cbor.Decode(utxoState[3], &govState); err == nil && len(govState) > 2 {
+				var proposals cbor.Value
+				if _, err := cbor.Decode(govState[0], &proposals); err == nil {
+					_ = parseProposals(state, proposals.Value())
+				}
+				var constitution cbor.Value
+				if _, err := cbor.Decode(govState[2], &constitution); err == nil {
+					_ = parseConstitution(state, constitution.Value())
+				}
+			}
+		}
 	}
 
 	// Parse UTxOs from raw CBOR using typed decoders (like gouroboros)
@@ -190,10 +335,283 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	// Non-fatal: some vectors don't have committee data
 	_ = parseCommitteeFromRawCBOR(state, raw)
 
+	// Credential and governance maps use array keys, which cannot be represented
+	// directly as Go interface-map keys. Decode those maps through comparable
+	// typed keys so their full credential identity and documented field offsets
+	// are preserved.
+	_ = parseCertStateFromRawCBOR(state, raw)
+	_ = parseProposalsFromRawCBOR(state, raw)
+
 	// Extract pparams hash from gov_state (search in ledger_state)
-	state.PParamsHash = extractPParamsHash(ls)
+	if hash := extractPParamsHashFromRawCBOR(ls); len(hash) > 0 {
+		state.PParamsHash = hash
+	}
 
 	return state, nil
+}
+
+func rawLedgerState(
+	raw cbor.RawMessage,
+) ([]cbor.RawMessage, error) {
+	var initialState []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &initialState); err != nil {
+		return nil, fmt.Errorf("failed to decode initial_state: %w", err)
+	}
+	if len(initialState) < 4 {
+		return nil, errors.New("initial_state array too short")
+	}
+	var beginEpochState []cbor.RawMessage
+	if _, err := cbor.Decode(initialState[3], &beginEpochState); err != nil {
+		return nil, fmt.Errorf("failed to decode begin_epoch_state: %w", err)
+	}
+	if len(beginEpochState) < 2 {
+		return nil, errors.New("begin_epoch_state array too short")
+	}
+	var ledgerState []cbor.RawMessage
+	if _, err := cbor.Decode(beginEpochState[1], &ledgerState); err != nil {
+		return nil, fmt.Errorf("failed to decode ledger_state: %w", err)
+	}
+	if len(ledgerState) < 2 {
+		return nil, errors.New("ledger_state array too short")
+	}
+	return ledgerState, nil
+}
+
+func parseCertStateFromRawCBOR(
+	state *ParsedInitialState,
+	raw cbor.RawMessage,
+) error {
+	ledgerState, err := rawLedgerState(raw)
+	if err != nil {
+		return err
+	}
+	var certState []cbor.RawMessage
+	if _, err := cbor.Decode(ledgerState[0], &certState); err != nil {
+		return fmt.Errorf("failed to decode cert_state: %w", err)
+	}
+	if len(certState) < 3 {
+		return errors.New("cert_state array too short")
+	}
+	var votingState []cbor.RawMessage
+	if _, err := cbor.Decode(certState[0], &votingState); err == nil &&
+		len(votingState) >= 2 {
+		if dreps, ok := decodeCredentialMapFromRawCBOR(votingState[0]); ok {
+			state.DRepRegistrations = state.DRepRegistrations[:0]
+			clear(state.DRepRegistrationsByCredential)
+			clear(state.DRepDeposits)
+			clear(state.DRepExpiries)
+			_ = parseVotingState(state, []any{dreps, nil})
+		}
+		if authorizations, ok := decodeCredentialMapFromRawCBOR(votingState[1]); ok {
+			clear(state.HotKeyAuthorizations)
+			clear(state.HotKeyAuthorizationsByCredential)
+			clear(state.CommitteeResignations)
+			_ = parseVotingState(state, []any{nil, authorizations})
+		}
+	}
+	var delegationState []cbor.RawMessage
+	if _, err := cbor.Decode(certState[2], &delegationState); err == nil &&
+		len(delegationState) > 0 {
+		unifiedMapRaw := delegationState[0]
+		var wrapper []cbor.RawMessage
+		if _, err := cbor.Decode(unifiedMapRaw, &wrapper); err == nil &&
+			len(wrapper) > 0 {
+			unifiedMapRaw = wrapper[0]
+		}
+		if delegations, ok := decodeCredentialMapFromRawCBOR(unifiedMapRaw); ok {
+			clear(state.StakeRegistrations)
+			clear(state.StakeRegistrationsByCredential)
+			clear(state.RewardAccounts)
+			clear(state.RewardAccountBalances)
+			clear(state.StakeCredentialDeposits)
+			clear(state.PoolDelegationsByCredential)
+			clear(state.DRepDelegations)
+			clear(state.DRepDelegationsByCredential)
+			_ = parseDelegationState(state, []any{delegations})
+		}
+	}
+	return nil
+}
+
+func decodeCredentialMapFromRawCBOR(
+	raw cbor.RawMessage,
+) (map[any]any, bool) {
+	result := make(map[any]any)
+	var entries map[stakeCredential]cbor.RawMessage
+	if _, err := cbor.Decode(raw, &entries); err != nil {
+		return nil, false
+	}
+	for credential, valueRaw := range entries {
+		var value cbor.Value
+		if _, err := cbor.Decode(valueRaw, &value); err != nil {
+			return nil, false
+		}
+		result[credential] = value.Value()
+	}
+	return result, true
+}
+
+type rawGovActionID struct {
+	cbor.StructAsArray
+	TxID  common.Blake2b256
+	Index uint64
+}
+
+//nolint:nilerr // Optional governance encodings remain non-fatal for compatibility.
+func parseProposalsFromRawCBOR(
+	state *ParsedInitialState,
+	raw cbor.RawMessage,
+) error {
+	ledgerState, err := rawLedgerState(raw)
+	if err != nil {
+		return err
+	}
+	var utxoState []cbor.RawMessage
+	if _, err := cbor.Decode(ledgerState[1], &utxoState); err != nil ||
+		len(utxoState) < 4 {
+		return nil
+	}
+	var govState []cbor.RawMessage
+	if _, err := cbor.Decode(utxoState[3], &govState); err != nil ||
+		len(govState) == 0 {
+		return nil
+	}
+	var proposalsState []cbor.RawMessage
+	if _, err := cbor.Decode(govState[0], &proposalsState); err != nil ||
+		len(proposalsState) == 0 {
+		return nil
+	}
+	// Current Blueprint vectors encode proposals as a canonical list of complete
+	// proposal records inside the proposal state. The older map-shaped
+	// representation is retained below for compatibility.
+	for _, candidate := range proposalsState {
+		var pairs [][]cbor.RawMessage
+		if _, err := cbor.Decode(candidate, &pairs); err != nil {
+			continue
+		}
+		for _, pair := range pairs {
+			if len(pair) != 2 && len(pair) < 7 {
+				continue
+			}
+			proposalRaw := pair[1]
+			idRaw := pair[0]
+			if len(pair) >= 7 {
+				idRaw = pair[0]
+				// The canonical proposal-list form stores the complete proposal
+				// record, whose first field is its governance action ID.
+				var encoded []cbor.RawMessage
+				encoded = append(encoded, pair...)
+				proposalRaw, _ = cbor.Encode(encoded)
+			}
+			var id rawGovActionID
+			if _, err := cbor.Decode(idRaw, &id); err != nil {
+				var idParts []cbor.RawMessage
+				if _, err := cbor.Decode(idRaw, &idParts); err != nil || len(idParts) != 2 {
+					continue
+				}
+				var hash []byte
+				if _, err := cbor.Decode(idParts[0], &hash); err != nil || len(hash) != len(id.TxID) {
+					continue
+				}
+				copy(id.TxID[:], hash)
+				if _, err := cbor.Decode(idParts[1], &id.Index); err != nil {
+					continue
+				}
+			}
+			if info, ok := parseProposalInfoFromRawCBOR(proposalRaw); ok {
+				state.Proposals[fmt.Sprintf(
+					"%s#%d",
+					hex.EncodeToString(id.TxID[:]),
+					id.Index,
+				)] = info
+			}
+		}
+	}
+	proposalsRaw := proposalsState[0]
+	var nested []cbor.RawMessage
+	if _, err := cbor.Decode(proposalsRaw, &nested); err == nil &&
+		len(nested) >= 4 {
+		proposalsRaw = nested[0]
+	}
+	var proposals map[rawGovActionID]cbor.RawMessage
+	if _, err := cbor.Decode(proposalsRaw, &proposals); err != nil {
+		return nil
+	}
+	for id, proposalRaw := range proposals {
+		info, ok := parseProposalInfoFromRawCBOR(proposalRaw)
+		if !ok {
+			continue
+		}
+		state.Proposals[fmt.Sprintf(
+			"%s#%d",
+			hex.EncodeToString(id.TxID[:]),
+			id.Index,
+		)] = info
+	}
+	return nil
+}
+
+func parseProposalInfoFromRawCBOR(
+	raw cbor.RawMessage,
+) (GovActionInfo, bool) {
+	var proposalRaw []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &proposalRaw); err != nil ||
+		len(proposalRaw) < 7 {
+		return GovActionInfo{}, false
+	}
+	var proposalValue cbor.Value
+	if _, err := cbor.Decode(raw, &proposalValue); err != nil {
+		return GovActionInfo{}, false
+	}
+	proposal, ok := proposalValue.Value().([]any)
+	if !ok || len(proposal) < 7 {
+		return GovActionInfo{}, false
+	}
+	if votes, ok := decodeCredentialMapFromRawCBOR(proposalRaw[1]); ok {
+		proposal[1] = votes
+	}
+	if votes, ok := decodeCredentialMapFromRawCBOR(proposalRaw[2]); ok {
+		proposal[2] = votes
+	}
+	info := extractProposalInfo(proposal)
+	var procedure []cbor.RawMessage
+	if _, err := cbor.Decode(proposalRaw[4], &procedure); err != nil ||
+		len(procedure) < 3 {
+		return info, true
+	}
+	var action []cbor.RawMessage
+	if _, err := cbor.Decode(procedure[2], &action); err != nil ||
+		len(action) < 2 {
+		return info, true
+	}
+	var actionType uint64
+	if _, err := cbor.Decode(action[0], &actionType); err != nil {
+		return info, true
+	}
+	if actionType == uint64(common.GovActionTypeHardForkInitiation) && len(action) >= 3 {
+		var version []uint64
+		if _, err := cbor.Decode(action[2], &version); err == nil && len(version) >= 2 {
+			info.ProtocolVersion = &ProtocolVersionInfo{Major: uint(version[0]), Minor: uint(version[1])}
+		}
+		return info, true
+	}
+	if actionType != uint64(common.GovActionTypeUpdateCommittee) || len(action) < 4 {
+		return info, true
+	}
+	var members map[stakeCredential]uint64
+	if _, err := cbor.Decode(action[3], &members); err == nil {
+		clear(info.ProposedMembersByCredential)
+		for credential, expiry := range members {
+			info.ProposedMembersByCredential[mockledger.RewardAccountKey{
+				CredType:   uint(credential.Type),
+				Credential: credential.Hash,
+			}] = expiry
+		}
+		info.ProposedMembers = committeeMembersByHash(
+			info.ProposedMembersByCredential,
+		)
+	}
+	return info, true
 }
 
 // parseCommitteeFromRawCBOR parses committee members from raw CBOR using typed decoders.
@@ -202,36 +620,13 @@ func parseCommitteeFromRawCBOR(
 	state *ParsedInitialState,
 	raw cbor.RawMessage,
 ) error {
-	// Decode the top-level array
-	var arr []cbor.RawMessage
-	if _, err := cbor.Decode(raw, &arr); err != nil {
-		return fmt.Errorf("failed to decode initial_state: %w", err)
+	ledgerState, err := rawLedgerState(raw)
+	if err != nil {
+		return err
 	}
-	if len(arr) < 4 {
-		return errors.New("initial_state array too short")
-	}
-
-	// arr[3] = begin_epoch_state
-	var bes []cbor.RawMessage
-	if _, err := cbor.Decode(arr[3], &bes); err != nil {
-		return fmt.Errorf("failed to decode begin_epoch_state: %w", err)
-	}
-	if len(bes) < 2 {
-		return errors.New("begin_epoch_state array too short")
-	}
-
-	// bes[1] = begin_ledger_state
-	var bls []cbor.RawMessage
-	if _, err := cbor.Decode(bes[1], &bls); err != nil {
-		return fmt.Errorf("failed to decode begin_ledger_state: %w", err)
-	}
-	if len(bls) < 2 {
-		return errors.New("begin_ledger_state array too short")
-	}
-
-	// bls[1] = utxo_state
+	// ledgerState[1] = utxo_state
 	var utxoState []cbor.RawMessage
-	if _, err := cbor.Decode(bls[1], &utxoState); err != nil {
+	if _, err := cbor.Decode(ledgerState[1], &utxoState); err != nil {
 		return fmt.Errorf("failed to decode utxo_state: %w", err)
 	}
 	if len(utxoState) < 4 {
@@ -272,8 +667,15 @@ func parseCommitteeFromRawCBOR(
 	}
 
 	for cred, expiryEpoch := range members {
-		state.CommitteeMembers[cred.Hash] = expiryEpoch
+		credentialKey := mockledger.RewardAccountKey{
+			CredType:   uint(cred.Type),
+			Credential: cred.Hash,
+		}
+		state.CommitteeMembersByCredential[credentialKey] = expiryEpoch
 	}
+	state.CommitteeMembers = committeeMembersByHash(
+		state.CommitteeMembersByCredential,
+	)
 
 	return nil
 }
@@ -324,6 +726,32 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 
 	// Try to decode UTxOs from each element in utxoState
 	for _, utxoData := range utxoState {
+		// Blueprint ledger states encode the Shelley-era UTxO map as packed
+		// byte-string keys and CBOR byte-string values. Keep this path typed so
+		// reference scripts are never materialized as cbor.Value trees.
+		var packedUtxos map[cbor.ByteString]cbor.ByteString
+		if _, err := cbor.Decode(utxoData, &packedUtxos); err == nil &&
+			len(packedUtxos) > 0 {
+			for packedID, outputCBOR := range packedUtxos {
+				id := packedID.Bytes()
+				if len(id) != 34 {
+					continue
+				}
+				output, ok := decodeCompactTransactionOutput(outputCBOR.Bytes())
+				if !ok {
+					continue
+				}
+				txHashCopy := append([]byte(nil), id[:32]...)
+				index := binary.LittleEndian.Uint16(id[32:])
+				result[fmt.Sprintf("%x#%d", txHashCopy, index)] = ParsedUtxo{
+					TxHash: txHashCopy,
+					Index:  uint32(index),
+					Output: output,
+				}
+			}
+			continue
+		}
+
 		// Try direct map[UtxoId]BabbageTransactionOutput format
 		var utxosMapDirect map[localstatequery.UtxoId]babbage.BabbageTransactionOutput
 		if _, err := cbor.Decode(utxoData, &utxosMapDirect); err == nil &&
@@ -400,73 +828,263 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 			}
 			continue
 		}
+	}
+	return result, nil
+}
 
-		// Try using cbor.Value for complex key structures
-		var val cbor.Value
-		if _, err := cbor.Decode(utxoData, &val); err == nil {
-			if m, ok := val.Value().(map[any]any); ok && len(m) > 0 {
-				for k, v := range m {
-					// Dereference pointer if needed
-					var key any
-					if ptr, ok := k.(*any); ok && ptr != nil {
-						key = *ptr
-					} else {
-						key = k
-					}
+// decodeCompactTransactionOutput decodes the MemPack representation used for
+// the Blueprint UTxO map: a compact address followed by a tagged variable
+// length coin. The address is self-delimiting, so try prefixes rather than
+// assuming a fixed Shelley address size (Byron addresses are variable-sized).
+func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool) {
+	// Tags 0 and 1 are the compact-address forms (without and with a datum
+	// hash). The trailing datum hash is not needed for UTxO identity or the
+	// current state-provider contract, so the shared address/value decoder can
+	// safely ignore it after decoding the compact coin.
+	if len(raw) < 3 {
+		return nil, false
+	}
+	if raw[0] == 2 || raw[0] == 3 {
+		return decodeCompactAdaOnlyOutput(raw)
+	}
+	if raw[0] != 0 && raw[0] != 1 && raw[0] != 4 && raw[0] != 5 {
+		return nil, false
+	}
+	addressLen := int(raw[1])
+	if addressLen == 0 || 2+addressLen >= len(raw) {
+		return nil, false
+	}
+	address, err := common.NewAddressFromBytes(raw[2 : 2+addressLen])
+	if err != nil {
+		return nil, false
+	}
+	coin, valueEnd, ok := decodeCompactValueCoinWithEnd(raw[2+addressLen:])
+	if !ok {
+		return nil, false
+	}
+	if raw[0] == 5 {
+		// Tag 5 carries the full MemPack Datum and AlonzoScript values.
+		// Preserve the reference script as a typed ScriptRef: validation uses
+		// its hash to match reference-script witnesses.
+		offset := 2 + addressLen + valueEnd
+		_, datumEnd, ok := decodeMempackDatumBytes(raw[offset:])
+		if !ok {
+			return nil, false
+		}
+		script, scriptType, scriptEnd, ok := decodeMempackScriptBytes(
+			raw[offset+datumEnd:],
+		)
+		if !ok || offset+datumEnd+scriptEnd != len(raw) {
+			return nil, false
+		}
+		return &babbage.BabbageTransactionOutput{
+			OutputAddress:  address,
+			OutputAmount:   mary.MaryTransactionOutputValue{Amount: coin},
+			TxOutScriptRef: &common.ScriptRef{Type: scriptType, Script: script},
+		}, true
+	}
+	if raw[0] == 1 && valueEnd+32 <= len(raw)-(2+addressLen) {
+		datumHash := common.Blake2b256(raw[2+addressLen+valueEnd : 2+addressLen+valueEnd+32])
+		return &alonzo.AlonzoTransactionOutput{
+			OutputAddress:   address,
+			OutputAmount:    mary.MaryTransactionOutputValue{Amount: coin},
+			OutputDatumHash: &datumHash,
+		}, true
+	}
+	return &shelley.ShelleyTransactionOutput{
+		OutputAddress: address,
+		OutputAmount:  coin,
+	}, true
+}
 
-					// Extract hash and index from key
-					var hash ledger.Blake2b256
-					var index uint32
-					keyOk := false
+//nolint:gosec // bounds are checked before each compact-length conversion.
+func decodeMempackDatumBytes(raw []byte) ([]byte, int, bool) {
+	if len(raw) < 1 {
+		return nil, 0, false
+	}
+	switch raw[0] {
+	case 0:
+		return nil, 1, true
+	case 1:
+		if len(raw) < 33 {
+			return nil, 0, false
+		}
+		return raw[1:33], 33, true
+	case 2:
+		length, consumed, parseOK := decodeMempackVarLen(raw[1:])
+		end, ok := compactSliceEnd(1+consumed, length, len(raw))
+		if !parseOK || !ok {
+			return nil, 0, false
+		}
+		return raw[1+consumed : end], end, true
+	default:
+		return nil, 0, false
+	}
+}
 
-					if arr, ok := key.([]any); ok && len(arr) == 2 {
-						if h, ok := arr[0].([]byte); ok {
-							copy(hash[:], h)
-							keyOk = true
-						}
-						if i, ok := arr[1].(uint64); ok {
-							//nolint:gosec // idx from trusted CBOR test data
-							index = uint32(i)
-						}
-					} else {
-						// Try encoding key and decoding as UtxoId
-						if keyData, err := cbor.Encode(key); err == nil {
-							var utxoId localstatequery.UtxoId
-							if _, err := cbor.Decode(keyData, &utxoId); err == nil {
-								hash = utxoId.Hash
-								//nolint:gosec // idx from trusted CBOR test data
-								index = uint32(utxoId.Idx)
-								keyOk = true
-							}
-						}
-					}
+//nolint:gosec // bounds are checked before each compact-length conversion.
+func decodeMempackScriptBytes(raw []byte) (common.Script, uint, int, bool) {
+	if len(raw) < 1 {
+		return nil, 0, 0, false
+	}
+	if raw[0] == 0 {
+		length, consumed, parseOK := decodeMempackVarLen(raw[1:])
+		end, ok := compactSliceEnd(1+consumed, length, len(raw))
+		if !parseOK || !ok {
+			return nil, 0, 0, false
+		}
+		var script common.NativeScript
+		scriptBytes := raw[1+consumed : end]
+		if _, err := cbor.Decode(scriptBytes, &script); err != nil {
+			return nil, 0, 0, false
+		}
+		return script, common.ScriptRefTypeNativeScript, end, true
+	}
+	if raw[0] != 1 || len(raw) < 2 {
+		return nil, 0, 0, false
+	}
+	version, versionBytes, ok := decodeMempackVarLen(raw[1:])
+	if !ok || version > 2 {
+		return nil, 0, 0, false
+	}
+	length, lengthBytes, parseOK := decodeMempackVarLen(raw[1+versionBytes:])
+	end, ok := compactSliceEnd(1+versionBytes+lengthBytes, length, len(raw))
+	if !parseOK || !ok {
+		return nil, 0, 0, false
+	}
+	scriptBytes := raw[1+versionBytes+lengthBytes : end]
+	var script common.Script
+	switch version {
+	case 0:
+		script = common.PlutusV1Script(scriptBytes)
+	case 1:
+		script = common.PlutusV2Script(scriptBytes)
+	case 2:
+		script = common.PlutusV3Script(scriptBytes)
+	}
+	return script, uint(version) + 1, end, true
+}
 
-					if !keyOk {
-						continue
-					}
+//nolint:gosec // this helper checks the uint64 length against the slice limit.
+func compactSliceEnd(offset int, length uint64, limit int) (int, bool) {
+	if offset < 0 || offset > limit || length > uint64(limit-offset) {
+		return 0, false
+	}
+	end := offset + int(length) //nolint:gosec // bounded by limit above
+	return end, end <= limit
+}
 
-					// Decode output
-					var output babbage.BabbageTransactionOutput
-					if outData, err := cbor.Encode(v); err == nil {
-						if _, err := cbor.Decode(outData, &output); err == nil {
-							utxoKey := fmt.Sprintf("%x#%d", hash[:], index)
-							// Copy hash to avoid aliasing the underlying array
-							txHashCopy := append([]byte(nil), hash[:]...)
-							// Copy output to avoid pointer aliasing across iterations
-							outputCopy := output
-							result[utxoKey] = ParsedUtxo{
-								TxHash: txHashCopy,
-								Index:  index,
-								Output: &outputCopy,
-							}
-						}
-					}
-				}
-			}
+// decodeCompactAdaOnlyOutput handles the optimized Alonzo/Babbage form. It
+// stores a packed payment credential, a packed 28-byte address payload plus
+// network/type bits, and a compact coin instead of a full address.
+func decodeCompactAdaOnlyOutput(raw []byte) (common.TransactionOutput, bool) {
+	// tag + credential (tag/hash) + Addr28Extra (four words) + coin
+	if len(raw) < 1+29+32+2 {
+		return nil, false
+	}
+	cred := raw[1:30]
+	if cred[0] > 1 || len(cred[1:]) != 28 {
+		return nil, false
+	}
+	extra := raw[30:62]
+	w0 := binary.LittleEndian.Uint64(extra[0:8])
+	w1 := binary.LittleEndian.Uint64(extra[8:16])
+	w2 := binary.LittleEndian.Uint64(extra[16:24])
+	w3 := binary.LittleEndian.Uint64(extra[24:32])
+	addressHash := make([]byte, 28)
+	binary.BigEndian.PutUint64(addressHash[0:8], w0)
+	binary.BigEndian.PutUint64(addressHash[8:16], w1)
+	binary.BigEndian.PutUint64(addressHash[16:24], w2)
+	binary.BigEndian.PutUint32(addressHash[24:28], uint32(w3>>32))
+	addrType := uint8(1)
+	if w3&1 != 0 { // payment credential is a key hash
+		addrType = 0
+	}
+	if cred[0] == 1 { // MemPack staking credential tag: 1 is key hash
+		// no type bit for a key staking credential
+	} else { // script staking credential
+		addrType += 2
+	}
+	address, err := common.NewAddressFromParts(
+		addrType,
+		uint8((w3>>1)&1),
+		addressHash,
+		cred[1:],
+	)
+	if err != nil {
+		return nil, false
+	}
+	coin, ok := decodeCompactCoin(raw[62:])
+	if !ok {
+		return nil, false
+	}
+	return &shelley.ShelleyTransactionOutput{
+		OutputAddress: address,
+		OutputAmount:  coin,
+	}, true
+}
+
+func decodeCompactCoin(raw []byte) (uint64, bool) {
+	if len(raw) < 2 || raw[0] != 0 {
+		return 0, false
+	}
+	var coin uint64
+	for _, b := range raw[1:] {
+		if coin > (math.MaxUint64 >> 7) {
+			return 0, false
+		}
+		coin = coin<<7 | uint64(b&0x7f)
+		if b&0x80 == 0 {
+			return coin, true
 		}
 	}
+	return 0, false
+}
 
-	return result, nil
+//nolint:gosec // bounds are checked before each compact-length conversion.
+func decodeCompactValueCoinWithEnd(raw []byte) (uint64, int, bool) {
+	if len(raw) < 2 || (raw[0] != 0 && raw[0] != 1) {
+		return 0, 0, false
+	}
+	coin, consumed, ok := decodeMempackVarLen(raw[1:])
+	if !ok {
+		return 0, 0, false
+	}
+	if raw[0] == 0 {
+		return coin, 1 + consumed, true
+	}
+	_, countBytes, ok := decodeMempackVarLen(raw[1+consumed:])
+	if !ok {
+		return 0, 0, false
+	}
+	length, lengthBytes, ok := decodeMempackVarLen(
+		raw[1+consumed+countBytes:],
+	)
+	if !ok {
+		return 0, 0, false
+	}
+	end, ok := compactSliceEnd(1+consumed+countBytes+lengthBytes, length, len(raw))
+	if !ok {
+		return 0, 0, false
+	}
+	return coin, end, true
+}
+
+func decodeMempackVarLen(raw []byte) (uint64, int, bool) {
+	var value uint64
+	for i, b := range raw {
+		if value > (math.MaxUint64 >> 7) {
+			return 0, 0, false
+		}
+		value = value<<7 | uint64(b&0x7f)
+		if b&0x80 == 0 {
+			return value, i + 1, true
+		}
+		if i == 9 {
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
 }
 
 // parseCertState extracts voting, pool, and delegation state.
@@ -505,32 +1123,56 @@ func parseVotingState(state *ParsedInitialState, votingStateRaw any) error {
 
 	// DReps map at votingState[0]
 	if drepsMap, ok := votingState[0].(map[any]any); ok {
-		for k := range drepsMap {
-			cred := extractCredentialHash(k)
+		for k, v := range drepsMap {
+			cred := extractCredentialHash(unwrapPointer(k))
 			if cred != nil {
 				state.DRepRegistrations = append(
 					state.DRepRegistrations,
 					cred.Credential,
 				)
+				credentialKey := mockledger.NewRewardAccountKey(*cred)
+				state.DRepRegistrationsByCredential[credentialKey] = true
+				if expiry, ok := extractDRepExpiry(v); ok {
+					state.DRepExpiries[credentialKey] = expiry
+				}
+				if deposit, ok := extractDRepDeposit(v); ok {
+					state.DRepDeposits[credentialKey] = deposit
+				}
 			}
 		}
 	}
 
-	// Hot key authorizations at votingState[1]
+	// Committee authorization state at votingState[1]. The sum is encoded as
+	// [0, hotCredential] for an authorization and [1, anchor] for a
+	// resignation.
 	if hotKeyMap, ok := votingState[1].(map[any]any); ok {
 		for k, v := range hotKeyMap {
-			coldKey := extractBlake2b224(k)
-			if coldKey == nil {
+			coldCredential := extractCredentialHash(unwrapPointer(k))
+			if coldCredential == nil {
 				continue
 			}
-			// Value is [hotKeyCred, memberStatus]
-			if vArr, ok := v.([]any); ok && len(vArr) >= 1 {
-				hotKey := extractCredentialHash(vArr[0])
+			coldKey := mockledger.NewRewardAccountKey(*coldCredential)
+			vArr, ok := v.([]any)
+			if !ok || len(vArr) < 2 {
+				continue
+			}
+			status, ok := unwrapPointer(vArr[0]).(uint64)
+			if !ok {
+				continue
+			}
+			switch status {
+			case 0:
+				hotKey := extractCredentialHash(unwrapPointer(vArr[1]))
 				if hotKey != nil {
-					state.HotKeyAuthorizations[*coldKey] = hotKey.Credential
+					state.HotKeyAuthorizationsByCredential[coldKey] = *hotKey
 				}
+			case 1:
+				state.CommitteeResignations[coldKey] = true
 			}
 		}
+		state.HotKeyAuthorizations = hotKeyAuthorizationsByHash(
+			state.HotKeyAuthorizationsByCredential,
+		)
 	}
 
 	return nil
@@ -547,15 +1189,75 @@ func parsePoolState(state *ParsedInitialState, poolStateRaw any) error {
 
 	// stakePoolParams at poolState[0]
 	if poolParams, ok := poolState[0].(map[any]any); ok {
-		for k := range poolParams {
+		for k, v := range poolParams {
 			poolId := extractBlake2b224(k)
 			if poolId != nil {
 				state.PoolRegistrations[*poolId] = true
+				if rewardAccount := extractPoolRewardAccount(v); rewardAccount != nil {
+					state.PoolRewardAccounts[*poolId] = *rewardAccount
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func extractDRepExpiry(raw any) (uint64, bool) {
+	state, ok := unwrapPointer(raw).([]any)
+	if !ok || len(state) == 0 {
+		return 0, false
+	}
+	expiry, ok := unwrapPointer(state[0]).(uint64)
+	return expiry, ok
+}
+
+// extractDRepDeposit reads the deposit a DRepState record carries. The
+// ledger encodes DRepState as [expiry, anchor, deposit, delegs], so the
+// deposit is the third element; older encodings without it report absence
+// rather than zero.
+func extractDRepDeposit(raw any) (uint64, bool) {
+	state, ok := unwrapPointer(raw).([]any)
+	if !ok || len(state) < 3 {
+		return 0, false
+	}
+	deposit, ok := unwrapPointer(state[2]).(uint64)
+	return deposit, ok
+}
+
+func extractPoolRewardAccount(raw any) *mockledger.RewardAccountKey {
+	poolState, ok := unwrapPointer(raw).([]any)
+	if !ok || len(poolState) <= 5 {
+		return nil
+	}
+	return extractRewardAccountKey(poolState[5])
+}
+
+func extractRewardAccountKey(raw any) *mockledger.RewardAccountKey {
+	if credential := extractCredentialHash(unwrapPointer(raw)); credential != nil {
+		key := mockledger.NewRewardAccountKey(*credential)
+		return &key
+	}
+	var addressBytes []byte
+	switch value := unwrapPointer(raw).(type) {
+	case []byte:
+		addressBytes = value
+	case cbor.ByteString:
+		addressBytes = value.Bytes()
+	}
+	if len(addressBytes) == 0 {
+		return nil
+	}
+	address, err := common.NewAddressFromBytes(addressBytes)
+	if err != nil {
+		return nil
+	}
+	credential, ok := address.StakeCredential()
+	if !ok {
+		return nil
+	}
+	key := mockledger.NewRewardAccountKey(credential)
+	return &key
 }
 
 // parseDelegationState extracts stake registrations and reward balances.
@@ -570,40 +1272,125 @@ func parseDelegationState(
 		return nil
 	}
 
-	// unified_map at delegationState[0] contains stake credentials
-	if unifiedMap, ok := delegationState[0].(map[any]any); ok {
+	// The vendored vectors wrap the unified credential map together with a
+	// pointer map. Some synthetic fixtures provide the credential map directly.
+	unifiedMapRaw := delegationState[0]
+	if wrapper, ok := unifiedMapRaw.([]any); ok && len(wrapper) > 0 {
+		unifiedMapRaw = wrapper[0]
+	}
+
+	if unifiedMap, ok := unifiedMapRaw.(map[any]any); ok {
 		for k, v := range unifiedMap {
-			cred := extractCredentialHash(k)
+			cred := extractCredentialHash(unwrapPointer(k))
 			if cred == nil {
 				continue
 			}
+			balance, deposit, hasDeposit, registered := extractRewardAccountState(v)
+			if !registered {
+				continue
+			}
 			state.StakeRegistrations[cred.Credential] = true
+			accountKey := mockledger.NewRewardAccountKey(*cred)
+			if state.StakeRegistrationsByCredential == nil {
+				state.StakeRegistrationsByCredential = make(
+					map[mockledger.RewardAccountKey]bool,
+				)
+			}
+			state.StakeRegistrationsByCredential[accountKey] = true
 
-			// Extract reward balance if present in value
-			// Value structure: [rewards_map, deposit, drep_delegatee, pool_delegatee]
-			if vArr, ok := v.([]any); ok && len(vArr) >= 1 {
-				// rewards_map contains [[epoch, balance], ...]
-				if rewardsMap, ok := vArr[0].(map[any]any); ok {
-					for _, reward := range rewardsMap {
-						if rewardPair, ok := reward.([]any); ok &&
-							len(rewardPair) >= 2 {
-							if balance, ok := rewardPair[1].(uint64); ok {
-								state.RewardAccounts[cred.Credential] = balance
-								break
-							}
+			// Current AccountState values place stake-pool delegation third.
+			if vArr, ok := v.([]any); ok && len(vArr) > 2 {
+				if pool := extractBlake2b224(
+					unwrapSingleton(unwrapPointer(vArr[2])),
+				); pool != nil {
+					state.PoolDelegationsByCredential[accountKey] = *pool
+				}
+			}
+
+			// Current AccountState values place the DRep delegation fourth.
+			// Retain the older third-position fallback for existing fixtures.
+			if vArr, ok := v.([]any); ok {
+				for _, idx := range []int{3, 2} {
+					if len(vArr) <= idx {
+						continue
+					}
+					if drep := extractDRepDelegation(unwrapPointer(vArr[idx])); drep != nil {
+						if state.DRepDelegationsByCredential == nil {
+							state.DRepDelegationsByCredential = make(
+								map[mockledger.RewardAccountKey]common.Drep,
+							)
 						}
+						state.DRepDelegationsByCredential[accountKey] = *drep
+						if _, exists := state.DRepDelegations[cred.Credential]; !exists ||
+							cred.CredType == common.CredentialTypeAddrKeyHash {
+							state.DRepDelegations[cred.Credential] = *drep
+						}
+						break
 					}
 				}
-				if len(vArr) >= 3 {
-					if drep := extractDRepDelegation(vArr[2]); drep != nil {
-						state.DRepDelegations[cred.Credential] = *drep
-					}
-				}
+			}
+
+			state.RewardAccountBalances[accountKey] = balance
+			if hasDeposit {
+				state.StakeCredentialDeposits[accountKey] = deposit
+			}
+			// Keep the legacy hash-only view deterministic: prefer a key-hash
+			// credential if both credential types carry the same hash.
+			if _, exists := state.RewardAccounts[cred.Credential]; !exists ||
+				cred.CredType == common.CredentialTypeAddrKeyHash {
+				state.RewardAccounts[cred.Credential] = balance
 			}
 		}
 	}
 
 	return nil
+}
+
+func extractRewardAccountState(
+	raw any,
+) (balance, deposit uint64, hasDeposit, registered bool) {
+	account, ok := raw.([]any)
+	if !ok || len(account) == 0 {
+		return 0, 0, false, false
+	}
+
+	switch balanceState := account[0].(type) {
+	case uint64:
+		if len(account) > 1 {
+			deposit, hasDeposit = account[1].(uint64)
+		}
+		return balanceState, deposit, hasDeposit, true
+	case []any:
+		if len(balanceState) == 0 {
+			return 0, 0, false, false
+		}
+		legacyAccount, ok := balanceState[0].([]any)
+		if !ok || len(legacyAccount) == 0 {
+			return 0, 0, false, false
+		}
+		balance, ok := legacyAccount[0].(uint64)
+		if len(legacyAccount) > 1 {
+			deposit, hasDeposit = legacyAccount[1].(uint64)
+		}
+		return balance, deposit, hasDeposit, ok
+	case map[any]any:
+		if len(balanceState) == 0 {
+			return 0, 0, false, true
+		}
+		for _, reward := range balanceState {
+			rewardPair, ok := reward.([]any)
+			if !ok || len(rewardPair) < 2 {
+				continue
+			}
+			balance, ok := rewardPair[1].(uint64)
+			if ok {
+				return balance, 0, false, true
+			}
+		}
+		return 0, 0, false, true
+	}
+
+	return 0, 0, false, false
 }
 
 func extractDRepDelegation(raw any) *common.Drep {
@@ -614,8 +1401,14 @@ func extractDRepDelegation(raw any) *common.Drep {
 		}
 	}
 	items, ok := raw.([]any)
-	if !ok || len(items) != 1 {
+	if !ok {
 		return nil
+	}
+	if len(items) != 1 {
+		return nil
+	}
+	if wrapped, ok := items[0].([]any); ok {
+		return extractDRepDelegation(wrapped)
 	}
 	drepType, ok := items[0].(uint64)
 	if !ok || (drepType != common.DrepTypeAbstain &&
@@ -856,6 +1649,43 @@ func parseProposals(state *ParsedInitialState, proposalsRaw any) error {
 		return nil
 	}
 
+	// Current Conway encodes Proposals as [roots, omap]. The roots are a
+	// four-element StrictMaybe relation in purpose order, and the OMap is a
+	// flat sequence of complete GovActionState records.
+	canonical := false
+	if len(proposalsArr) == 2 {
+		if records, ok := proposalsArr[1].([]any); ok {
+			canonical = len(records) == 0
+			for _, proposal := range records {
+				record, ok := proposal.([]any)
+				if !ok || len(record) < 7 {
+					canonical = false
+					break
+				}
+				canonical = true
+			}
+		}
+	}
+	if canonical {
+		if roots, ok := proposalsArr[0].([]any); ok && len(roots) >= 4 {
+			state.ProposalRoots.ProtocolParameters = extractWrappedEnactedRoot(roots[0])
+			state.ProposalRoots.HardFork = extractWrappedEnactedRoot(roots[1])
+			state.ProposalRoots.ConstitutionalCommittee = extractWrappedEnactedRoot(roots[2])
+			state.ProposalRoots.Constitution = extractWrappedEnactedRoot(roots[3])
+		}
+		if proposals, ok := proposalsArr[1].([]any); ok {
+			for _, proposal := range proposals {
+				if record, ok := proposal.([]any); ok && len(record) >= 7 {
+					id := extractGovActionId(record[0])
+					if id != "" {
+						state.Proposals[id] = extractProposalInfo(record)
+					}
+				}
+			}
+		}
+		return nil
+	}
+
 	var proposalsTree any
 	var rootParams, rootHF, rootCC, rootConstitution any
 
@@ -898,6 +1728,19 @@ func parseProposals(state *ParsedInitialState, proposalsRaw any) error {
 	}
 
 	return nil
+}
+
+// extractWrappedEnactedRoot decodes a StrictMaybe GovActionId: [] means
+// Nothing and [[txHash,index]] means Just.
+func extractWrappedEnactedRoot(raw any) *string {
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	if len(items) == 1 {
+		return extractEnactedRoot(items[0])
+	}
+	return extractEnactedRoot(items)
 }
 
 // extractEnactedRoot extracts a GovActionId from a root structure.
@@ -948,8 +1791,14 @@ func extractGovActionId(raw any) string {
 // extractProposalInfo extracts GovActionInfo from a proposal entry.
 func extractProposalInfo(raw any) GovActionInfo {
 	info := GovActionInfo{
-		Votes:           make(map[string]uint8),
-		ProposedMembers: make(map[common.Blake2b224]uint64),
+		Votes:          make(map[string]uint8),
+		RemovedMembers: make(map[mockledger.RewardAccountKey]bool),
+		ProposedMembers: make(
+			map[common.Blake2b224]uint64,
+		),
+		ProposedMembersByCredential: make(
+			map[mockledger.RewardAccountKey]uint64,
+		),
 	}
 
 	// Proposal structure: [id, cc_votes, drep_votes, pool_votes, procedure, proposed_in, expires_after]
@@ -965,9 +1814,14 @@ func extractProposalInfo(raw any) GovActionInfo {
 
 	// procedure at arr[4]
 	if procedure, ok := arr[4].([]any); ok {
-		info.ActionType, info.ProposedMembers = extractActionTypeAndMembers(
-			procedure,
+		info.Deposit, info.ReturnAccount = extractProposalStake(procedure)
+		info.ActionType,
+			info.RemovedMembers,
+			info.ProposedMembersByCredential = extractActionTypeAndMembers(procedure)
+		info.ProposedMembers = committeeMembersByHash(
+			info.ProposedMembersByCredential,
 		)
+		extractProposalPayload(&info, procedure)
 	}
 
 	// proposed_in at arr[5]
@@ -981,6 +1835,85 @@ func extractProposalInfo(raw any) GovActionInfo {
 	}
 
 	return info
+}
+
+// extractProposalPayload preserves governance fields encoded inside the action
+// payload rather than in the surrounding proposal record.
+func extractProposalPayload(info *GovActionInfo, procedure []any) {
+	if info == nil {
+		return
+	}
+	var action []any
+	for i := 2; i < len(procedure) && i <= 4; i++ {
+		candidate, ok := procedure[i].([]any)
+		if ok && len(candidate) > 0 {
+			if _, ok := candidate[0].(uint64); ok {
+				action = candidate
+				break
+			}
+		}
+	}
+	if len(action) == 0 {
+		return
+	}
+	if len(action) > 1 {
+		if parent := extractGovActionId(action[1]); parent != "" {
+			info.ParentActionId = &parent
+		}
+	}
+	if len(action) < 3 {
+		return
+	}
+	switch info.ActionType {
+	case common.GovActionTypeNewConstitution:
+		constitution, ok := action[2].([]any)
+		if !ok || len(constitution) < 2 {
+			return
+		}
+		if policyHash := rawBytes(constitution[1]); len(policyHash) > 0 {
+			info.PolicyHash = policyHash
+		}
+	case common.GovActionTypeParameterChange:
+		encoded, err := cbor.Encode(action[2])
+		if err != nil {
+			return
+		}
+		var update conway.ConwayProtocolParameterUpdate
+		if _, err := cbor.Decode(encoded, &update); err == nil {
+			info.ParameterUpdate = &update
+		}
+	case common.GovActionTypeHardForkInitiation,
+		common.GovActionTypeTreasuryWithdrawal,
+		common.GovActionTypeNoConfidence,
+		common.GovActionTypeUpdateCommittee,
+		common.GovActionTypeInfo:
+		// These action payloads do not expose additional fields that this
+		// parser needs to preserve for final-state comparison.
+	}
+}
+
+func rawBytes(raw any) []byte {
+	switch value := raw.(type) {
+	case []byte:
+		return append([]byte(nil), value...)
+	case cbor.ByteString:
+		return append([]byte(nil), value.Bytes()...)
+	default:
+		return nil
+	}
+}
+
+func extractProposalStake(
+	procedure []any,
+) (uint64, *mockledger.RewardAccountKey) {
+	if len(procedure) < 2 {
+		return 0, nil
+	}
+	deposit, ok := procedure[0].(uint64)
+	if !ok {
+		return 0, nil
+	}
+	return deposit, extractRewardAccountKey(procedure[1])
 }
 
 // extractVotes extracts votes from a vote map.
@@ -1010,6 +1943,10 @@ func extractVotes(votes map[string]uint8, votesRaw any, voterTypeBase uint8) {
 			// Raw bytes - assume key hash (type 0)
 			credHash = hex.EncodeToString(key.Bytes())
 			credType = 0
+		case stakeCredential:
+			credHash = hex.EncodeToString(key.Hash[:])
+			//nolint:gosec // CredType is 0 or 1
+			credType = uint8(key.Type)
 		case []any:
 			// [type, hash] credential - extract actual credential type
 			if cred := extractCredentialHash(key); cred != nil {
@@ -1064,8 +2001,13 @@ func extractVotes(votes map[string]uint8, votesRaw any, voterTypeBase uint8) {
 // extractActionTypeAndMembers extracts action type and proposed members from procedure.
 func extractActionTypeAndMembers(
 	procedure []any,
-) (common.GovActionType, map[common.Blake2b224]uint64) {
-	members := make(map[common.Blake2b224]uint64)
+) (
+	common.GovActionType,
+	map[mockledger.RewardAccountKey]bool,
+	map[mockledger.RewardAccountKey]uint64,
+) {
+	removed := make(map[mockledger.RewardAccountKey]bool)
+	members := make(map[mockledger.RewardAccountKey]uint64)
 
 	// Find action array in procedure (typically at indices 2-4)
 	var actionArr []any
@@ -1079,27 +2021,83 @@ func extractActionTypeAndMembers(
 	}
 
 	if len(actionArr) < 1 {
-		return 0, members
+		return 0, removed, members
 	}
 
 	actionType, _ := actionArr[0].(uint64)
 
-	// For UpdateCommittee (type 4), extract proposed members from actionArr[3]
+	// For UpdateCommittee (type 4), extract removed credentials from the set
+	// at actionArr[2] and proposed members from the map at actionArr[3].
+	if actionType == 4 && len(actionArr) > 2 {
+		var removedCredentials []any
+		switch values := actionArr[2].(type) {
+		case []any:
+			removedCredentials = values
+		case cbor.Set:
+			removedCredentials = []any(values)
+		}
+		for _, value := range removedCredentials {
+			cred := extractCredentialHash(unwrapPointer(value))
+			if cred != nil {
+				removed[mockledger.NewRewardAccountKey(*cred)] = true
+			}
+		}
+	}
 	if actionType == 4 && len(actionArr) > 3 {
 		if membersMap, ok := actionArr[3].(map[any]any); ok {
 			for k, v := range membersMap {
-				cred := extractCredentialHash(k)
+				cred := extractCredentialHash(unwrapPointer(k))
 				if cred == nil {
 					continue
 				}
 				if expiry, ok := v.(uint64); ok {
-					members[cred.Credential] = expiry
+					members[mockledger.NewRewardAccountKey(*cred)] = expiry
 				}
 			}
 		}
 	}
 
-	return common.GovActionType(actionType), members
+	return common.GovActionType(actionType), removed, members
+}
+
+func committeeMembersByHash(
+	members map[mockledger.RewardAccountKey]uint64,
+) map[common.Blake2b224]uint64 {
+	ret := make(map[common.Blake2b224]uint64, len(members))
+	ambiguous := make(map[common.Blake2b224]bool)
+	for credential, expiry := range members {
+		hash := credential.Credential
+		if ambiguous[hash] {
+			continue
+		}
+		if _, exists := ret[hash]; exists {
+			delete(ret, hash)
+			ambiguous[hash] = true
+			continue
+		}
+		ret[hash] = expiry
+	}
+	return ret
+}
+
+func hotKeyAuthorizationsByHash(
+	authorizations map[mockledger.RewardAccountKey]common.Credential,
+) map[common.Blake2b224]common.Blake2b224 {
+	ret := make(map[common.Blake2b224]common.Blake2b224, len(authorizations))
+	ambiguous := make(map[common.Blake2b224]bool)
+	for credential, hotCredential := range authorizations {
+		hash := credential.Credential
+		if ambiguous[hash] {
+			continue
+		}
+		if _, exists := ret[hash]; exists {
+			delete(ret, hash)
+			ambiguous[hash] = true
+			continue
+		}
+		ret[hash] = hotCredential.Credential
+	}
+	return ret
 }
 
 // parseCommittee extracts committee members.
@@ -1147,8 +2145,12 @@ func parseCommittee(state *ParsedInitialState, committeeRaw any) error {
 			expiry = exp
 		}
 
-		state.CommitteeMembers[cred.Credential] = expiry
+		credentialKey := mockledger.NewRewardAccountKey(*cred)
+		state.CommitteeMembersByCredential[credentialKey] = expiry
 	}
+	state.CommitteeMembers = committeeMembersByHash(
+		state.CommitteeMembersByCredential,
+	)
 
 	return nil
 }
@@ -1232,6 +2234,31 @@ func extractPParamsHash(ls []any) []byte {
 	return nil
 }
 
+// extractPParamsHashFromRawCBOR extracts the protocol-parameter hash without
+// decoding the complete ledger state into interface values.
+func extractPParamsHashFromRawCBOR(ls []cbor.RawMessage) []byte {
+	for _, itemRaw := range ls {
+		var item []cbor.RawMessage
+		if _, err := cbor.Decode(itemRaw, &item); err != nil || len(item) <= 3 {
+			continue
+		}
+
+		var hash []byte
+		if _, err := cbor.Decode(item[3], &hash); err == nil && len(hash) > 0 {
+			return hash
+		}
+
+		var nested []cbor.RawMessage
+		if _, err := cbor.Decode(item[3], &nested); err != nil || len(nested) <= 3 {
+			continue
+		}
+		if _, err := cbor.Decode(nested[3], &hash); err == nil && len(hash) > 0 {
+			return hash
+		}
+	}
+	return nil
+}
+
 // unwrapPointer attempts to extract a usable value from CBOR's pointer wrappers.
 // For non-hashable map keys, CBOR wraps the value in &keyValue (see cbor/value.go).
 // We simply dereference the pointer to get the actual value.
@@ -1239,6 +2266,13 @@ func unwrapPointer(v any) any {
 	// If it's a pointer to any, dereference once
 	if ptr, ok := v.(*any); ok && ptr != nil {
 		return *ptr
+	}
+	return v
+}
+
+func unwrapSingleton(v any) any {
+	if items, ok := v.([]any); ok && len(items) == 1 {
+		return items[0]
 	}
 	return v
 }

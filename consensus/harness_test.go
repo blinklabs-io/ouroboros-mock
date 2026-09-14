@@ -19,6 +19,7 @@ import (
 
 	"github.com/blinklabs-io/ouroboros-mock/consensus"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/stretchr/testify/require"
 )
 
 // firstPeerStub is a deliberately-wrong Replayer: it adopts the FIRST
@@ -66,6 +67,10 @@ func (s *firstPeerStub) BestTip() (format.Tip, bool) {
 }
 
 func (s *firstPeerStub) DrainSwitchEvents() []format.SwitchEvent {
+	return nil
+}
+
+func (s *firstPeerStub) DrainDownstreamChainSync() []format.ServedMessage {
 	return nil
 }
 
@@ -118,6 +123,59 @@ type maxTipNoSwitchStub struct {
 	tip  format.Tip
 }
 
+type observableStub struct {
+	finalTip      format.Tip
+	previousTip   format.Tip
+	rollbackPoint *format.Point
+	downstream    []format.ServedMessage
+	switches      []format.SwitchEvent
+}
+
+func (s *observableStub) RollForward(
+	_ uint64, _ uint, _ []byte, _ format.Tip,
+) error {
+	return nil
+}
+
+func (s *observableStub) RollBackward(
+	_ uint64, _ format.Point, _ format.Tip,
+) error {
+	return nil
+}
+
+func (s *observableStub) Stabilize() {}
+
+func (s *observableStub) BestTip() (format.Tip, bool) {
+	return s.finalTip, true
+}
+
+func (s *observableStub) DrainSwitchEvents() []format.SwitchEvent {
+	if s.switches != nil {
+		return s.switches
+	}
+	return []format.SwitchEvent{{
+		PreviousTip:   s.previousTip,
+		NewTip:        s.finalTip,
+		RollbackPoint: s.rollbackPoint,
+	}}
+}
+
+func (s *observableStub) DrainDownstreamChainSync() []format.ServedMessage {
+	return s.downstream
+}
+
+func lastPeerTip(peer format.PeerInput) (format.Tip, bool) {
+	var tip format.Tip
+	have := false
+	for _, msg := range peer.Served {
+		if msg.MsgType == format.ChainSyncMsgRollForward && msg.Tip != nil {
+			tip = *msg.Tip
+			have = true
+		}
+	}
+	return tip, have
+}
+
 func (s *maxTipNoSwitchStub) RollForward(
 	_ uint64, _ uint, _ []byte, tip format.Tip,
 ) error {
@@ -141,6 +199,10 @@ func (s *maxTipNoSwitchStub) BestTip() (format.Tip, bool) {
 }
 
 func (s *maxTipNoSwitchStub) DrainSwitchEvents() []format.SwitchEvent {
+	return nil
+}
+
+func (s *maxTipNoSwitchStub) DrainDownstreamChainSync() []format.ServedMessage {
 	return nil
 }
 
@@ -177,4 +239,54 @@ func TestHarnessRequiresSwitchDecision(t *testing.T) {
 	if checked == 0 {
 		t.Skip("no vector carries expected_rollback")
 	}
+}
+
+func TestHarnessRejectsWrongRollbackAndDownstreamObservations(t *testing.T) {
+	vectors, err := consensus.CapturedVectors()
+	require.NoError(t, err)
+	checked := 0
+	for _, cv := range vectors {
+		capture := cv.Vector.Capture
+		if capture == nil || capture.ExpectedOutput.ExpectedRollback == nil {
+			continue
+		}
+		checked++
+		var previous format.Tip
+		for _, peer := range capture.Peers {
+			tip, ok := lastPeerTip(peer)
+			if ok && !tipsEqualForTest(tip, capture.ExpectedOutput.FinalTip) {
+				previous = tip
+				break
+			}
+		}
+		wantPoint := capture.ExpectedOutput.ExpectedRollback.Point
+		wrongPoint := wantPoint
+		wrongPoint.Slot++
+		stub := &observableStub{
+			finalTip:      capture.ExpectedOutput.FinalTip,
+			previousTip:   previous,
+			rollbackPoint: &wrongPoint,
+			downstream:    capture.ExpectedOutput.DownstreamChainSync,
+		}
+		stub.switches = []format.SwitchEvent{
+			{NewTip: capture.ExpectedOutput.FinalTip, RollbackPoint: &wantPoint},
+			{PreviousTip: previous, NewTip: capture.ExpectedOutput.FinalTip, RollbackPoint: &wrongPoint},
+		}
+		err = consensus.RunConsensusVector(t, cv.Vector, stub)
+		require.ErrorContains(t, err, "rollback point")
+
+		stub.rollbackPoint = &wantPoint
+		stub.switches[1].RollbackPoint = &wantPoint
+		stub.downstream = nil
+		err = consensus.RunConsensusVector(t, cv.Vector, stub)
+		require.ErrorContains(t, err, "downstream ChainSync mismatch")
+	}
+	if checked == 0 {
+		t.Skip("no captured vector carries expected rollback")
+	}
+}
+
+func tipsEqualForTest(a, b format.Tip) bool {
+	return a.Slot == b.Slot && a.BlockNumber == b.BlockNumber &&
+		string(a.Hash) == string(b.Hash)
 }

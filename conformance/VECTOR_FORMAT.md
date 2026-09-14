@@ -1,14 +1,19 @@
 # Test Vector Format Reference
 
-This document describes the CBOR binary format of the Amaru conformance test vectors consumed by this package. It is intended for implementors who need to parse vectors directly or understand how the harness extracts state.
+This document describes the legacy CBOR envelope and the Cardano Blueprint
+JSON records consumed by this package. See [CORPUS.md](CORPUS.md) for the
+pinned source and refresh procedure.
 
-Vectors are stored in `testdata/eras/conway/impl/dump/Conway/Imp/` (binary CBOR, no extension). Protocol parameter files are in `testdata/eras/conway/impl/dump/pparams-by-hash/` (one file per hash, named by hex-encoded hash).
+Vectors are generated under `testdata/eras/conway/impl/dump/`. Blueprint
+records are JSON files with hex-encoded `cbor`, `oldLedgerState`, and
+`newLedgerState` fields, plus `success` and `testState`. Protocol parameter
+files are in `testdata/eras/conway/impl/dump/pparams-by-hash/`.
 
 ---
 
-## Top-Level Structure
+## Legacy CBOR envelope
 
-Each vector file decodes to a 5-element CBOR array:
+The legacy CBOR files decode to a 5-element array:
 
 ```
 vector = [
@@ -20,7 +25,26 @@ vector = [
 ]
 ```
 
-The `title` field identifies the Haskell test that generated this vector (e.g. `"Conway/Imp/GOV/vote on committee member"`). It is also used to detect "No cost model" vectors (see [Protocol Parameters](#protocol-parameters)).
+The `title` field identifies the source test. This envelope remains supported
+for locally authored synthetic fixtures.
+
+## Cardano Blueprint JSON records
+
+The pinned Blueprint archive is the primary ledger corpus. Each record contains
+hex-encoded `cbor`, `oldLedgerState`, and `newLedgerState` fields, a boolean
+`success`, and a `testState` title. Blueprint exports `LedgerState`, not
+`NewEpochState`, so the adapter wraps each state in the legacy shape while
+preserving the source CBOR bytes. The export does not contain
+`NewEpochState.epoch_no` or its event timeline. The adapter restores the
+imported corpus's default execution epoch (899) and records the known
+timeline-derived exception for `GOV.Voting.expired_gov-actions/5` (epoch 902).
+These values are adapter metadata, not changes to the Blueprint bytes; refresh
+them from the legacy event envelope when the pinned Blueprint revision changes.
+
+Blueprint UTxO maps use the ledger's compact binary representation. The parser
+decodes its tagged, length-prefixed address and variable-length coin directly;
+it must not materialize the complete state as `cbor.Value`, because reference
+script vectors can exceed the Go stack's recursive decoding limit.
 
 ---
 
@@ -52,7 +76,7 @@ The harness reads `start_slot` (index 0) and `epoch_length` (index 2) from confi
 
 ## NewEpochState Structure (initial\_state and final\_state)
 
-Both `initial_state` and `final_state` are 7-element CBOR arrays representing a Cardano `NewEpochState`. The harness reads from `initial_state`; `final_state` is used to extract final reward balances.
+Both `initial_state` and `final_state` encode Cardano ledger state. The harness loads `initial_state` before execution and compares the resulting snapshot with `final_state` afterward. Expected final-state values are not execution inputs.
 
 ```
 NewEpochState = [
@@ -79,7 +103,7 @@ begin_epoch_state = [
 
 ```
 ledger_state = [
-    cert_state,  ; [0] array[5] — certificates, DReps, committee
+    cert_state,  ; [0] array[3] — certificates, DReps, stake and pool state
     utxo_state,  ; [1] array[4] — UTxOs, deposits, fees, governance
 ]
 ```
@@ -88,17 +112,27 @@ ledger_state = [
 
 ```
 cert_state = [
-    voting_state,  ; [0] [drep_state, committee_state, ...]
-    _deleg_state,  ; [1]
-    _pool_state,   ; [2] — pool registrations / stake distributions
-    _reward_state, ; [3] — deposit map (stake registrations, pool deposits)
-    _stake_state,  ; [4]
+    voting_state,     ; [0] [drep_state, committee_state, ...]
+    pool_state,       ; [1] pool registrations / retirements
+    delegation_state, ; [2] unified stake-credential state
+]
+
+delegation_state = [
+    unified_map_wrapper, ; [0]
+    _future_gen_delegs,  ; [1]
+    _gen_delegs,         ; [2]
+    _instantaneous,      ; [3]
+]
+
+unified_map_wrapper = [
+    reward_accounts, ; [0] map[Credential]AccountState
+    _pointer_map,    ; [1]
 ]
 ```
 
 The harness reads DRep registrations and stake registrations from this subtree:
 - DReps: `initial_state[3][1][0][0][0]`
-- Stake registrations: `initial_state[3][1][0][2][0]`
+- Stake registrations: `initial_state[3][1][0][2][0][0]`
 
 ### utxo\_state (index 3→1→1)
 
@@ -126,8 +160,19 @@ utxo_state = [
 | Current pparams hash | `initial_state[3][1][1][3][3]` |
 | Previous pparams hash | `initial_state[3][1][1][3][4]` |
 | DRep registrations | `initial_state[3][1][0][0][0]` |
-| Stake registrations | `initial_state[3][1][0][2][0]` |
-| Final reward balances | `final_state[3][1][1][3]` (reward accounts within gov state) |
+| Stake registrations | `initial_state[3][1][0][2][0][0]` |
+| Final reward balances | `final_state[3][1][0][2][0][0]` (reward accounts within delegation state) |
+
+---
+
+Reward-account keys are stake credentials encoded as `[type, hash]`. The type
+is part of the identity: type `0` (verification-key hash) and type `1` (script
+hash) remain distinct even when the 28-byte hashes are equal.
+
+Vendored UMap account values wrap `[reward, deposit]` in their first field, so
+the reward balance is the first value of that nested pair. Modern Conway
+AccountState values encode `[balance, deposit, poolDelegation,
+drepDelegation]`, with the balance directly in the first field.
 
 ---
 
@@ -151,12 +196,18 @@ gov_state = [
 
 ```
 proposals_container = [
-    proposals_tree,     ; [0] map GovActionId -> ProposalState
-    root_params,        ; [1] GovActionId | null — last enacted ParameterChange
-    root_hard_fork,     ; [2] GovActionId | null — last enacted HardForkInitiation
-    root_cc,            ; [3] GovActionId | null — last enacted NoConfidence/UpdateCommittee
-    root_constitution,  ; [4] GovActionId | null — last enacted NewConstitution
+    roots,               ; [0] StrictMaybe [PParam, HardFork, Committee, Constitution]
+    proposal_sequence,   ; [1] flat OMap sequence of ProposalState records
 ]
+
+roots = [
+    root_params,         ; [] or [[GovActionId]]
+    root_hard_fork,      ; [] or [[GovActionId]]
+    root_cc,             ; [] or [[GovActionId]]
+    root_constitution,   ; [] or [[GovActionId]]
+]
+
+proposal_sequence = [ ProposalState, ... ]
 ```
 
 Roots are used for parent-chain validation when new proposals are submitted. A `null` root means no proposal of that type has ever been enacted (genesis state).

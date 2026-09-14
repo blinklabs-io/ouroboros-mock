@@ -13,10 +13,12 @@
 // limitations under the License.
 
 // Package conformance provides a shared test harness for Cardano ledger
-// conformance tests using Amaru test vectors.
+// conformance tests using Cardano Blueprint vectors.
 package conformance
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -26,6 +28,14 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 )
+
+// blueprintConfig supplies the network timing fields absent from Blueprint's
+// per-transaction JSON format. The ledger states and transaction bytes remain
+// the authoritative values from the Blueprint artifact.
+var blueprintConfig = cbor.RawMessage{
+	0x8d, 0x00, 0x01, 0x1a, 0x00, 0x06, 0x97, 0x80,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+}
 
 // EventType represents the type of event in a test vector.
 type EventType int
@@ -91,8 +101,26 @@ type TestVector struct {
 	FilePath string
 }
 
+// hasPathSegment reports whether a slash-normalized path contains name as a
+// whole path segment.
+//
+// A substring test is wrong here: the Cardano Blueprint corpus contains vector
+// directories whose names end in the filter words, such as
+// Conway.Imp.ConwayImpSpec - Version 10.UTXOS.can use reference scripts, which a
+// strings.Contains check for "scripts/" silently excluded.
+func hasPathSegment(normalizedPath, name string) bool {
+	for _, segment := range strings.Split(normalizedPath, "/") {
+		if segment == name {
+			return true
+		}
+	}
+	return false
+}
+
 // CollectVectorFiles walks the testdata directory and returns all vector file paths.
 // It skips pparams-by-hash directories, scripts directories, and non-vector files.
+// Directory filters match whole path segments, so a vector directory whose name
+// merely ends in a filter word is still collected.
 func CollectVectorFiles(root string) ([]string, error) {
 	var vectors []string
 	err := filepath.WalkDir(
@@ -105,14 +133,14 @@ func CollectVectorFiles(root string) ([]string, error) {
 			normalizedPath := filepath.ToSlash(path)
 			if entry.IsDir() {
 				// Skip protocol parameters directory
-				if strings.Contains(normalizedPath, "pparams-by-hash") {
+				if hasPathSegment(normalizedPath, "pparams-by-hash") {
 					return filepath.SkipDir
 				}
 				return nil
 			}
 			// Skip files in special directories
-			if strings.Contains(normalizedPath, "pparams-by-hash") ||
-				strings.Contains(normalizedPath, "scripts/") {
+			if hasPathSegment(normalizedPath, "pparams-by-hash") ||
+				hasPathSegment(normalizedPath, "scripts") {
 				return nil
 			}
 			// Skip documentation files
@@ -147,6 +175,9 @@ func DecodeTestVector(vectorPath string) (*TestVector, error) {
 			Message: "failed to read vector file",
 			Err:     err,
 		}
+	}
+	if len(data) > 0 && data[0] == '{' {
+		return decodeBlueprintVector(vectorPath, data)
 	}
 
 	var items []cbor.RawMessage
@@ -193,6 +224,85 @@ func DecodeTestVector(vectorPath string) (*TestVector, error) {
 	}, nil
 }
 
+type blueprintVector struct {
+	CBOR           string `json:"cbor"`
+	OldLedgerState string `json:"oldLedgerState"`
+	NewLedgerState string `json:"newLedgerState"`
+	Success        bool   `json:"success"`
+	TestState      string `json:"testState"`
+}
+
+func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
+	var source blueprintVector
+	if err := json.Unmarshal(data, &source); err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint JSON", Err: err}
+	}
+	decode := func(name, value string) ([]byte, error) {
+		decoded, err := hex.DecodeString(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s hex: %w", name, err)
+		}
+		return decoded, nil
+	}
+	tx, err := decode("cbor", source.CBOR)
+	if err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+	}
+	oldState, err := decode("oldLedgerState", source.OldLedgerState)
+	if err != nil {
+		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+	}
+	var newState []byte
+	if source.NewLedgerState != "" {
+		newState, err = decode("newLedgerState", source.NewLedgerState)
+		if err != nil {
+			return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+		}
+	} else if source.Success {
+		// An absent newLedgerState is only meaningful for a vector whose
+		// transaction is expected to be rejected. Accepting one for a
+		// successful transaction silently drops the final-state comparison,
+		// which is the only end-to-end check the vector carries.
+		return nil, &VectorError{
+			Path:    path,
+			Message: "successful Blueprint vector has no newLedgerState",
+		}
+	}
+	epoch := blueprintExecutionEpoch(path)
+	oldState = wrapBlueprintLedgerStateAtEpoch(oldState, epoch)
+	if newState != nil {
+		newState = wrapBlueprintLedgerStateAtEpoch(newState, epoch)
+	}
+
+	return &TestVector{
+		Title:        source.TestState,
+		Config:       blueprintConfig,
+		InitialState: oldState,
+		FinalState:   newState,
+		Events: []VectorEvent{{
+			Type:    EventTypeTransaction,
+			TxBytes: tx,
+			Success: source.Success,
+			Slot:    0,
+		}},
+		FilePath: path,
+	}, nil
+}
+
+// Blueprint's JSON export omits the legacy event timeline. The default epoch
+// is the epoch used by the imported Conway corpus; this override preserves
+// the one exported transaction whose legacy vector advanced three epochs
+// before executing record 5. Keep these values tied to source paths and update
+// them from the legacy event envelope when the Blueprint pin changes.
+func blueprintExecutionEpoch(path string) uint64 {
+	const defaultEpoch = 899
+	if strings.HasSuffix(filepath.ToSlash(path),
+		"Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5") {
+		return 902
+	}
+	return defaultEpoch
+}
+
 // decodeEvents decodes the events array from a test vector.
 func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 	var encodedEvents []cbor.RawMessage
@@ -202,7 +312,6 @@ func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 			Err:     err,
 		}
 	}
-
 	events := make([]VectorEvent, 0, len(encodedEvents))
 	for i, rawEvent := range encodedEvents {
 		var payload []any
@@ -236,6 +345,30 @@ func decodeEvents(raw cbor.RawMessage) ([]VectorEvent, error) {
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+// Blueprint exports LedgerState, while the harness consumes NewEpochState.
+// Supply the non-ledger fields that the format omits and retain the exported
+// LedgerState bytes verbatim at NewEpochState[3][1].
+//
+//nolint:gosec // epoch is bounded to uint16 before the CBOR byte conversion.
+func wrapBlueprintLedgerStateAtEpoch(ledgerState []byte, epoch uint64) []byte {
+	wrapped := make([]byte, 0, len(ledgerState)+12)
+	wrapped = append(wrapped, 0x87) // NewEpochState
+	if epoch < 24 {
+		wrapped = append(wrapped, byte(epoch))
+	} else if epoch <= 0xffff {
+		wrapped = append(wrapped, 0x19, byte(epoch>>8), byte(epoch))
+	} else {
+		panic("temporary epoch encoder only supports uint16")
+	}
+	wrapped = append(wrapped,
+		0x80, 0x80, // blocks made, last epoch
+		0x82, 0x82, 0x00, 0x00, // begin epoch account state
+	)
+	wrapped = append(wrapped, ledgerState...)
+	wrapped = append(wrapped, 0x80, 0x80, 0x80) // snapshots, pool distribution, non-myopic
+	return wrapped
 }
 
 // decodeEvent decodes a single event from its payload.

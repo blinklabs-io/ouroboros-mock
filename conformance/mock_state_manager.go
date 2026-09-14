@@ -16,9 +16,12 @@ package conformance
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
+	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
@@ -43,31 +46,66 @@ type MockStateManager struct {
 	utxos map[string]common.Utxo
 
 	// stakeRegistrations tracks registered stake credentials and their balances
-	stakeRegistrations map[common.Blake2b224]uint64
+	stakeRegistrations map[ledger.RewardAccountKey]uint64
+
+	// stakeCredentialDeposits tracks the original registration deposit. It is
+	// intentionally separate from reward balances because protocol parameters
+	// may change after registration.
+	stakeCredentialDeposits map[ledger.RewardAccountKey]uint64
+
+	// rewardAccounts tracks balances by full credential identity.
+	rewardAccounts map[ledger.RewardAccountKey]uint64
 
 	// poolRegistrations tracks registered pools
 	poolRegistrations map[common.Blake2b224]bool
 
-	// drepRegistrations tracks registered DReps
-	drepRegistrations map[common.Blake2b224]bool
+	// drepRegistrations tracks registered DReps by full credential
+	// identity, holding the deposit recorded against each registration. A
+	// nil value is a registration the fixture supplied no deposit for,
+	// which is distinct from a recorded deposit of zero.
+	drepRegistrations map[ledger.RewardAccountKey]*uint64
 
 	// committeeMembers tracks committee members (cold key -> expiry epoch)
-	committeeMembers map[common.Blake2b224]uint64
+	committeeMembers map[ledger.RewardAccountKey]uint64
 
 	// hotKeyAuthorizations tracks hot key authorizations (cold key -> hot key)
-	hotKeyAuthorizations map[common.Blake2b224]common.Blake2b224
+	hotKeyAuthorizations map[ledger.RewardAccountKey]common.Credential
+
+	// committeeResignations tracks current and pending committee credentials
+	// that have resigned.
+	committeeResignations map[ledger.RewardAccountKey]bool
+}
+
+// drepSeedDeposit returns the deposit the initial state records for a DRep
+// credential, or nil when the state supplies none. It is a pointer rather
+// than a zero default so an unsupplied deposit stays distinguishable from a
+// recorded deposit of zero.
+func drepSeedDeposit(
+	state *ParsedInitialState,
+	key ledger.RewardAccountKey,
+) *uint64 {
+	deposit, found := state.DRepDeposits[key]
+	if !found {
+		return nil
+	}
+	return &deposit
 }
 
 // NewMockStateManager creates a new MockStateManager.
 func NewMockStateManager() *MockStateManager {
 	return &MockStateManager{
-		govState:             NewGovernanceState(),
-		utxos:                make(map[string]common.Utxo),
-		stakeRegistrations:   make(map[common.Blake2b224]uint64),
-		poolRegistrations:    make(map[common.Blake2b224]bool),
-		drepRegistrations:    make(map[common.Blake2b224]bool),
-		committeeMembers:     make(map[common.Blake2b224]uint64),
-		hotKeyAuthorizations: make(map[common.Blake2b224]common.Blake2b224),
+		govState:                NewGovernanceState(),
+		utxos:                   make(map[string]common.Utxo),
+		stakeRegistrations:      make(map[ledger.RewardAccountKey]uint64),
+		stakeCredentialDeposits: make(map[ledger.RewardAccountKey]uint64),
+		rewardAccounts:          make(map[ledger.RewardAccountKey]uint64),
+		poolRegistrations:       make(map[common.Blake2b224]bool),
+		drepRegistrations:       make(map[ledger.RewardAccountKey]*uint64),
+		committeeMembers:        make(map[ledger.RewardAccountKey]uint64),
+		hotKeyAuthorizations: make(
+			map[ledger.RewardAccountKey]common.Credential,
+		),
+		committeeResignations: make(map[ledger.RewardAccountKey]bool),
 	}
 }
 
@@ -81,17 +119,64 @@ func (m *MockStateManager) LoadInitialState(
 
 	// Clear existing state
 	m.utxos = make(map[string]common.Utxo)
-	m.stakeRegistrations = make(map[common.Blake2b224]uint64)
+	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
+	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
+	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
-	m.drepRegistrations = make(map[common.Blake2b224]bool)
-	m.committeeMembers = make(map[common.Blake2b224]uint64)
-	m.hotKeyAuthorizations = make(map[common.Blake2b224]common.Blake2b224)
+	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
+	m.committeeMembers = make(map[ledger.RewardAccountKey]uint64)
+	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
+	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
 
-	// Load stake registrations with reward balances
-	for hash, registered := range state.StakeRegistrations {
-		if registered {
-			balance := state.RewardAccounts[hash]
-			m.stakeRegistrations[hash] = balance
+	// Load stake registrations with reward balances. Prefer full credential
+	// identity. Legacy hash-only registrations represent key credentials.
+	if len(state.StakeRegistrationsByCredential) > 0 {
+		for credential, registered := range state.StakeRegistrationsByCredential {
+			if !registered {
+				continue
+			}
+			balance, exists := state.RewardAccountBalances[credential]
+			if !exists {
+				balance = state.RewardAccounts[credential.Credential]
+			}
+			m.stakeRegistrations[credential] = balance
+		}
+	} else if len(state.RewardAccountBalances) > 0 {
+		maps.Copy(m.stakeRegistrations, state.RewardAccountBalances)
+	} else {
+		for hash, registered := range state.StakeRegistrations {
+			if !registered {
+				continue
+			}
+			m.stakeRegistrations[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: hash,
+			}] = state.RewardAccounts[hash]
+		}
+	}
+	// Preserve the parsed registration deposit when the initial state exposes
+	// it. Do not fabricate a current-parameter value for older state formats;
+	// the original deposit is not recoverable from registration alone.
+	for credential := range m.stakeRegistrations {
+		if deposit, ok := state.StakeCredentialDeposits[credential]; ok {
+			m.stakeCredentialDeposits[credential] = deposit
+		}
+	}
+	if len(state.RewardAccountBalances) > 0 {
+		maps.Copy(m.rewardAccounts, state.RewardAccountBalances)
+	} else {
+		for hash, balance := range state.RewardAccounts {
+			m.rewardAccounts[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: hash,
+			}] = balance
+		}
+	}
+	// Preserve compatibility for callers that provide only a registration
+	// view. Every registered account has a balance entry, including zero.
+	for credential, balance := range m.stakeRegistrations {
+		if _, exists := m.rewardAccounts[credential]; !exists {
+			m.rewardAccounts[credential] = balance
 		}
 	}
 
@@ -102,19 +187,61 @@ func (m *MockStateManager) LoadInitialState(
 		}
 	}
 
-	// Load DRep registrations
-	for _, hash := range state.DRepRegistrations {
-		m.drepRegistrations[hash] = true
+	// Load DRep registrations. The typed set is authoritative; the legacy
+	// hash list is its key-hash compatibility projection, matching
+	// GovernanceState.RegisterDRep.
+	for key, registered := range state.DRepRegistrationsByCredential {
+		if !registered {
+			continue
+		}
+		m.drepRegistrations[key] = drepSeedDeposit(state, key)
 	}
-	// Load committee members
-	maps.Copy(m.committeeMembers, state.CommitteeMembers)
+	for _, hash := range state.DRepRegistrations {
+		if hasCredentialHash(state.DRepRegistrationsByCredential, hash) {
+			continue
+		}
+		key := ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hash,
+		}
+		m.drepRegistrations[key] = drepSeedDeposit(state, key)
+	}
+	// Load committee members. Legacy entries represent key credentials, but a
+	// hash already present in the typed state may be its compatibility projection.
+	maps.Copy(m.committeeMembers, state.CommitteeMembersByCredential)
+	for coldKey, expiry := range state.CommitteeMembers {
+		if hasCredentialHash(m.committeeMembers, coldKey) {
+			continue
+		}
+		m.committeeMembers[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = expiry
+	}
 
-	// Load hot key authorizations
-	maps.Copy(m.hotKeyAuthorizations, state.HotKeyAuthorizations)
+	// Load hot key authorizations using the same compatibility rule.
+	maps.Copy(
+		m.hotKeyAuthorizations,
+		state.HotKeyAuthorizationsByCredential,
+	)
+	for coldKey, hotKey := range state.HotKeyAuthorizations {
+		if hasCredentialHash(m.hotKeyAuthorizations, coldKey) {
+			continue
+		}
+		m.hotKeyAuthorizations[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: coldKey,
+		}] = common.Credential{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: hotKey,
+		}
+	}
+	maps.Copy(m.committeeResignations, state.CommitteeResignations)
 
 	// Load governance state
 	m.govState = NewGovernanceState()
 	m.govState.LoadFromParsedState(state)
+	m.syncRewardBalanceMirrors()
 
 	// Populate UTxOs from parsed state using the fully decoded Output
 	for utxoId, parsedUtxo := range state.Utxos {
@@ -186,6 +313,37 @@ func (m *MockStateManager) ApplyTransaction(
 	txHash := tx.Hash()
 	txHashStr := hex.EncodeToString(txHash.Bytes())
 
+	// Validate withdrawals before mutating any UTxO or certificate state.
+	//
+	// Withdrawals are applied after this transaction's certificates, so the
+	// balance a withdrawal is checked against is the one left by the
+	// certificate sequence: a deregistration removes the account and a
+	// registration resets it to zero. Project those effects here so an
+	// insufficient withdrawal is rejected before anything is mutated, rather
+	// than part-way through.
+	projected := m.projectedRewardAccounts(tx.Certificates())
+	withdrawals := make(map[ledger.RewardAccountKey]uint64)
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		withdrawals[key] += amount.Uint64()
+	}
+	for key, withdrawal := range withdrawals {
+		balance, exists := projected(key)
+		if exists && withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+	}
+
 	// Process consumed UTxOs (inputs)
 	inputs := tx.Inputs()
 	for _, input := range inputs {
@@ -222,6 +380,31 @@ func (m *MockStateManager) ApplyTransaction(
 		m.processCertificate(cert)
 	}
 
+	// Process withdrawals against balances derived from initial state and
+	// previously applied events, after pre-validation above.
+	for rewardAccount, amount := range tx.Withdrawals() {
+		if rewardAccount == nil || amount == nil {
+			continue
+		}
+		credential, ok := rewardAccount.StakeCredential()
+		if !ok {
+			continue
+		}
+		key := ledger.NewRewardAccountKey(credential)
+		balance, exists := m.rewardAccounts[key]
+		if !exists {
+			continue
+		}
+		withdrawal := amount.Uint64()
+		if withdrawal > balance {
+			return fmt.Errorf(
+				"withdrawal amount %d exceeds reward account balance %d",
+				withdrawal, balance,
+			)
+		}
+		m.rewardAccounts[key] = balance - withdrawal
+	}
+	m.syncRewardBalanceMirrors()
 	// Process governance proposals
 	proposals := tx.ProposalProcedures()
 	for idx, proposal := range proposals {
@@ -238,7 +421,17 @@ func (m *MockStateManager) ApplyTransaction(
 				ActionType:      getActionType(action),
 				ExpiresAfter:    m.currentEpoch + govActionLifetime,
 				SubmittedEpoch:  m.currentEpoch,
+				Deposit:         proposal.Deposit(),
+				RemovedMembers:  make(map[ledger.RewardAccountKey]bool),
 				ProposedMembers: make(map[common.Blake2b224]uint64),
+				ProposedMembersByCredential: make(
+					map[ledger.RewardAccountKey]uint64,
+				),
+			}
+			rewardAccount := proposal.RewardAccount()
+			if credential, ok := rewardAccount.StakeCredential(); ok {
+				returnAccount := ledger.NewRewardAccountKey(credential)
+				info.ReturnAccount = &returnAccount
 			}
 
 			// Extract action-specific data including parent action ID
@@ -248,11 +441,18 @@ func (m *MockStateManager) ApplyTransaction(
 					key := fmt.Sprintf("%x#%d", ga.ActionId.TransactionId[:], ga.ActionId.GovActionIdx)
 					info.ParentActionId = &key
 				}
+				for _, cred := range ga.Credentials {
+					info.RemovedMembers[ledger.NewRewardAccountKey(cred)] = true
+				}
 				for cred, epoch := range ga.CredEpochs {
 					if cred != nil {
-						info.ProposedMembers[cred.Credential] = uint64(epoch)
+						credentialKey := ledger.NewRewardAccountKey(*cred)
+						info.ProposedMembersByCredential[credentialKey] = uint64(epoch)
 					}
 				}
+				info.ProposedMembers = committeeMembersByHash(
+					info.ProposedMembersByCredential,
+				)
 			case *common.NoConfidenceGovAction:
 				if ga.ActionId != nil {
 					key := fmt.Sprintf("%x#%d", ga.ActionId.TransactionId[:], ga.ActionId.GovActionIdx)
@@ -292,6 +492,7 @@ func (m *MockStateManager) ApplyTransaction(
 	// Process voting procedures
 	votes := tx.VotingProcedures()
 	for voter, voteMap := range votes {
+		m.refreshDRepVoter(voter)
 		for govActionId, votingProc := range voteMap {
 			actionKey := fmt.Sprintf(
 				"%s#%d",
@@ -326,75 +527,104 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 	switch certType {
 	case common.CertificateTypeStakeRegistration:
 		if regCert, ok := cert.(*common.StakeRegistrationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			m.stakeRegistrations[credential] = 0
-			m.govState.RegisterStake(credential)
+			credential := regCert.StakeCredential
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = keyDepositAmount(m.protocolParams)
+			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
+			m.govState.RegisterStakeCredential(credential)
 		}
 
 	case common.CertificateTypeRegistration:
 		if regCert, ok := cert.(*common.RegistrationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			m.stakeRegistrations[credential] = 0
-			m.govState.RegisterStake(credential)
+			credential := regCert.StakeCredential
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
+			m.govState.RegisterStakeCredential(credential)
 		}
 
 	case common.CertificateTypeStakeRegistrationDelegation:
 		// Combined registration + delegation (Conway)
 		if regCert, ok := cert.(*common.StakeRegistrationDelegationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			m.stakeRegistrations[credential] = 0
-			m.govState.RegisterStake(credential)
+			credential := regCert.StakeCredential
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
+			m.govState.RegisterStakeCredential(credential)
+			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
 		}
 
 	case common.CertificateTypeVoteRegistrationDelegation:
 		// Combined registration + vote delegation (Conway)
 		if regCert, ok := cert.(*common.VoteRegistrationDelegationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			m.stakeRegistrations[credential] = 0
-			m.govState.RegisterStake(credential)
-			m.govState.DRepDelegations[credential] = drepDelegation(regCert.Drep)
+			credential := regCert.StakeCredential
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
+			m.govState.RegisterStakeCredential(credential)
+			m.govState.SetDRepDelegation(
+				credential,
+				drepDelegation(regCert.Drep),
+			)
 		}
 
 	case common.CertificateTypeStakeVoteRegistrationDelegation:
 		// Combined registration + stake + vote delegation (Conway)
 		if regCert, ok := cert.(*common.StakeVoteRegistrationDelegationCertificate); ok {
-			credential := regCert.StakeCredential.Credential
-			m.stakeRegistrations[credential] = 0
-			m.govState.RegisterStake(credential)
-			m.govState.DRepDelegations[credential] = drepDelegation(regCert.Drep)
+			credential := regCert.StakeCredential
+			key := ledger.NewRewardAccountKey(credential)
+			m.stakeRegistrations[key] = 0
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.rewardAccounts[key] = 0
+			m.govState.RegisterStakeCredential(credential)
+			m.govState.SetDRepDelegation(
+				credential,
+				drepDelegation(regCert.Drep),
+			)
+			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
 		}
 
 	case common.CertificateTypeStakeDelegation:
-		// Standalone stake delegation (without registration)
-		// Used for redelegation to a different pool
-		// No state change needed - delegation is tracked elsewhere in full implementation
+		if delegationCert, ok := cert.(*common.StakeDelegationCertificate); ok &&
+			delegationCert.StakeCredential != nil {
+			m.govState.SetPoolDelegation(
+				*delegationCert.StakeCredential,
+				delegationCert.PoolKeyHash,
+			)
+		}
 
 	case common.CertificateTypeVoteDelegation:
 		if voteCert, ok := cert.(*common.VoteDelegationCertificate); ok {
-			credential := voteCert.StakeCredential.Credential
-			m.govState.DRepDelegations[credential] = drepDelegation(voteCert.Drep)
+			m.govState.SetDRepDelegation(
+				voteCert.StakeCredential,
+				drepDelegation(voteCert.Drep),
+			)
 		}
 
 	case common.CertificateTypeStakeVoteDelegation:
 		if voteCert, ok := cert.(*common.StakeVoteDelegationCertificate); ok {
-			credential := voteCert.StakeCredential.Credential
-			m.govState.DRepDelegations[credential] = drepDelegation(voteCert.Drep)
+			m.govState.SetDRepDelegation(
+				voteCert.StakeCredential,
+				drepDelegation(voteCert.Drep),
+			)
+			m.govState.SetPoolDelegation(
+				voteCert.StakeCredential,
+				voteCert.PoolKeyHash,
+			)
 		}
 
 	case common.CertificateTypeStakeDeregistration:
 		if deregCert, ok := cert.(*common.StakeDeregistrationCertificate); ok {
-			credential := deregCert.StakeCredential.Credential
-			delete(m.stakeRegistrations, credential)
-			delete(m.govState.DRepDelegations, credential)
-			m.govState.DeregisterStake(credential)
+			m.deregisterStakeCredential(deregCert.StakeCredential)
 		}
 
 	case common.CertificateTypeDeregistration:
 		if deregCert, ok := cert.(*common.DeregistrationCertificate); ok {
-			credential := deregCert.StakeCredential.Credential
-			delete(m.stakeRegistrations, credential)
-			delete(m.govState.DRepDelegations, credential)
-			m.govState.DeregisterStake(credential)
+			m.deregisterStakeCredential(deregCert.StakeCredential)
 		}
 
 	case common.CertificateTypePoolRegistration:
@@ -402,6 +632,13 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			poolId := poolCert.Operator
 			m.poolRegistrations[poolId] = true
 			m.govState.RegisterPool(poolId)
+			m.govState.SetPoolRewardAccount(
+				poolId,
+				ledger.RewardAccountKey{
+					CredType:   common.CredentialTypeAddrKeyHash,
+					Credential: poolCert.RewardAccount,
+				},
+			)
 		}
 
 	case common.CertificateTypePoolRetirement:
@@ -413,36 +650,181 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 
 	case common.CertificateTypeRegistrationDrep:
 		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential.Credential
-			m.drepRegistrations[credential] = true
-			m.govState.RegisterDRep(credential)
+			credential := drepCert.DrepCredential
+			// The certificate carries the deposit the DRep paid, and
+			// that is the amount its deregistration must refund.
+			deposit := uint64(0)
+			if drepCert.Amount >= 0 {
+				deposit = uint64(drepCert.Amount)
+			}
+			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
+			m.govState.RegisterDRepCredentialUntil(
+				credential,
+				m.drepActivityExpiry(),
+			)
 		}
 
 	case common.CertificateTypeDeregistrationDrep:
 		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential.Credential
-			delete(m.drepRegistrations, credential)
-			m.govState.DeregisterDRep(credential)
+			credential := drepCert.DrepCredential
+			key := ledger.NewRewardAccountKey(credential)
+			m.govState.DeregisterDRepCredential(credential)
+			if !m.govState.IsDRepCredentialRegistered(credential) {
+				delete(m.drepRegistrations, key)
+				if !hasRegisteredCredentialHash(
+					m.govState.DRepRegistrationsByCredential,
+					credential.Credential,
+				) {
+					delete(m.drepRegistrations, ledger.RewardAccountKey{
+						CredType:   common.CredentialTypeAddrKeyHash,
+						Credential: credential.Credential,
+					})
+				}
+			}
+		}
+
+	case common.CertificateTypeUpdateDrep:
+		if drepCert, ok := cert.(*common.UpdateDrepCertificate); ok {
+			m.govState.refreshDRepCredentialUntil(
+				drepCert.DrepCredential,
+				m.drepActivityExpiry(),
+			)
 		}
 
 	case common.CertificateTypeAuthCommitteeHot:
 		if authCert, ok := cert.(*common.AuthCommitteeHotCertificate); ok {
-			coldKey := authCert.ColdCredential.Credential
-			hotKey := authCert.HotCredential.Credential
-			m.hotKeyAuthorizations[coldKey] = hotKey
-			m.govState.AuthorizeHotKey(coldKey, hotKey)
+			coldKey := ledger.NewRewardAccountKey(authCert.ColdCredential)
+			if m.committeeResignations[coldKey] ||
+				m.govState.CommitteeResignations[coldKey] {
+				break
+			}
+			m.hotKeyAuthorizations[coldKey] = authCert.HotCredential
+			m.govState.AuthorizeHotCredential(
+				authCert.ColdCredential,
+				authCert.HotCredential,
+			)
 		}
 
 	case common.CertificateTypeResignCommitteeCold:
 		if resignCert, ok := cert.(*common.ResignCommitteeColdCertificate); ok {
-			coldKey := resignCert.ColdCredential.Credential
+			coldKey := ledger.NewRewardAccountKey(resignCert.ColdCredential)
 			delete(m.hotKeyAuthorizations, coldKey)
-			m.govState.ResignCommitteeMember(coldKey)
+			m.committeeResignations[coldKey] = true
+			m.govState.ResignCommitteeCredential(resignCert.ColdCredential)
 		}
 
 	default:
 		// Other certificate types not relevant for state tracking
 	}
+}
+
+func (m *MockStateManager) drepActivityExpiry() uint64 {
+	period := uint64(0)
+	if pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok {
+		period = pp.DRepInactivityPeriod
+	}
+	expiry := m.currentEpoch + period
+	if expiry < m.currentEpoch {
+		return ^uint64(0)
+	}
+	return expiry
+}
+
+func (m *MockStateManager) refreshDRepVoter(voter *common.Voter) {
+	if voter == nil {
+		return
+	}
+	credential := common.Credential{
+		Credential: common.Blake2b224(voter.Hash),
+	}
+	switch voter.Type {
+	case common.VoterTypeDRepKeyHash:
+		credential.CredType = common.CredentialTypeAddrKeyHash
+	case common.VoterTypeDRepScriptHash:
+		credential.CredType = common.CredentialTypeScriptHash
+	default:
+		return
+	}
+	m.govState.refreshDRepCredentialUntil(
+		credential,
+		m.drepActivityExpiry(),
+	)
+}
+
+// projectedRewardAccounts returns a lookup for the reward-account balance each
+// credential will hold once certs have been applied by processCertificate.
+// It mirrors the reward-account effects of that function: every registration
+// form resets the balance to zero and every deregistration form removes the
+// account. Credentials the certificates do not touch keep their current
+// balance.
+func (m *MockStateManager) projectedRewardAccounts(
+	certs []common.Certificate,
+) func(ledger.RewardAccountKey) (uint64, bool) {
+	type projectedBalance struct {
+		balance uint64
+		exists  bool
+	}
+	projected := make(map[ledger.RewardAccountKey]projectedBalance)
+	for _, cert := range certs {
+		var credential common.Credential
+		registered := false
+		switch cert := cert.(type) {
+		case *common.StakeRegistrationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.RegistrationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.VoteRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeVoteRegistrationDelegationCertificate:
+			credential, registered = cert.StakeCredential, true
+		case *common.StakeDeregistrationCertificate:
+			credential = cert.StakeCredential
+		case *common.DeregistrationCertificate:
+			credential = cert.StakeCredential
+		default:
+			continue
+		}
+		projected[ledger.NewRewardAccountKey(credential)] = projectedBalance{
+			exists: registered,
+		}
+	}
+	return func(key ledger.RewardAccountKey) (uint64, bool) {
+		if entry, ok := projected[key]; ok {
+			return entry.balance, entry.exists
+		}
+		balance, exists := m.rewardAccounts[key]
+		return balance, exists
+	}
+}
+
+func (m *MockStateManager) deregisterStakeCredential(
+	credential common.Credential,
+) {
+	credentialKey := ledger.NewRewardAccountKey(credential)
+	delete(m.rewardAccounts, credentialKey)
+	delete(m.stakeRegistrations, credentialKey)
+	delete(m.stakeCredentialDeposits, credentialKey)
+	m.govState.DeregisterStakeCredential(credential)
+}
+
+func keyDepositAmount(pp common.ProtocolParameters) uint64 {
+	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok && conwayPP != nil {
+		return uint64(conwayPP.KeyDeposit)
+	}
+	provider, ok := pp.(interface{ KeyDepositAmount() *big.Int })
+	if !ok || provider.KeyDepositAmount() == nil || !provider.KeyDepositAmount().IsUint64() {
+		return 0
+	}
+	return provider.KeyDepositAmount().Uint64()
+}
+
+func nonNegativeDeposit(amount int64) uint64 {
+	if amount < 0 {
+		return 0
+	}
+	return uint64(amount)
 }
 
 func drepDelegation(drep common.Drep) common.Drep {
@@ -451,6 +833,18 @@ func drepDelegation(drep common.Drep) common.Drep {
 
 // ProcessEpochBoundary implements StateManager.ProcessEpochBoundary.
 func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
+	staged, err := m.cloneForEpochBoundary()
+	if err != nil {
+		return err
+	}
+	if err := staged.processEpochBoundary(newEpoch); err != nil {
+		return err
+	}
+	m.commitEpochBoundary(staged)
+	return nil
+}
+
+func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 	m.currentEpoch = newEpoch
 	m.govState.CurrentEpoch = newEpoch
 
@@ -479,6 +873,7 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 			toEnact = append(toEnact, id)
 		}
 	}
+	sort.Strings(toEnact)
 
 	// Enact collected proposals (update roots)
 	for _, id := range toEnact {
@@ -495,7 +890,9 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 	}
 
 	// Phase 2: Ratify proposals that meet threshold requirements
-	m.ratifyProposals(newEpoch)
+	if err := m.ratifyProposals(newEpoch); err != nil {
+		return err
+	}
 
 	// Phase 3: Expire old proposals
 	for id, proposal := range m.govState.Proposals {
@@ -510,22 +907,221 @@ func (m *MockStateManager) ProcessEpochBoundary(newEpoch uint64) error {
 	return nil
 }
 
-// ratifyProposals performs simplified proposal ratification.
-// For conformance testing, we use a simplified model based on CIP-1694 requirements.
-//
-// Per CIP-1694, different action types require votes from different stakeholders:
-// - UpdateCommittee: CC + DRep (no SPO)
-// - NoConfidence: CC + DRep + SPO
-// - HardFork: CC + DRep + SPO
-// - NewConstitution: CC + DRep (no SPO)
-// - ParameterChange: CC + DRep (no SPO)
-// - TreasuryWithdrawal: CC + DRep (no SPO)
-// - Info: No votes required (auto-ratified)
-//
-// Voter types: 0=CC, 2=DRep, 4=SPO
-// Vote values per CIP-1694: 0=No, 1=Yes, 2=Abstain
-func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
-	for id, proposal := range m.govState.Proposals {
+func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
+	if conwayParams, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok &&
+		conwayParams == nil {
+		return nil, errors.New("conway protocol parameters unavailable")
+	}
+	staged := *m
+	staged.protocolParams = deepCopyPParams(m.protocolParams)
+	staged.govState = cloneGovernanceState(m.govState)
+	staged.poolRegistrations = maps.Clone(m.poolRegistrations)
+	staged.stakeCredentialDeposits = maps.Clone(m.stakeCredentialDeposits)
+	staged.committeeMembers = maps.Clone(m.committeeMembers)
+	staged.hotKeyAuthorizations = maps.Clone(m.hotKeyAuthorizations)
+	staged.committeeResignations = maps.Clone(m.committeeResignations)
+	return &staged, nil
+}
+
+func (m *MockStateManager) commitEpochBoundary(staged *MockStateManager) {
+	m.currentEpoch = staged.currentEpoch
+	m.poolRegistrations = staged.poolRegistrations
+	m.stakeCredentialDeposits = staged.stakeCredentialDeposits
+	m.committeeMembers = staged.committeeMembers
+	m.hotKeyAuthorizations = staged.hotKeyAuthorizations
+	m.committeeResignations = staged.committeeResignations
+	m.protocolParams = commitProtocolParameters(
+		m.protocolParams,
+		staged.protocolParams,
+	)
+	if m.govState == nil {
+		m.govState = staged.govState
+	} else {
+		*m.govState = *staged.govState
+	}
+}
+
+func commitProtocolParameters(
+	current common.ProtocolParameters,
+	staged common.ProtocolParameters,
+) common.ProtocolParameters {
+	currentConway, currentOK := current.(*conway.ConwayProtocolParameters)
+	stagedConway, stagedOK := staged.(*conway.ConwayProtocolParameters)
+	if currentOK && stagedOK {
+		*currentConway = *stagedConway
+		return currentConway
+	}
+	return staged
+}
+
+func cloneGovernanceState(state *GovernanceState) *GovernanceState {
+	if state == nil {
+		return nil
+	}
+	cloned := *state
+
+	memberCopies := make(map[*CommitteeMemberInfo]*CommitteeMemberInfo)
+	cloneMember := func(member *CommitteeMemberInfo) *CommitteeMemberInfo {
+		if member == nil {
+			return nil
+		}
+		if clonedMember, ok := memberCopies[member]; ok {
+			return clonedMember
+		}
+		clonedMember := *member
+		if member.HotCredential != nil {
+			hotCredential := *member.HotCredential
+			clonedMember.HotCredential = &hotCredential
+		}
+		if member.HotKey != nil {
+			hotKey := *member.HotKey
+			clonedMember.HotKey = &hotKey
+		}
+		memberCopies[member] = &clonedMember
+		return &clonedMember
+	}
+	cloned.CommitteeMembers = make(
+		map[common.Blake2b224]*CommitteeMemberInfo,
+		len(state.CommitteeMembers),
+	)
+	for credential, member := range state.CommitteeMembers {
+		cloned.CommitteeMembers[credential] = cloneMember(member)
+	}
+	cloned.CommitteeMembersByCredential = make(
+		map[ledger.RewardAccountKey]*CommitteeMemberInfo,
+		len(state.CommitteeMembersByCredential),
+	)
+	for credential, member := range state.CommitteeMembersByCredential {
+		cloned.CommitteeMembersByCredential[credential] = cloneMember(member)
+	}
+
+	cloned.DRepRegistrations = maps.Clone(state.DRepRegistrations)
+	cloned.DRepRegistrationsByCredential = maps.Clone(
+		state.DRepRegistrationsByCredential,
+	)
+	cloned.DRepExpiries = maps.Clone(state.DRepExpiries)
+	cloned.DRepDelegations = maps.Clone(state.DRepDelegations)
+	cloned.DRepDelegationsByCredential = maps.Clone(
+		state.DRepDelegationsByCredential,
+	)
+	cloned.HotKeyAuthorizations = maps.Clone(state.HotKeyAuthorizations)
+	cloned.HotKeyAuthorizationsByCredential = maps.Clone(
+		state.HotKeyAuthorizationsByCredential,
+	)
+	cloned.CommitteeResignations = maps.Clone(state.CommitteeResignations)
+	cloned.StakeRegistrations = maps.Clone(state.StakeRegistrations)
+	cloned.StakeRegistrationsByCredential = maps.Clone(
+		state.StakeRegistrationsByCredential,
+	)
+	cloned.PoolRegistrations = maps.Clone(state.PoolRegistrations)
+	cloned.PoolRewardAccounts = maps.Clone(state.PoolRewardAccounts)
+	cloned.PoolDelegationsByCredential = maps.Clone(
+		state.PoolDelegationsByCredential,
+	)
+	cloned.PoolRetirements = maps.Clone(state.PoolRetirements)
+	cloned.RewardAccounts = maps.Clone(state.RewardAccounts)
+	cloned.RewardAccountBalances = maps.Clone(state.RewardAccountBalances)
+	cloned.Proposals = make(map[string]*ProposalState, len(state.Proposals))
+	for id, proposal := range state.Proposals {
+		cloned.Proposals[id] = cloneProposalState(proposal)
+	}
+	cloned.EnactedProposals = maps.Clone(state.EnactedProposals)
+	cloned.Roots = cloneProposalRoots(state.Roots)
+	cloned.Constitution = cloneConstitutionInfo(state.Constitution)
+	return &cloned
+}
+
+func cloneProposalState(proposal *ProposalState) *ProposalState {
+	if proposal == nil {
+		return nil
+	}
+	cloned := *proposal
+	cloned.Votes = maps.Clone(proposal.Votes)
+	cloned.RemovedMembers = maps.Clone(proposal.RemovedMembers)
+	cloned.ProposedMembers = maps.Clone(proposal.ProposedMembers)
+	cloned.ProposedMembersByCredential = maps.Clone(
+		proposal.ProposedMembersByCredential,
+	)
+	cloned.PolicyHash = slices.Clone(proposal.PolicyHash)
+	if proposal.ParentActionId != nil {
+		parentActionID := *proposal.ParentActionId
+		cloned.ParentActionId = &parentActionID
+	}
+	if proposal.ReturnAccount != nil {
+		returnAccount := *proposal.ReturnAccount
+		cloned.ReturnAccount = &returnAccount
+	}
+	if proposal.ProtocolVersion != nil {
+		protocolVersion := *proposal.ProtocolVersion
+		cloned.ProtocolVersion = &protocolVersion
+	}
+	if proposal.ParameterUpdate != nil {
+		parameterUpdate := *proposal.ParameterUpdate
+		if proposal.ParameterUpdate.CostModels != nil {
+			parameterUpdate.CostModels = make(
+				map[uint][]int64,
+				len(proposal.ParameterUpdate.CostModels),
+			)
+			for version, costModel := range proposal.ParameterUpdate.CostModels {
+				parameterUpdate.CostModels[version] = slices.Clone(costModel)
+			}
+		}
+		cloned.ParameterUpdate = &parameterUpdate
+	}
+	if proposal.RatifiedEpoch != nil {
+		ratifiedEpoch := *proposal.RatifiedEpoch
+		cloned.RatifiedEpoch = &ratifiedEpoch
+	}
+	return &cloned
+}
+
+func cloneProposalRoots(roots ProposalRoots) ProposalRoots {
+	cloned := roots
+	if roots.ProtocolParameters != nil {
+		root := *roots.ProtocolParameters
+		cloned.ProtocolParameters = &root
+	}
+	if roots.HardFork != nil {
+		root := *roots.HardFork
+		cloned.HardFork = &root
+	}
+	if roots.ConstitutionalCommittee != nil {
+		root := *roots.ConstitutionalCommittee
+		cloned.ConstitutionalCommittee = &root
+	}
+	if roots.Constitution != nil {
+		root := *roots.Constitution
+		cloned.Constitution = &root
+	}
+	return cloned
+}
+
+func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
+	if constitution == nil {
+		return nil
+	}
+	cloned := *constitution
+	cloned.AnchorHash = slices.Clone(constitution.AnchorHash)
+	cloned.PolicyHash = slices.Clone(constitution.PolicyHash)
+	return &cloned
+}
+
+// ratifyProposals models the action acceptance needed by the conformance
+// vectors. UpdateCommittee uses stake-weighted DRep and SPO thresholds; the
+// remaining actions retain the harness's stakeholder-presence approximation.
+func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
+	var updateCommitteeStake map[ledger.RewardAccountKey]*big.Int
+	proposalIDs := make([]string, 0, len(m.govState.Proposals))
+	for id := range m.govState.Proposals {
+		proposalIDs = append(proposalIDs, id)
+	}
+	sort.Strings(proposalIDs)
+	toRatify := make([]string, 0, len(proposalIDs))
+	for _, id := range proposalIDs {
+		proposal := m.govState.Proposals[id]
+		if proposal == nil || currentEpoch > proposal.ExpiresAfter {
+			continue
+		}
 		// Skip already-ratified proposals
 		if proposal.RatifiedEpoch != nil {
 			continue
@@ -538,14 +1134,14 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
 
 		// Info proposals are auto-ratified (no votes required)
 		if proposal.ActionType == common.GovActionTypeInfo {
-			epoch := currentEpoch
-			proposal.RatifiedEpoch = &epoch
-			m.govState.Proposals[id] = proposal
+			toRatify = append(toRatify, id)
 			continue
 		}
 
-		// Skip proposals that haven't been voted on
-		if len(proposal.Votes) == 0 {
+		// A zero-threshold UpdateCommittee action can ratify without votes.
+		// Other action types retain the mock's existing vote-presence rule.
+		if proposal.ActionType != common.GovActionTypeUpdateCommittee &&
+			len(proposal.Votes) == 0 {
 			continue
 		}
 
@@ -577,8 +1173,19 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
 			common.GovActionTypeHardForkInitiation:
 			// Requires CC + DRep + SPO
 			meetsRequirements = hasCC && hasDRep && hasSPO
-		case common.GovActionTypeUpdateCommittee,
-			common.GovActionTypeNewConstitution,
+		case common.GovActionTypeUpdateCommittee:
+			if updateCommitteeStake == nil {
+				updateCommitteeStake = m.credentialVotingStake(currentEpoch)
+			}
+			var err error
+			meetsRequirements, err = m.updateCommitteeAcceptedWithStake(
+				proposal,
+				updateCommitteeStake,
+			)
+			if err != nil {
+				return fmt.Errorf("ratify proposal %s: %w", id, err)
+			}
+		case common.GovActionTypeNewConstitution,
 			common.GovActionTypeParameterChange,
 			common.GovActionTypeTreasuryWithdrawal:
 			// Requires CC + DRep (no SPO)
@@ -591,13 +1198,219 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) {
 		if !meetsRequirements {
 			continue
 		}
+		toRatify = append(toRatify, id)
+	}
 
-		// Ratify: mark as ratified in current epoch
-		// Enactment will happen in the next epoch (handled by ProcessEpochBoundary)
+	// Commit only after every proposal has been evaluated successfully. This
+	// keeps an action-specific parameter error from leaving partial ratification
+	// state behind.
+	for _, id := range toRatify {
+		proposal := m.govState.Proposals[id]
+		if proposal == nil {
+			continue
+		}
 		epoch := currentEpoch
 		proposal.RatifiedEpoch = &epoch
 		m.govState.Proposals[id] = proposal
 	}
+	return nil
+}
+
+func (m *MockStateManager) updateCommitteeAcceptedWithStake(
+	proposal *ProposalState,
+	stake map[ledger.RewardAccountKey]*big.Int,
+) (bool, error) {
+	pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters)
+	if !ok {
+		return false, errors.New("conway protocol parameters unavailable")
+	}
+	electedCommittee := m.govState.hasActiveCommitteeMember(m.currentEpoch)
+	drepThreshold := pp.DRepVotingThresholds.CommitteeNoConfidence.Rat
+	poolThreshold := pp.PoolVotingThresholds.CommitteeNoConfidence.Rat
+	if electedCommittee {
+		drepThreshold = pp.DRepVotingThresholds.CommitteeNormal.Rat
+		poolThreshold = pp.PoolVotingThresholds.CommitteeNormal.Rat
+	}
+	if drepThreshold == nil {
+		return false, errors.New("DRep voting threshold unavailable")
+	}
+	if poolThreshold == nil {
+		return false, errors.New("SPO voting threshold unavailable")
+	}
+	return m.drepAcceptedForUpdateCommittee(
+		proposal,
+		stake,
+		drepThreshold,
+	) && m.spoAcceptedForUpdateCommittee(proposal, stake, poolThreshold), nil
+}
+
+func (m *MockStateManager) credentialVotingStake(
+	currentEpoch uint64,
+) map[ledger.RewardAccountKey]*big.Int {
+	credentialStake := make(map[ledger.RewardAccountKey]*big.Int)
+	addStake := func(credential ledger.RewardAccountKey, amount *big.Int) {
+		if amount == nil || amount.Sign() <= 0 {
+			return
+		}
+		if current := credentialStake[credential]; current != nil {
+			current.Add(current, amount)
+		} else {
+			credentialStake[credential] = new(big.Int).Set(amount)
+		}
+	}
+	for _, utxo := range m.utxos {
+		if utxo.Output == nil {
+			continue
+		}
+		address := utxo.Output.Address()
+		credential, ok := address.StakeCredential()
+		if !ok {
+			continue
+		}
+		addStake(ledger.NewRewardAccountKey(credential), utxo.Output.Amount())
+	}
+	for credential, balance := range m.rewardAccounts {
+		addStake(credential, new(big.Int).SetUint64(balance))
+	}
+	for _, activeProposal := range m.govState.Proposals {
+		if activeProposal == nil || activeProposal.ReturnAccount == nil ||
+			activeProposal.Deposit == 0 ||
+			currentEpoch > activeProposal.ExpiresAfter {
+			continue
+		}
+		addStake(
+			*activeProposal.ReturnAccount,
+			new(big.Int).SetUint64(activeProposal.Deposit),
+		)
+	}
+	return credentialStake
+}
+
+func (m *MockStateManager) drepAcceptedForUpdateCommittee(
+	proposal *ProposalState,
+	credentialStake map[ledger.RewardAccountKey]*big.Int,
+	threshold *big.Rat,
+) bool {
+	if threshold.Sign() == 0 {
+		return true
+	}
+	yesStake := new(big.Int)
+	totalStake := new(big.Int)
+	for stakeCredential, stake := range credentialStake {
+		delegation, ok := m.govState.DRepDelegationsByCredential[stakeCredential]
+		if !ok {
+			continue
+		}
+		switch delegation.Type {
+		case common.DrepTypeAbstain:
+			continue
+		case common.DrepTypeNoConfidence:
+			totalStake.Add(totalStake, stake)
+		case common.DrepTypeAddrKeyHash, common.DrepTypeScriptHash:
+			if len(delegation.Credential) != common.Blake2b224Size {
+				continue
+			}
+			drepCredential := common.Credential{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: common.NewBlake2b224(delegation.Credential),
+			}
+			voterType := common.VoterTypeDRepKeyHash
+			if delegation.Type == common.DrepTypeScriptHash {
+				drepCredential.CredType = common.CredentialTypeScriptHash
+				voterType = common.VoterTypeDRepScriptHash
+			}
+			if !m.govState.IsDRepCredentialActive(
+				drepCredential,
+				m.currentEpoch,
+			) {
+				continue
+			}
+			vote, voted := proposal.Votes[fmt.Sprintf(
+				"%d:%s",
+				voterType,
+				hex.EncodeToString(drepCredential.Credential[:]),
+			)]
+			if voted && vote == 2 {
+				continue
+			}
+			totalStake.Add(totalStake, stake)
+			if voted && vote == 1 {
+				yesStake.Add(yesStake, stake)
+			}
+		}
+	}
+	return votingStakeAccepted(yesStake, totalStake, threshold)
+}
+
+func (m *MockStateManager) spoAcceptedForUpdateCommittee(
+	proposal *ProposalState,
+	credentialStake map[ledger.RewardAccountKey]*big.Int,
+	threshold *big.Rat,
+) bool {
+	if threshold.Sign() == 0 {
+		return true
+	}
+	poolStake := make(map[common.PoolKeyHash]*big.Int)
+	for stakeCredential, stake := range credentialStake {
+		pool, ok := m.govState.PoolDelegationsByCredential[stakeCredential]
+		if !ok || !m.govState.IsPoolRegistered(pool) {
+			continue
+		}
+		if current := poolStake[pool]; current != nil {
+			current.Add(current, stake)
+		} else {
+			poolStake[pool] = new(big.Int).Set(stake)
+		}
+	}
+	yesStake := new(big.Int)
+	totalStake := new(big.Int)
+	for pool, stake := range poolStake {
+		vote, voted := proposal.Votes[fmt.Sprintf(
+			"%d:%s",
+			common.VoterTypeStakingPoolKeyHash,
+			hex.EncodeToString(pool[:]),
+		)]
+		if voted {
+			switch vote {
+			case 1:
+				yesStake.Add(yesStake, stake)
+				totalStake.Add(totalStake, stake)
+			case 0:
+				totalStake.Add(totalStake, stake)
+			case 2:
+			}
+			continue
+		}
+		if pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok &&
+			pp.ProtocolVersion.Major == common.ProtocolVersionConway {
+			continue
+		}
+		if rewardAccount, ok := m.govState.PoolRewardAccounts[pool]; ok {
+			if delegation, ok := m.govState.DRepDelegationsByCredential[rewardAccount]; ok &&
+				delegation.Type == common.DrepTypeAbstain {
+				continue
+			}
+		}
+		totalStake.Add(totalStake, stake)
+	}
+	return votingStakeAccepted(yesStake, totalStake, threshold)
+}
+
+func votingStakeAccepted(
+	yesStake *big.Int,
+	totalStake *big.Int,
+	threshold *big.Rat,
+) bool {
+	if threshold.Sign() == 0 {
+		return true
+	}
+	if totalStake.Sign() == 0 {
+		return false
+	}
+	return new(big.Int).Mul(
+		yesStake,
+		threshold.Denom(),
+	).Cmp(new(big.Int).Mul(totalStake, threshold.Num())) >= 0
 }
 
 // enactProposal processes a ratified proposal by updating the appropriate root.
@@ -632,18 +1445,63 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 		}
 	case common.GovActionTypeHardForkInitiation:
 		m.govState.Roots.HardFork = &id
-	case common.GovActionTypeNoConfidence, common.GovActionTypeUpdateCommittee:
+	case common.GovActionTypeNoConfidence:
 		m.govState.Roots.ConstitutionalCommittee = &id
-		// For UpdateCommittee, apply the committee changes
-		if proposal.ActionType == common.GovActionTypeUpdateCommittee {
-			for coldKey, expiry := range proposal.ProposedMembers {
-				m.govState.CommitteeMembers[coldKey] = &CommitteeMemberInfo{
-					ColdKey:     coldKey,
-					ExpiryEpoch: expiry,
-				}
-				m.committeeMembers[coldKey] = expiry
-			}
+		clear(m.govState.CommitteeMembers)
+		clear(m.govState.CommitteeMembersByCredential)
+		clear(m.committeeMembers)
+		clear(m.govState.HotKeyAuthorizations)
+		clear(m.govState.HotKeyAuthorizationsByCredential)
+		clear(m.hotKeyAuthorizations)
+		clear(m.govState.CommitteeResignations)
+		clear(m.committeeResignations)
+	case common.GovActionTypeUpdateCommittee:
+		m.govState.Roots.ConstitutionalCommittee = &id
+		for coldKey := range proposal.RemovedMembers {
+			delete(m.govState.CommitteeMembersByCredential, coldKey)
+			delete(m.govState.CommitteeMembers, coldKey.Credential)
+			delete(m.committeeMembers, coldKey)
+			delete(m.govState.HotKeyAuthorizationsByCredential, coldKey)
+			delete(
+				m.govState.HotKeyAuthorizations,
+				coldKey.Credential,
+			)
+			delete(m.hotKeyAuthorizations, coldKey)
+			delete(m.govState.CommitteeResignations, coldKey)
+			delete(m.committeeResignations, coldKey)
 		}
+		proposedMembers := maps.Clone(proposal.ProposedMembersByCredential)
+		if proposedMembers == nil {
+			proposedMembers = make(map[ledger.RewardAccountKey]uint64)
+		}
+		for coldKey, expiry := range proposal.ProposedMembers {
+			if hasCredentialHash(proposedMembers, coldKey) {
+				continue
+			}
+			proposedMembers[ledger.RewardAccountKey{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: coldKey,
+			}] = expiry
+		}
+		for coldKey, expiry := range proposedMembers {
+			member := &CommitteeMemberInfo{
+				ColdCredential: coldKey.AsCredential(),
+				ColdKey:        coldKey.Credential,
+				ExpiryEpoch:    expiry,
+				Resigned:       m.govState.CommitteeResignations[coldKey],
+			}
+			if hotKey, ok := m.govState.HotKeyAuthorizationsByCredential[coldKey]; ok &&
+				!member.Resigned {
+				hotCredential := hotKey
+				member.HotCredential = &hotCredential
+				hotHash := hotKey.Credential
+				member.HotKey = &hotHash
+			}
+			m.govState.CommitteeMembersByCredential[coldKey] = member
+			m.committeeMembers[coldKey] = expiry
+		}
+		m.govState.syncLegacyCommitteeMembers()
+		m.govState.syncLegacyHotKeyAuthorizations()
 	}
 
 	// Mark as enacted and remove from active proposals
@@ -670,22 +1528,63 @@ func (m *MockStateManager) GetGovernanceState() *GovernanceState {
 	return m.govState
 }
 
+// GetStateSnapshot implements StateSnapshotProvider.
+func (m *MockStateManager) GetStateSnapshot() *StateSnapshot {
+	utxoIDs := make([]string, 0, len(m.utxos))
+	for id := range m.utxos {
+		utxoIDs = append(utxoIDs, id)
+	}
+	sort.Strings(utxoIDs)
+	registrations := make(map[ledger.RewardAccountKey]bool, len(m.stakeRegistrations))
+	for credential := range m.stakeRegistrations {
+		registrations[credential] = true
+	}
+	return &StateSnapshot{
+		CurrentEpoch:                   m.currentEpoch,
+		UtxoIDs:                        utxoIDs,
+		StakeRegistrationsByCredential: registrations,
+		RewardAccountBalances:          maps.Clone(m.rewardAccounts),
+		StakeCredentialDeposits:        maps.Clone(m.stakeCredentialDeposits),
+		PoolRegistrations:              maps.Clone(m.poolRegistrations),
+		Governance:                     cloneGovernanceState(m.govState),
+	}
+}
+
 // SetRewardBalances implements StateManager.SetRewardBalances.
 func (m *MockStateManager) SetRewardBalances(
 	balances map[common.Blake2b224]uint64,
 ) {
-	// Update both the state manager's internal tracking and governance state
-	for cred, balance := range balances {
-		if _, exists := m.stakeRegistrations[cred]; exists {
+	for credential := range m.rewardAccounts {
+		if balance, exists := balances[credential.Credential]; exists {
+			m.rewardAccounts[credential] = balance
+		}
+	}
+	m.syncRewardBalanceMirrors()
+}
+
+// SetRewardAccountBalances updates currently registered reward balances by
+// full credential identity without changing registration state.
+func (m *MockStateManager) SetRewardAccountBalances(
+	balances map[ledger.RewardAccountKey]uint64,
+) {
+	for credential := range m.rewardAccounts {
+		if balance, exists := balances[credential]; exists {
+			m.rewardAccounts[credential] = balance
+		}
+	}
+	m.syncRewardBalanceMirrors()
+}
+
+func (m *MockStateManager) syncRewardBalanceMirrors() {
+	legacyBalances := rewardBalancesByHash(m.rewardAccounts)
+	for cred := range m.stakeRegistrations {
+		if balance, exists := m.rewardAccounts[cred]; exists {
 			m.stakeRegistrations[cred] = balance
 		}
 	}
 	if m.govState != nil {
-		for cred, balance := range balances {
-			if m.govState.StakeRegistrations[cred] {
-				m.govState.RewardAccounts[cred] = balance
-			}
-		}
+		m.govState.RewardAccountBalances = maps.Clone(m.rewardAccounts)
+		m.govState.RewardAccounts = legacyBalances
 	}
 }
 
@@ -699,11 +1598,14 @@ func (m *MockStateManager) Reset() error {
 	m.protocolParams = nil
 	m.currentEpoch = 0
 	m.utxos = make(map[string]common.Utxo)
-	m.stakeRegistrations = make(map[common.Blake2b224]uint64)
+	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
+	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
+	m.rewardAccounts = make(map[ledger.RewardAccountKey]uint64)
 	m.poolRegistrations = make(map[common.Blake2b224]bool)
-	m.drepRegistrations = make(map[common.Blake2b224]bool)
-	m.committeeMembers = make(map[common.Blake2b224]uint64)
-	m.hotKeyAuthorizations = make(map[common.Blake2b224]common.Blake2b224)
+	m.drepRegistrations = make(map[ledger.RewardAccountKey]*uint64)
+	m.committeeMembers = make(map[ledger.RewardAccountKey]uint64)
+	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
+	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
 	m.govState = NewGovernanceState()
 	return nil
 }
@@ -727,18 +1629,12 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 		return common.Utxo{}, ledger.ErrNotFound
 	})
 
-	// Set up stake registrations
-	stakeRegs := m.stakeRegistrations // capture for closure
-	builder.WithStakeCredentials(func() map[common.Blake2b224]bool {
-		result := make(map[common.Blake2b224]bool)
-		for cred := range stakeRegs {
-			result[cred] = true
-		}
-		return result
-	}())
-
-	// Set up reward account balances
-	builder.WithRewardAccounts(stakeRegs)
+	// Reward-account entries carry both registration and balance. Every
+	// registration path above creates an entry, including registered-zero
+	// accounts, so using the credential-aware builder avoids fabricating a
+	// key credential for a registered script account.
+	builder.WithRewardAccountCredentialBalances(m.rewardAccounts)
+	builder.WithStakeCredentialDeposits(m.stakeCredentialDeposits)
 
 	// Set up pool lookup callback
 	// Pool is considered registered if:
@@ -771,55 +1667,152 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	)
 
 	// Set up DRep lookup callback
-	drepRegs := m.drepRegistrations // capture for closure
-	builder.WithDRepRegistration(
-		func(cred common.Blake2b224) (*common.DRepRegistration, error) {
-			if drepRegs[cred] {
-				return &common.DRepRegistration{
-					Credential: cred,
-				}, nil
+	drepRegs := maps.Clone(m.drepRegistrations) // capture for closure
+	builder.WithDRepCredentialRegistration(
+		func(cred common.Credential) (*common.DRepRegistration, error) {
+			deposit, found := drepRegs[ledger.NewRewardAccountKey(cred)]
+			if !found {
+				return nil, nil
 			}
-			return nil, nil
+			return &common.DRepRegistration{
+				Credential: cred,
+				Deposit:    deposit,
+			}, nil
 		},
 	)
-	drepDelegations := m.govState.DRepDelegations
+	drepDelegations := m.govState.DRepDelegationsByCredential
+	legacyDRepDelegations := m.govState.DRepDelegations
 	builder.WithDRepDelegation(
 		func(cred common.Credential) (*common.Drep, error) {
-			delegation, ok := drepDelegations[cred.Credential]
+			delegation, ok := drepDelegations[ledger.NewRewardAccountKey(cred)]
+			if !ok && len(drepDelegations) == 0 {
+				delegation, ok = legacyDRepDelegations[cred.Credential]
+			}
 			if !ok {
 				return nil, nil
 			}
-			delegation.Credential = append([]byte(nil), delegation.Credential...)
+			delegation.Credential = append(
+				[]byte(nil),
+				delegation.Credential...)
 			return &delegation, nil
 		},
 	)
 
 	// Set up committee member lookup
-	committeeMembers := m.committeeMembers         // capture for closure
-	hotKeyAuth := m.hotKeyAuthorizations           // capture for closure
-	proposedMembers := m.govState.CommitteeMembers // get proposed from govState
-	builder.WithCommitteeMember(
-		func(coldKey common.Blake2b224) (*common.CommitteeMember, error) {
-			// Check current members first
-			if expiry, ok := committeeMembers[coldKey]; ok {
-				member := &common.CommitteeMember{
-					ColdKey:     coldKey,
-					ExpiryEpoch: expiry,
-				}
-				// Add hot key if authorized
-				if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot {
-					member.HotKey = &hotKey
-				}
-				return member, nil
+	committeeMembers := m.committeeMembers  // capture for closure
+	hotKeyAuth := m.hotKeyAuthorizations    // capture for closure
+	resignations := m.committeeResignations // capture for closure
+	proposals := m.govState.Proposals       // capture for closure
+	currentEpoch := m.govState.CurrentEpoch
+	legacyMembersByHash := make(map[common.Blake2b224]common.CommitteeMember)
+	ambiguousMemberHashes := make(map[common.Blake2b224]bool)
+	for coldKey, expiry := range committeeMembers {
+		if currentEpoch > expiry {
+			continue
+		}
+		hash := coldKey.Credential
+		if ambiguousMemberHashes[hash] {
+			continue
+		}
+		if _, exists := legacyMembersByHash[hash]; exists {
+			delete(legacyMembersByHash, hash)
+			ambiguousMemberHashes[hash] = true
+			continue
+		}
+		member := common.CommitteeMember{
+			ColdKey:     hash,
+			ExpiryEpoch: expiry,
+			Resigned:    resignations[coldKey],
+		}
+		if hotKey, ok := hotKeyAuth[coldKey]; ok && !member.Resigned {
+			hotHash := hotKey.Credential
+			member.HotKey = &hotHash
+		}
+		legacyMembersByHash[hash] = member
+	}
+	legacyMembers := make([]common.CommitteeMember, 0, len(legacyMembersByHash))
+	for _, member := range legacyMembersByHash {
+		legacyMembers = append(legacyMembers, member)
+	}
+	builder.WithCommitteeMembers(legacyMembers)
+	//nolint:unparam // The ledger-state callback contract requires an error.
+	credentialMember := func(
+		coldCredential common.Credential,
+	) (*common.CommitteeMember, error) {
+		coldKey := ledger.NewRewardAccountKey(coldCredential)
+		// Check current members first
+		if expiry, ok := committeeMembers[coldKey]; ok &&
+			currentEpoch <= expiry {
+			member := &common.CommitteeMember{
+				ColdKey:     coldCredential.Credential,
+				ExpiryEpoch: expiry,
+				Resigned:    resignations[coldKey],
 			}
-			// Check proposed members
-			if memberInfo, ok := proposedMembers[coldKey]; ok {
-				member := &common.CommitteeMember{
-					ColdKey:     coldKey,
-					ExpiryEpoch: memberInfo.ExpiryEpoch,
+			// Add hot key if authorized
+			if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot &&
+				!member.Resigned {
+				hotHash := hotKey.Credential
+				member.HotKey = &hotHash
+			}
+			return member, nil
+		}
+		// Check members proposed by pending UpdateCommittee actions.
+		for _, proposal := range proposals {
+			if !isActiveUpdateCommitteeProposal(proposal, currentEpoch) {
+				continue
+			}
+			if expiry, ok := proposal.ProposedMembersByCredential[coldKey]; ok &&
+				currentEpoch <= expiry {
+				return &common.CommitteeMember{
+					ColdKey:     coldCredential.Credential,
+					ExpiryEpoch: expiry,
+					Resigned:    resignations[coldKey],
+				}, nil
+			}
+			if coldCredential.CredType == common.CredentialTypeAddrKeyHash &&
+				!hasCredentialHash(
+					proposal.ProposedMembersByCredential,
+					coldCredential.Credential,
+				) {
+				if expiry, ok := proposal.ProposedMembers[coldCredential.Credential]; ok &&
+					currentEpoch <= expiry {
+					return &common.CommitteeMember{
+						ColdKey:     coldCredential.Credential,
+						ExpiryEpoch: expiry,
+						Resigned:    resignations[coldKey],
+					}, nil
 				}
-				if hotKey, hasHot := hotKeyAuth[coldKey]; hasHot {
-					member.HotKey = &hotKey
+			}
+		}
+		return nil, nil
+	}
+	builder.WithCommitteeCredentialMember(credentialMember)
+	builder.WithCommitteeHotCredentialMember(
+		func(hotCredential common.Credential) (*common.CommitteeMember, error) {
+			coldKeys := make([]ledger.RewardAccountKey, 0, len(hotKeyAuth))
+			for coldKey := range hotKeyAuth {
+				coldKeys = append(coldKeys, coldKey)
+			}
+			sort.Slice(coldKeys, func(i, j int) bool {
+				if coldKeys[i].CredType != coldKeys[j].CredType {
+					return coldKeys[i].CredType < coldKeys[j].CredType
+				}
+				return string(coldKeys[i].Credential[:]) <
+					string(coldKeys[j].Credential[:])
+			})
+			for _, coldKey := range coldKeys {
+				authorizedHotCredential := hotKeyAuth[coldKey]
+				if authorizedHotCredential.CredType != hotCredential.CredType ||
+					authorizedHotCredential.Credential != hotCredential.Credential ||
+					resignations[coldKey] {
+					continue
+				}
+				member, err := credentialMember(coldKey.AsCredential())
+				if err != nil {
+					return nil, err
+				}
+				if member == nil {
+					continue
 				}
 				return member, nil
 			}

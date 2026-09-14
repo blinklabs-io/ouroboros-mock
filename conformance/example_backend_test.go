@@ -41,13 +41,17 @@ package conformance_test
 // 1.  Implement ledger.StateProvider with your real database reads.
 // 2.  Implement conformance.StateManager with your real transaction
 //     processing / epoch boundary logic.
-// 3.  Pass your StateManager to conformance.NewHarness.
+// 3.  Implement conformance.StateSnapshotProvider when running vectors with
+//     final_state; the harness reports an error rather than skipping that
+//     comparison when it is absent.
+// 4.  Pass your StateManager to conformance.NewHarness.
 //
 // The example below uses a stub that delegates everything to the built-in
 // MockStateManager so it compiles and runs without a real database.  A real
 // integration would replace the stub calls with actual database operations.
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -75,6 +79,15 @@ type stubBackend struct {
 
 // Verify the stub satisfies the interface at compile time.
 var _ ledger.StateProvider = (*stubBackend)(nil)
+
+type committeeStateProvider interface {
+	ledger.StateProvider
+	CommitteeStateAvailable() (bool, error)
+	CommitteeCredentialMember(common.Credential) (*common.CommitteeMember, error)
+	CommitteeHotCredentialMember(common.Credential) (*common.CommitteeMember, error)
+}
+
+var _ committeeStateProvider = (*stubBackend)(nil)
 
 func (s *stubBackend) NetworkId() uint { return s.getInner().NetworkId() }
 
@@ -158,14 +171,68 @@ func (s *stubBackend) CommitteeMembers() ([]common.CommitteeMember, error) {
 	return s.getInner().CommitteeMembers()
 }
 
+func (s *stubBackend) CommitteeStateAvailable() (bool, error) {
+	inner, ok := s.getInner().(interface {
+		CommitteeStateAvailable() (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("inner state provider %T does not implement CommitteeStateAvailable", s.getInner())
+	}
+	return inner.CommitteeStateAvailable()
+}
+
+func (s *stubBackend) CommitteeCredentialMember(
+	coldCredential common.Credential,
+) (*common.CommitteeMember, error) {
+	inner, ok := s.getInner().(interface {
+		CommitteeCredentialMember(common.Credential) (*common.CommitteeMember, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("inner state provider %T does not implement CommitteeCredentialMember", s.getInner())
+	}
+	return inner.CommitteeCredentialMember(coldCredential)
+}
+
+func (s *stubBackend) CommitteeHotCredentialMember(
+	hotCredential common.Credential,
+) (*common.CommitteeMember, error) {
+	inner, ok := s.getInner().(interface {
+		CommitteeHotCredentialMember(common.Credential) (*common.CommitteeMember, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("inner state provider %T does not implement CommitteeHotCredentialMember", s.getInner())
+	}
+	return inner.CommitteeHotCredentialMember(hotCredential)
+}
+
 func (s *stubBackend) DRepRegistration(
-	hash common.Blake2b224,
+	credential common.Credential,
 ) (*common.DRepRegistration, error) {
-	return s.getInner().DRepRegistration(hash)
+	return s.getInner().DRepRegistration(credential)
 }
 
 func (s *stubBackend) DRepRegistrations() ([]common.DRepRegistration, error) {
 	return s.getInner().DRepRegistrations()
+}
+
+// DRepDelegation forwards gouroboros' optional DRepDelegationState capability.
+// StateProvider does not require it, because gouroboros probes for it with a
+// type assertion rather than demanding it of every ledger state. A backend that
+// omits it fails PV10 and PV11 reward withdrawals with
+// DRepDelegationStateUnavailableError before any validation runs, so a custom
+// backend that serves those eras has to implement this alongside the seven
+// StateProvider interfaces.
+func (s *stubBackend) DRepDelegation(
+	c common.Credential,
+) (*common.Drep, error) {
+	inner, ok := s.getInner().(common.DRepDelegationState)
+	if !ok {
+		return nil, fmt.Errorf(
+			"inner state provider %T does not implement DRepDelegationState",
+			s.getInner(),
+		)
+	}
+	return inner.DRepDelegation(c)
 }
 
 func (s *stubBackend) Constitution() (*common.Constitution, error) {
@@ -246,10 +313,20 @@ func (m *customStateManager) GetGovernanceState() *conformance.GovernanceState {
 	return m.inner.GetGovernanceState()
 }
 
+func (m *customStateManager) GetStateSnapshot() *conformance.StateSnapshot {
+	return m.inner.GetStateSnapshot()
+}
+
 func (m *customStateManager) SetRewardBalances(
 	balances map[common.Blake2b224]uint64,
 ) {
 	m.inner.SetRewardBalances(balances)
+}
+
+func (m *customStateManager) SetRewardAccountBalances(
+	balances map[ledger.RewardAccountKey]uint64,
+) {
+	m.inner.SetRewardAccountBalances(balances)
 }
 
 func (m *customStateManager) GetProtocolParameters() common.ProtocolParameters {

@@ -69,8 +69,13 @@ type Replayer interface {
 	// DrainSwitchEvents returns the SUT's fork-choice decisions emitted
 	// during the replay, oldest first. The method surfaces the SUT's switch
 	// endpoints; the switch-decision assertion that consumes them lives in
-	// the harness (assertSwitchedToWinner).
+	// the harness.
 	DrainSwitchEvents() []format.SwitchEvent
+
+	// DrainDownstreamChainSync returns messages served to downstream consumers
+	// during replay, oldest first. The harness compares this sequence with the
+	// vector's expected downstream trace, including an empty sequence.
+	DrainDownstreamChainSync() []format.ServedMessage
 }
 
 // LoadVector reads a JSON test vector from disk and decodes it.
@@ -201,42 +206,112 @@ func runConsensusVector(
 	// switch, the SUT must not merely *end* on the winning chain — it must
 	// have *switched* onto it off a shorter chain. This catches a SUT that
 	// adopts the longest tip from the start without ever considering the
-	// competing chain. The rollback *point* is not checked here: the
-	// switch event carries only endpoints, and verifying the canonical
-	// rollback target needs block bodies the header-only trace omits.
+	// competing chain. The selected switch event also carries the canonical
+	// rollback point for assertion.
 	if capture.ExpectedOutput.ExpectedRollback != nil {
-		if err := assertSwitchedToWinner(
-			r.DrainSwitchEvents(),
+		switches := r.DrainSwitchEvents()
+		winningSwitch, err := findWinningSwitch(
+			switches,
 			capture.Peers,
 			capture.ExpectedOutput.FinalTip,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("%s: switch decision: %w", title, err)
 		}
+		if err := assertRollbackPoint(
+			winningSwitch,
+			capture.ExpectedOutput.ExpectedRollback.Point,
+		); err != nil {
+			return fmt.Errorf("%s: rollback point: %w", title, err)
+		}
+	}
+	if got := r.DrainDownstreamChainSync(); !servedMessagesEqual(
+		got, capture.ExpectedOutput.DownstreamChainSync,
+	) {
+		return fmt.Errorf(
+			"%s: downstream ChainSync mismatch: got %d messages, want %d",
+			title, len(got), len(capture.ExpectedOutput.DownstreamChainSync),
+		)
 	}
 	return nil
 }
 
-// assertSwitchedToWinner verifies the SUT emitted a fork switch onto the
-// winning chain (final_tip) from a different, shorter-or-equal-length peer —
-// i.e. it adopted a competing chain first and then switched up to (a strictly
-// longer fork) or across to (an equal-length VRF-tie winner) final_tip.
-// Returns an error when no such switch is present among the drained events.
-//
-// The PreviousTip must belong to a non-winning peer whose block_number is <=
-// final_tip's: a "switch" from a longer chain down to a shorter winner is
-// nonsensical under longest-chain selection and is not accepted as evidence.
-//
-// Feed-order contract: the harness replays peers in slice order, so the winner
-// must be fed AFTER the chain it displaces for a switch to be observable — a
-// SUT fed the winner first adopts it outright and never switches. The capture
-// pipeline assigns the winner the last peer slot for exactly this reason; a
-// vector that expects a switch but lists the winner first would fail here
-// despite a correct selector.
-func assertSwitchedToWinner(
+func assertRollbackPoint(
+	switchEvent format.SwitchEvent,
+	want format.Point,
+) error {
+	if switchEvent.RollbackPoint == nil {
+		return errors.New("winning switch did not report a rollback point")
+	}
+	if switchEvent.RollbackPoint.Slot != want.Slot ||
+		!bytes.Equal(switchEvent.RollbackPoint.Hash, want.Hash) {
+		return fmt.Errorf(
+			"got slot %d hash %x, want slot %d hash %x",
+			switchEvent.RollbackPoint.Slot, []byte(switchEvent.RollbackPoint.Hash),
+			want.Slot, []byte(want.Hash),
+		)
+	}
+	return nil
+}
+
+func servedMessagesEqual(got, want []format.ServedMessage) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i].Protocol != want[i].Protocol || got[i].MsgType != want[i].MsgType ||
+			!bytes.Equal(got[i].HeaderCbor, want[i].HeaderCbor) ||
+			!bytes.Equal(got[i].BlockCbor, want[i].BlockCbor) ||
+			!pointsEqual(got[i].Point, want[i].Point) ||
+			!pointsEqual(got[i].Start, want[i].Start) ||
+			!pointsEqual(got[i].End, want[i].End) ||
+			!tipsEqualPointers(got[i].Tip, want[i].Tip) ||
+			!uintPointersEqual(got[i].Era, want[i].Era) ||
+			!pointsSliceEqual(got[i].Points, want[i].Points) {
+			return false
+		}
+	}
+	return true
+}
+
+func pointsEqual(got, want *format.Point) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return got.Slot == want.Slot && bytes.Equal(got.Hash, want.Hash)
+}
+
+func tipsEqualPointers(got, want *format.Tip) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return tipsEqual(*got, *want)
+}
+
+func uintPointersEqual(got, want *uint) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return *got == *want
+}
+
+func pointsSliceEqual(got, want []format.Point) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i].Slot != want[i].Slot || !bytes.Equal(got[i].Hash, want[i].Hash) {
+			return false
+		}
+	}
+	return true
+}
+
+func findWinningSwitch(
 	switches []format.SwitchEvent,
 	peers []format.PeerInput,
 	finalTip format.Tip,
-) error {
+) (format.SwitchEvent, error) {
 	for _, sw := range switches {
 		if !tipsEqual(sw.NewTip, finalTip) {
 			continue
@@ -247,11 +322,11 @@ func assertSwitchedToWinner(
 			pt := lastRollForwardTip(p.Served)
 			if tipsEqual(pt, sw.PreviousTip) && !tipsEqual(pt, finalTip) &&
 				pt.BlockNumber <= finalTip.BlockNumber {
-				return nil
+				return sw, nil
 			}
 		}
 	}
-	return errors.New(
+	return format.SwitchEvent{}, errors.New(
 		"SUT never switched onto the winning chain off a shorter or " +
 			"equal-length peer (no ChainSwitchEvent with new_tip==final_tip " +
 			"from a non-winning peer of block_number <= final_tip)",

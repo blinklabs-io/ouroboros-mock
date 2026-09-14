@@ -47,6 +47,8 @@ type Connection struct {
 	doneChan      chan any
 	onceClose     sync.Once
 	errorChan     chan error
+	errorMu       sync.Mutex
+	errorClosed   bool
 	inputBuffers  map[uint16]*bytes.Buffer
 }
 
@@ -81,8 +83,7 @@ func NewConnection(
 		if !ok {
 			return
 		}
-		c.errorChan <- fmt.Errorf("muxer error: %w", err)
-		c.Close()
+		c.sendError(fmt.Errorf("muxer error: %w", err))
 	}()
 	// Start async conversation handler
 	go c.asyncLoop()
@@ -151,16 +152,33 @@ func (c *Connection) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *Connection) sendError(err error) {
-	select {
-	case c.errorChan <- err:
-		_ = c.Close()
-	default:
+	c.deliverError(err)
+	_ = c.Close()
+}
+
+func (c *Connection) deliverError(err error) {
+	c.errorMu.Lock()
+	defer c.errorMu.Unlock()
+	if !c.errorClosed {
+		select {
+		case c.errorChan <- err:
+		default:
+		}
+	}
+}
+
+func (c *Connection) closeErrorChan() {
+	c.errorMu.Lock()
+	defer c.errorMu.Unlock()
+	if !c.errorClosed {
+		close(c.errorChan)
+		c.errorClosed = true
 	}
 }
 
 func (c *Connection) asyncLoop() {
 	defer func() {
-		close(c.errorChan)
+		c.closeErrorChan()
 	}()
 	for _, entry := range c.conversation {
 		select {
