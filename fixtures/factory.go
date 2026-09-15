@@ -100,7 +100,7 @@ func generateByronChain(
 	blocks := make([]ledger.Block, 0, count)
 	currentPrev := prevHash
 	for i := range count {
-		body := []common.Blake2b224{}
+		body := [][]byte{}
 		bodyCbor, err := cbor.Encode(body)
 		if err != nil {
 			return nil, fmt.Errorf("encode byron EBB body %d: %w", i, err)
