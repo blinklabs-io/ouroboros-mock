@@ -1043,6 +1043,40 @@ func TestLedgerStateBuilder_CommitteeMember_NotFound(t *testing.T) {
 // DRepRegistrationBuilder Tests
 // =============================================================================
 
+func TestDRepRegistrationCallbackPreservesCredentialIdentity(t *testing.T) {
+	t.Parallel()
+
+	sharedHash := lcommon.Blake2b224{0x42}
+	keyCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: sharedHash,
+	}
+	scriptCredential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: sharedHash,
+	}
+	var lookups []lcommon.Credential
+	state := ledger.NewLedgerStateBuilder().
+		WithDRepRegistration(func(
+			credential lcommon.Credential,
+		) (*lcommon.DRepRegistration, error) {
+			lookups = append(lookups, credential)
+			return &lcommon.DRepRegistration{Credential: credential}, nil
+		}).
+		Build()
+
+	keyRegistration, err := state.DRepRegistration(keyCredential)
+	require.NoError(t, err)
+	require.NotNil(t, keyRegistration)
+	require.Equal(t, keyCredential, keyRegistration.Credential)
+
+	scriptRegistration, err := state.DRepRegistration(scriptCredential)
+	require.NoError(t, err)
+	require.NotNil(t, scriptRegistration)
+	require.Equal(t, scriptCredential, scriptRegistration.Credential)
+	require.Equal(t, []lcommon.Credential{keyCredential, scriptCredential}, lookups)
+}
+
 func TestNewDRepRegistrationBuilder(t *testing.T) {
 	builder := ledger.NewDRepRegistrationBuilder()
 	if builder == nil {

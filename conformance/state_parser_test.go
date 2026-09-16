@@ -643,6 +643,7 @@ func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(45000000000000000), shelleyOutput.OutputAmount)
 	require.Equal(t, "addr_test1vzyq9ppc89y5vfulnmvdvmt3seumstexkaferjmdlqg8ercx8lee2", shelleyOutput.OutputAddress.String())
+	require.NotEmpty(t, output.Cbor())
 
 	_, ok = decodeCompactTransactionOutput(append([]byte{6}, raw[1:]...))
 	require.False(t, ok)
@@ -657,6 +658,7 @@ func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
 		require.NoError(t, err)
 		output, ok := decodeCompactTransactionOutput(compact)
 		require.True(t, ok)
+		require.NotEmpty(t, output.Cbor())
 		if i == 0 {
 			datummed, ok := output.(*alonzo.AlonzoTransactionOutput)
 			require.True(t, ok)

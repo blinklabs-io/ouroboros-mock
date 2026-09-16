@@ -1668,7 +1668,7 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 
 	// Set up DRep lookup callback
 	drepRegs := maps.Clone(m.drepRegistrations) // capture for closure
-	builder.WithDRepCredentialRegistration(
+	builder.WithDRepRegistration(
 		func(cred common.Credential) (*common.DRepRegistration, error) {
 			deposit, found := drepRegs[ledger.NewRewardAccountKey(cred)]
 			if !found {
