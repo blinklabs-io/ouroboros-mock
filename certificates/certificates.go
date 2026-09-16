@@ -27,6 +27,15 @@ import (
 
 const hashSize = lcommon.Blake2b224Size
 
+const maxURLSize = 128
+
+func validateURL(url string) error {
+	if len(url) > maxURLSize {
+		return fmt.Errorf("URL must not exceed %d bytes", maxURLSize)
+	}
+	return nil
+}
+
 func credential(kind uint, hash []byte) (lcommon.Credential, error) {
 	if len(hash) != hashSize {
 		return lcommon.Credential{}, fmt.Errorf(
@@ -257,10 +266,14 @@ type PoolRegistrationBuilder struct {
 	relays        []lcommon.PoolRelay
 	metadata      *lcommon.PoolMetadata
 	metadataErr   error
+	network       uint
 }
 
-func NewPoolRegistration() *PoolRegistrationBuilder {
-	return &PoolRegistrationBuilder{margin: cbor.Rat{Rat: big.NewRat(0, 1)}}
+func NewPoolRegistration(network uint) *PoolRegistrationBuilder {
+	return &PoolRegistrationBuilder{
+		margin:  cbor.Rat{Rat: big.NewRat(0, 1)},
+		network: network,
+	}
 }
 
 func (b *PoolRegistrationBuilder) WithOperator(hash []byte) *PoolRegistrationBuilder {
@@ -303,6 +316,7 @@ func (b *PoolRegistrationBuilder) WithRewardAccountKey(hash []byte) *PoolRegistr
 }
 
 func (b *PoolRegistrationBuilder) WithOwners(hashes ...[]byte) *PoolRegistrationBuilder {
+	b.ownersErr = nil
 	b.owners = make([]lcommon.AddrKeyHash, len(hashes))
 	for i, hash := range hashes {
 		if len(hash) != hashSize {
@@ -320,6 +334,10 @@ func (b *PoolRegistrationBuilder) WithRelays(relays ...lcommon.PoolRelay) *PoolR
 }
 
 func (b *PoolRegistrationBuilder) WithMetadata(url string, hash []byte) *PoolRegistrationBuilder {
+	if err := validateURL(url); err != nil {
+		b.metadataErr = err
+		return b
+	}
 	if len(hash) != lcommon.Blake2b256Size {
 		b.metadataErr = fmt.Errorf("pool metadata hash must be exactly %d bytes", lcommon.Blake2b256Size)
 		return b
@@ -364,8 +382,13 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 	if err := cert.SetRewardAccountCredential(lcommon.Credential{
 		CredType:   lcommon.CredentialTypeAddrKeyHash,
 		Credential: lcommon.CredentialHash(cert.RewardAccount),
-	}, lcommon.AddressNetworkTestnet); err != nil {
+	}, b.network); err != nil {
 		return nil, err
+	}
+	for i := range cert.Relays {
+		if _, err := cbor.Encode(cert.Relays[i]); err != nil {
+			return nil, fmt.Errorf("invalid pool relay %d: %w", i, err)
+		}
 	}
 	return cert, nil
 }
@@ -435,6 +458,10 @@ func (b *conwayBuilder) WithDeposit(amount uint64) *conwayBuilder {
 }
 
 func (b *conwayBuilder) WithAnchor(url string, dataHash []byte) *conwayBuilder {
+	if err := validateURL(url); err != nil {
+		b.anchorErr = err
+		return b
+	}
 	if len(dataHash) != 0 && len(dataHash) != lcommon.Blake2b256Size {
 		b.anchorErr = fmt.Errorf("anchor data hash must be exactly %d bytes", lcommon.Blake2b256Size)
 		return b
@@ -941,6 +968,10 @@ func (b *ResignCommitteeColdBuilder) WithColdCredential(hash []byte) *ResignComm
 }
 
 func (b *ResignCommitteeColdBuilder) WithAnchor(url string, dataHash []byte) *ResignCommitteeColdBuilder {
+	if err := validateURL(url); err != nil {
+		b.anchorErr = err
+		return b
+	}
 	if len(dataHash) != 0 && len(dataHash) != lcommon.Blake2b256Size {
 		b.anchorErr = fmt.Errorf("anchor data hash must be exactly %d bytes", lcommon.Blake2b256Size)
 		return b

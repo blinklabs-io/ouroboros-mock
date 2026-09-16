@@ -10,6 +10,7 @@ package certificates_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -63,7 +64,7 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 }
 
 func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
-	registration, err := certificates.NewPoolRegistration().
+	registration, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).
 		WithOperator(poolHash).
 		WithVrfKeyHash(vrfHash).
 		WithRewardAccountKey(stakeHash).
@@ -93,7 +94,7 @@ func TestGovernanceBuildersReturnCertificatesUsableInTransactions(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	combined, err := certificates.NewStakeVoteRegistrationDelegation().WithCredential(stakeHash).WithDRepKeyHash(poolHash).WithPoolKeyHash(poolHash).WithDeposit(100).Build()
+	combined, err := certificates.NewStakeVoteRegistrationDelegation().WithCredential(stakeHash).WithDRepKeyHash(poolHash).WithPoolKeyHash(stakeHash).WithDeposit(100).Build()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,12 +124,37 @@ func TestGovernanceBuildersReturnCertificatesUsableInTransactions(t *testing.T) 
 	if got := built.Certificates(); len(got) != 3 {
 		t.Fatalf("transaction certificates = %d, want 3", len(got))
 	}
+	txRPC, err := built.Utxorpc()
+	if err != nil {
+		t.Fatalf("transaction conversion: %v", err)
+	}
+	if got := len(txRPC.Certificates); got != 3 {
+		t.Fatalf("converted transaction certificates = %d, want 3", got)
+	}
 	assertCertificateRoundTrip(t, drepRegistration)
 	if _, err := voteDelegation.Utxorpc(); err != nil {
 		t.Fatalf("vote delegation conversion: %v", err)
 	}
-	if _, err := combined.Utxorpc(); err != nil {
+	combinedRPC, err := combined.Utxorpc()
+	if err != nil {
 		t.Fatalf("combined delegation conversion: %v", err)
+	}
+	if got := combinedRPC.GetStakeVoteRegDelegCert().GetPoolKeyhash(); !bytes.Equal(got, stakeHash) {
+		t.Fatalf("combined delegation pool key hash = %x, want %x", got, stakeHash)
+	}
+}
+
+func TestPoolRegistrationUsesSelectedNetwork(t *testing.T) {
+	registration, err := certificates.NewPoolRegistration(lcommon.AddressNetworkMainnet).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountKey(stakeHash).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := registration.RewardAccountNetworkId(); !ok || got != uint(lcommon.AddressNetworkMainnet) {
+		t.Fatalf("reward account network = %d, known %t; want mainnet", got, ok)
 	}
 }
 
@@ -136,14 +162,46 @@ func TestBuildersRejectInvalidHashes(t *testing.T) {
 	if _, err := certificates.NewStakeRegistration().WithCredential([]byte{1}).Build(); err == nil {
 		t.Fatal("expected invalid stake credential hash to be rejected")
 	}
-	if _, err := certificates.NewPoolRegistration().WithOperator(poolHash).WithVrfKeyHash(vrfHash).WithRewardAccountKey(stakeHash).WithMargin(2, 1).Build(); err == nil {
+	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).WithOperator(poolHash).WithVrfKeyHash(vrfHash).WithRewardAccountKey(stakeHash).WithMargin(2, 1).Build(); err == nil {
 		t.Fatal("expected out-of-range pool margin to be rejected")
 	}
 	if _, err := certificates.NewDRepRegistration().WithCredential(stakeHash).WithDeposit(^uint64(0)).Build(); err == nil {
 		t.Fatal("expected overflowing DRep deposit to be rejected")
 	}
-	if _, err := certificates.NewPoolRegistration().WithOwners([]byte{1}).Build(); err == nil {
+	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).WithOwners([]byte{1}).Build(); err == nil {
 		t.Fatal("expected invalid pool owner hash to be rejected")
+	}
+	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountKey(stakeHash).
+		WithOwners([]byte{1}).
+		WithOwners(stakeHash).
+		Build(); err != nil {
+		t.Fatalf("valid owner retry rejected: %v", err)
+	}
+	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountKey(stakeHash).
+		WithRelays(lcommon.PoolRelay{Type: 99}).
+		Build(); err == nil {
+		t.Fatal("expected invalid pool relay to be rejected")
+	}
+	longURL := strings.Repeat("x", 129)
+	if _, err := certificates.NewDRepRegistration().WithCredential(stakeHash).WithAnchor(longURL, nil).Build(); err == nil {
+		t.Fatal("expected oversized DRep anchor URL to be rejected")
+	}
+	if _, err := certificates.NewResignCommitteeCold().WithColdCredential(stakeHash).WithAnchor(longURL, nil).Build(); err == nil {
+		t.Fatal("expected oversized committee anchor URL to be rejected")
+	}
+	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountKey(stakeHash).
+		WithMetadata(longURL, vrfHash).
+		Build(); err == nil {
+		t.Fatal("expected oversized pool metadata URL to be rejected")
 	}
 	if _, err := certificates.NewVoteDelegation().WithCredential(stakeHash).WithDRep(lcommon.Drep{Type: 99}).Build(); err == nil {
 		t.Fatal("expected unknown DRep type to be rejected")
@@ -165,9 +223,9 @@ func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
 	}
 	decodedWire, err := cbor.Encode(decoded.Certificate)
 	if err != nil {
-		t.Fatalf("re-encode certificate: %v", err)
+		t.Fatalf("re-encode decoded certificate: %v", err)
 	}
 	if !bytes.Equal(decodedWire, wire) {
-		t.Fatalf("certificate round trip changed wire bytes")
+		t.Fatalf("certificate body changed during round trip: got %x, want %x", decodedWire, wire)
 	}
 }

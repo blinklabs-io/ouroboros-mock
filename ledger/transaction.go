@@ -380,6 +380,14 @@ func (t *MockTransaction) Utxorpc() (*utxorpc.Tx, error) {
 		tx.Outputs = append(tx.Outputs, utxorpcOutput)
 	}
 
+	for _, certificate := range t.certs {
+		utxorpcCertificate, err := certificate.Utxorpc()
+		if err != nil {
+			return nil, err
+		}
+		tx.Certificates = append(tx.Certificates, utxorpcCertificate)
+	}
+
 	return tx, nil
 }
 
