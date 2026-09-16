@@ -2127,7 +2127,7 @@ func TestUpdateCommitteeConflictUsesCredentialIdentity(t *testing.T) {
 	) *common.UpdateCommitteeGovAction {
 		return &common.UpdateCommitteeGovAction{
 			Credentials: []common.Credential{removed},
-			CredEpochs:  map[*common.Credential]uint{&added: 1},
+			CredEpochs:  map[*common.Credential]uint64{&added: 1},
 		}
 	}
 
@@ -2161,7 +2161,7 @@ func TestApplyTransactionDropsAmbiguousProposedMemberHash(t *testing.T) {
 	}
 	action := &common.UpdateCommitteeGovAction{
 		Type: uint(common.GovActionTypeUpdateCommittee),
-		CredEpochs: map[*common.Credential]uint{
+		CredEpochs: map[*common.Credential]uint64{
 			&keyCredential:    41,
 			&scriptCredential: 42,
 		},
