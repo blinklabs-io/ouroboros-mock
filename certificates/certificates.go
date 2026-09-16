@@ -844,6 +844,11 @@ func (b *VoteRegistrationDelegationBuilder) WithCredential(hash []byte) *VoteReg
 	return b
 }
 
+func (b *VoteRegistrationDelegationBuilder) WithScriptCredential(hash []byte) *VoteRegistrationDelegationBuilder {
+	b.stakeBuilder.WithScriptCredential(hash)
+	return b
+}
+
 func (b *VoteRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepKeyHash(hash)
 	return b
@@ -884,6 +889,11 @@ func NewStakeVoteRegistrationDelegation() *StakeVoteRegistrationDelegationBuilde
 
 func (b *StakeVoteRegistrationDelegationBuilder) WithCredential(hash []byte) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithCredential(hash)
+	return b
+}
+
+func (b *StakeVoteRegistrationDelegationBuilder) WithScriptCredential(hash []byte) *StakeVoteRegistrationDelegationBuilder {
+	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
@@ -938,8 +948,20 @@ func (b *AuthCommitteeHotBuilder) WithColdCredential(hash []byte) *AuthCommittee
 	return b
 }
 
+func (b *AuthCommitteeHotBuilder) WithColdScriptCredential(hash []byte) *AuthCommitteeHotBuilder {
+	b.cold, _ = scriptCredential(hash)
+	b.coldSet = len(hash) == hashSize
+	return b
+}
+
 func (b *AuthCommitteeHotBuilder) WithHotCredential(hash []byte) *AuthCommitteeHotBuilder {
 	b.hot, _ = keyCredential(hash)
+	b.hotSet = len(hash) == hashSize
+	return b
+}
+
+func (b *AuthCommitteeHotBuilder) WithHotScriptCredential(hash []byte) *AuthCommitteeHotBuilder {
+	b.hot, _ = scriptCredential(hash)
 	b.hotSet = len(hash) == hashSize
 	return b
 }
@@ -963,6 +985,12 @@ func NewResignCommitteeCold() *ResignCommitteeColdBuilder { return &ResignCommit
 
 func (b *ResignCommitteeColdBuilder) WithColdCredential(hash []byte) *ResignCommitteeColdBuilder {
 	b.cold, _ = keyCredential(hash)
+	b.coldSet = len(hash) == hashSize
+	return b
+}
+
+func (b *ResignCommitteeColdBuilder) WithColdScriptCredential(hash []byte) *ResignCommitteeColdBuilder {
+	b.cold, _ = scriptCredential(hash)
 	b.coldSet = len(hash) == hashSize
 	return b
 }

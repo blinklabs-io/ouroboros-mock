@@ -208,6 +208,59 @@ func TestBuildersRejectInvalidHashes(t *testing.T) {
 	}
 }
 
+func TestConwayBuildersSupportScriptCredentials(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func() (lcommon.Certificate, error)
+	}{
+		{
+			name: "vote registration delegation",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewVoteRegistrationDelegation().
+					WithScriptCredential(stakeHash).
+					WithDRepKeyHash(poolHash).
+					Build()
+			},
+		},
+		{
+			name: "stake vote registration delegation",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewStakeVoteRegistrationDelegation().
+					WithScriptCredential(stakeHash).
+					WithDRepKeyHash(poolHash).
+					WithPoolKeyHash(poolHash).
+					Build()
+			},
+		},
+		{
+			name: "committee authorization",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewAuthCommitteeHot().
+					WithColdScriptCredential(stakeHash).
+					WithHotScriptCredential(poolHash).
+					Build()
+			},
+		},
+		{
+			name: "committee resignation",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewResignCommitteeCold().
+					WithColdScriptCredential(stakeHash).
+					Build()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cert, err := tt.build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCertificateRoundTrip(t, cert)
+		})
+	}
+}
+
 func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
 	t.Helper()
 	wire, err := cbor.Encode(cert)
