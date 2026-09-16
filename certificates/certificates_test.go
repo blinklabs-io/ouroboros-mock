@@ -42,6 +42,24 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCertificateRoundTrip(t, delegation)
+
+	registrationWithDeposit, err := certificates.NewRegistration().
+		WithScriptCredential(stakeHash).
+		WithDeposit(123).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCertificateRoundTrip(t, registrationWithDeposit)
+
+	deregistrationWithRefund, err := certificates.NewDeregistration().
+		WithCredential(stakeHash).
+		WithDeposit(123).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCertificateRoundTrip(t, deregistrationWithRefund)
 }
 
 func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
@@ -144,5 +162,12 @@ func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
 	}
 	if decoded.Type != cert.Type() {
 		t.Fatalf("certificate type mismatch: got %d, want %d", decoded.Type, cert.Type())
+	}
+	decodedWire, err := cbor.Encode(decoded.Certificate)
+	if err != nil {
+		t.Fatalf("re-encode certificate: %v", err)
+	}
+	if !bytes.Equal(decodedWire, wire) {
+		t.Fatalf("certificate round trip changed wire bytes")
 	}
 }

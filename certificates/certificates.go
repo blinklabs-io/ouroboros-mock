@@ -127,6 +127,78 @@ func (b *StakeDeregistrationBuilder) Build() (*lcommon.StakeDeregistrationCertif
 	}, nil
 }
 
+// RegistrationBuilder builds a Conway stake registration certificate with a
+// deposit.
+type RegistrationBuilder struct{ conwayBuilder }
+
+func NewRegistration() *RegistrationBuilder { return &RegistrationBuilder{} }
+
+func (b *RegistrationBuilder) WithCredential(hash []byte) *RegistrationBuilder {
+	b.conwayBuilder.WithCredential(hash)
+	return b
+}
+
+func (b *RegistrationBuilder) WithScriptCredential(hash []byte) *RegistrationBuilder {
+	b.conwayBuilder.WithScriptCredential(hash)
+	return b
+}
+
+func (b *RegistrationBuilder) WithDeposit(amount uint64) *RegistrationBuilder {
+	b.conwayBuilder.WithDeposit(amount)
+	return b
+}
+
+func (b *RegistrationBuilder) Build() (*lcommon.RegistrationCertificate, error) {
+	if err := b.validate(); err != nil {
+		return nil, err
+	}
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
+	return &lcommon.RegistrationCertificate{
+		CertType:        uint(lcommon.CertificateTypeRegistration),
+		StakeCredential: b.credential,
+		Amount:          amount,
+	}, nil
+}
+
+// DeregistrationBuilder builds a Conway stake deregistration certificate with
+// a deposit refund.
+type DeregistrationBuilder struct{ conwayBuilder }
+
+func NewDeregistration() *DeregistrationBuilder { return &DeregistrationBuilder{} }
+
+func (b *DeregistrationBuilder) WithCredential(hash []byte) *DeregistrationBuilder {
+	b.conwayBuilder.WithCredential(hash)
+	return b
+}
+
+func (b *DeregistrationBuilder) WithScriptCredential(hash []byte) *DeregistrationBuilder {
+	b.conwayBuilder.WithScriptCredential(hash)
+	return b
+}
+
+func (b *DeregistrationBuilder) WithDeposit(amount uint64) *DeregistrationBuilder {
+	b.conwayBuilder.WithDeposit(amount)
+	return b
+}
+
+func (b *DeregistrationBuilder) Build() (*lcommon.DeregistrationCertificate, error) {
+	if err := b.validate(); err != nil {
+		return nil, err
+	}
+	amount, err := checkedAmount(b.deposit)
+	if err != nil {
+		return nil, err
+	}
+	return &lcommon.DeregistrationCertificate{
+		CertType:        uint(lcommon.CertificateTypeDeregistration),
+		StakeCredential: b.credential,
+		Amount:          amount,
+	}, nil
+}
+
 // StakeDelegationBuilder builds a Shelley stake delegation certificate.
 type StakeDelegationBuilder struct {
 	stakeBuilder
