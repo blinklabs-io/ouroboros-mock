@@ -877,24 +877,48 @@ func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool)
 		if !ok || offset+datumEnd+scriptEnd != len(raw) {
 			return nil, false
 		}
-		return &babbage.BabbageTransactionOutput{
+		return canonicalizeCompactOutput(&babbage.BabbageTransactionOutput{
 			OutputAddress:  address,
 			OutputAmount:   mary.MaryTransactionOutputValue{Amount: coin},
 			TxOutScriptRef: &common.ScriptRef{Type: scriptType, Script: script},
-		}, true
+		})
 	}
 	if raw[0] == 1 && valueEnd+32 <= len(raw)-(2+addressLen) {
 		datumHash := common.Blake2b256(raw[2+addressLen+valueEnd : 2+addressLen+valueEnd+32])
-		return &alonzo.AlonzoTransactionOutput{
+		return canonicalizeCompactOutput(&alonzo.AlonzoTransactionOutput{
 			OutputAddress:   address,
 			OutputAmount:    mary.MaryTransactionOutputValue{Amount: coin},
 			OutputDatumHash: &datumHash,
-		}, true
+		})
 	}
-	return &shelley.ShelleyTransactionOutput{
+	return canonicalizeCompactOutput(&shelley.ShelleyTransactionOutput{
 		OutputAddress: address,
 		OutputAmount:  coin,
-	}, true
+	})
+}
+
+// canonicalizeCompactOutput attaches the canonical ledger CBOR to an output
+// decoded from Blueprint's compact MemPack representation. Compact MemPack is
+// only a state-file encoding; callers of TransactionOutput.Cbor need the
+// ordinary era output encoding used by the ledger and blob stores.
+func canonicalizeCompactOutput(
+	output common.TransactionOutput,
+) (common.TransactionOutput, bool) {
+	encoded, err := cbor.Encode(output)
+	if err != nil {
+		return nil, false
+	}
+	switch value := output.(type) {
+	case *shelley.ShelleyTransactionOutput:
+		value.SetCbor(encoded)
+	case *alonzo.AlonzoTransactionOutput:
+		value.SetCbor(encoded)
+	case *babbage.BabbageTransactionOutput:
+		value.SetCbor(encoded)
+	default:
+		return nil, false
+	}
+	return output, true
 }
 
 //nolint:gosec // bounds are checked before each compact-length conversion.
@@ -1018,10 +1042,10 @@ func decodeCompactAdaOnlyOutput(raw []byte) (common.TransactionOutput, bool) {
 	if !ok {
 		return nil, false
 	}
-	return &shelley.ShelleyTransactionOutput{
+	return canonicalizeCompactOutput(&shelley.ShelleyTransactionOutput{
 		OutputAddress: address,
 		OutputAmount:  coin,
-	}, true
+	})
 }
 
 func decodeCompactCoin(raw []byte) (uint64, bool) {
