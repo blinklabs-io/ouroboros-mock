@@ -20,7 +20,7 @@ GO_LDFLAGS=-ldflags "-s -w"
 	format \
 	golines \
 	test \
-	download-amaru-testdata \
+	download-blueprint-testdata \
 	prepare-blueprint-testdata \
 	download-upstream-fixtures \
 	gen-synthetic-vectors \
@@ -93,5 +93,4 @@ capture-consensus-vectors:
 download-upstream-fixtures:
 	@bash $(ROOT_DIR)/scripts/update-upstream-fixtures.sh
 
-# Compatibility name for callers of the former Amaru refresh target.
-download-amaru-testdata: prepare-blueprint-testdata
+download-blueprint-testdata: prepare-blueprint-testdata
