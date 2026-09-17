@@ -180,6 +180,14 @@ func (t *MockTransaction) Build() (lcommon.Transaction, error) {
 			)
 		}
 	}
+	for i, certificate := range t.certs {
+		if certificate == nil {
+			return nil, fmt.Errorf(
+				"transaction contains nil certificate at index %d",
+				i,
+			)
+		}
+	}
 	return t, nil
 }
 
@@ -378,6 +386,14 @@ func (t *MockTransaction) Utxorpc() (*utxorpc.Tx, error) {
 			return nil, err
 		}
 		tx.Outputs = append(tx.Outputs, utxorpcOutput)
+	}
+
+	for _, certificate := range t.certs {
+		utxorpcCertificate, err := certificate.Utxorpc()
+		if err != nil {
+			return nil, err
+		}
+		tx.Certificates = append(tx.Certificates, utxorpcCertificate)
 	}
 
 	return tx, nil
