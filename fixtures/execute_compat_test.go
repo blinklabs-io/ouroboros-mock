@@ -39,10 +39,18 @@ func TestStrictDecodePlaceholderMatcher(t *testing.T) {
 	for _, errorText := range exactStrictDecodeErrors {
 		exact := errors.New(errorText)
 		if !isStrictDecodePlaceholderError(exact) {
-			t.Fatalf("expected exact strict decode error %q to match", errorText)
+			t.Fatalf(
+				"expected exact strict decode error %q to match",
+				errorText,
+			)
 		}
-		if !isStrictDecodePlaceholderError(fmt.Errorf("decode fixture: %w", exact)) {
-			t.Fatalf("expected wrapped strict decode error %q to match", errorText)
+		if !isStrictDecodePlaceholderError(
+			fmt.Errorf("decode fixture: %w", exact),
+		) {
+			t.Fatalf(
+				"expected wrapped strict decode error %q to match",
+				errorText,
+			)
 		}
 	}
 	for _, err := range []error{

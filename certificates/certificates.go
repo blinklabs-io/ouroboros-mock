@@ -89,12 +89,16 @@ func NewStakeRegistration() *StakeRegistrationBuilder {
 	return &StakeRegistrationBuilder{}
 }
 
-func (b *StakeRegistrationBuilder) WithCredential(hash []byte) *StakeRegistrationBuilder {
+func (b *StakeRegistrationBuilder) WithCredential(
+	hash []byte,
+) *StakeRegistrationBuilder {
 	b.stakeBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *StakeRegistrationBuilder) WithScriptCredential(hash []byte) *StakeRegistrationBuilder {
+func (b *StakeRegistrationBuilder) WithScriptCredential(
+	hash []byte,
+) *StakeRegistrationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
@@ -116,12 +120,16 @@ func NewStakeDeregistration() *StakeDeregistrationBuilder {
 	return &StakeDeregistrationBuilder{}
 }
 
-func (b *StakeDeregistrationBuilder) WithCredential(hash []byte) *StakeDeregistrationBuilder {
+func (b *StakeDeregistrationBuilder) WithCredential(
+	hash []byte,
+) *StakeDeregistrationBuilder {
 	b.stakeBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *StakeDeregistrationBuilder) WithScriptCredential(hash []byte) *StakeDeregistrationBuilder {
+func (b *StakeDeregistrationBuilder) WithScriptCredential(
+	hash []byte,
+) *StakeDeregistrationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
@@ -147,7 +155,9 @@ func (b *RegistrationBuilder) WithCredential(hash []byte) *RegistrationBuilder {
 	return b
 }
 
-func (b *RegistrationBuilder) WithScriptCredential(hash []byte) *RegistrationBuilder {
+func (b *RegistrationBuilder) WithScriptCredential(
+	hash []byte,
+) *RegistrationBuilder {
 	b.conwayBuilder.WithScriptCredential(hash)
 	return b
 }
@@ -178,17 +188,23 @@ type DeregistrationBuilder struct{ conwayBuilder }
 
 func NewDeregistration() *DeregistrationBuilder { return &DeregistrationBuilder{} }
 
-func (b *DeregistrationBuilder) WithCredential(hash []byte) *DeregistrationBuilder {
+func (b *DeregistrationBuilder) WithCredential(
+	hash []byte,
+) *DeregistrationBuilder {
 	b.conwayBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *DeregistrationBuilder) WithScriptCredential(hash []byte) *DeregistrationBuilder {
+func (b *DeregistrationBuilder) WithScriptCredential(
+	hash []byte,
+) *DeregistrationBuilder {
 	b.conwayBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *DeregistrationBuilder) WithDeposit(amount uint64) *DeregistrationBuilder {
+func (b *DeregistrationBuilder) WithDeposit(
+	amount uint64,
+) *DeregistrationBuilder {
 	b.conwayBuilder.WithDeposit(amount)
 	return b
 }
@@ -219,17 +235,23 @@ func NewStakeDelegation() *StakeDelegationBuilder {
 	return &StakeDelegationBuilder{}
 }
 
-func (b *StakeDelegationBuilder) WithCredential(hash []byte) *StakeDelegationBuilder {
+func (b *StakeDelegationBuilder) WithCredential(
+	hash []byte,
+) *StakeDelegationBuilder {
 	b.stakeBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *StakeDelegationBuilder) WithScriptCredential(hash []byte) *StakeDelegationBuilder {
+func (b *StakeDelegationBuilder) WithScriptCredential(
+	hash []byte,
+) *StakeDelegationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *StakeDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeDelegationBuilder {
+func (b *StakeDelegationBuilder) WithPoolKeyHash(
+	hash []byte,
+) *StakeDelegationBuilder {
 	b.poolKeyHash = lcommon.NewBlake2b224(hash)
 	b.poolSet = len(hash) == hashSize
 	return b
@@ -240,7 +262,10 @@ func (b *StakeDelegationBuilder) Build() (*lcommon.StakeDelegationCertificate, e
 		return nil, err
 	}
 	if !b.poolSet {
-		return nil, fmt.Errorf("pool key hash must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"pool key hash must be exactly %d bytes",
+			hashSize,
+		)
 	}
 	credential := b.credential
 	return &lcommon.StakeDelegationCertificate{
@@ -277,29 +302,39 @@ func NewPoolRegistration(network uint) *PoolRegistrationBuilder {
 	}
 }
 
-func (b *PoolRegistrationBuilder) WithOperator(hash []byte) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithOperator(
+	hash []byte,
+) *PoolRegistrationBuilder {
 	b.operator = lcommon.NewBlake2b224(hash)
 	b.operatorSet = len(hash) == hashSize
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithVrfKeyHash(hash []byte) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithVrfKeyHash(
+	hash []byte,
+) *PoolRegistrationBuilder {
 	b.vrfKeyHash = lcommon.NewBlake2b256(hash)
 	b.vrfSet = len(hash) == lcommon.Blake2b256Size
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithPledge(amount uint64) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithPledge(
+	amount uint64,
+) *PoolRegistrationBuilder {
 	b.pledge = amount
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithCost(amount uint64) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithCost(
+	amount uint64,
+) *PoolRegistrationBuilder {
 	b.cost = amount
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithMargin(numerator, denominator uint64) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithMargin(
+	numerator, denominator uint64,
+) *PoolRegistrationBuilder {
 	if denominator == 0 {
 		b.margin = cbor.Rat{}
 		return b
@@ -310,26 +345,35 @@ func (b *PoolRegistrationBuilder) WithMargin(numerator, denominator uint64) *Poo
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithRewardAccountKey(hash []byte) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithRewardAccountKey(
+	hash []byte,
+) *PoolRegistrationBuilder {
 	b.rewardAccount = lcommon.NewBlake2b224(hash)
 	b.rewardSet = len(hash) == hashSize
 	b.rewardCredential, _ = keyCredential(hash)
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithRewardAccountScript(hash []byte) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithRewardAccountScript(
+	hash []byte,
+) *PoolRegistrationBuilder {
 	b.rewardAccount = lcommon.NewBlake2b224(hash)
 	b.rewardSet = len(hash) == hashSize
 	b.rewardCredential, _ = scriptCredential(hash)
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithOwners(hashes ...[]byte) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithOwners(
+	hashes ...[]byte,
+) *PoolRegistrationBuilder {
 	b.ownersErr = nil
 	b.owners = make([]lcommon.AddrKeyHash, len(hashes))
 	for i, hash := range hashes {
 		if len(hash) != hashSize {
-			b.ownersErr = fmt.Errorf("pool owner hash must be exactly %d bytes", hashSize)
+			b.ownersErr = fmt.Errorf(
+				"pool owner hash must be exactly %d bytes",
+				hashSize,
+			)
 			return b
 		}
 		b.owners[i] = lcommon.NewBlake2b224(hash)
@@ -337,22 +381,33 @@ func (b *PoolRegistrationBuilder) WithOwners(hashes ...[]byte) *PoolRegistration
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithRelays(relays ...lcommon.PoolRelay) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithRelays(
+	relays ...lcommon.PoolRelay,
+) *PoolRegistrationBuilder {
 	b.relays = append([]lcommon.PoolRelay(nil), relays...)
 	return b
 }
 
-func (b *PoolRegistrationBuilder) WithMetadata(url string, hash []byte) *PoolRegistrationBuilder {
+func (b *PoolRegistrationBuilder) WithMetadata(
+	url string,
+	hash []byte,
+) *PoolRegistrationBuilder {
 	if err := validateURL(url); err != nil {
 		b.metadataErr = err
 		return b
 	}
 	if len(hash) != lcommon.Blake2b256Size {
-		b.metadataErr = fmt.Errorf("pool metadata hash must be exactly %d bytes", lcommon.Blake2b256Size)
+		b.metadataErr = fmt.Errorf(
+			"pool metadata hash must be exactly %d bytes",
+			lcommon.Blake2b256Size,
+		)
 		return b
 	}
 	metadataHash := lcommon.NewBlake2b256(hash)
-	b.metadata = &lcommon.PoolMetadata{Url: url, Hash: lcommon.PoolMetadataHash(metadataHash[:])}
+	b.metadata = &lcommon.PoolMetadata{
+		Url:  url,
+		Hash: lcommon.PoolMetadataHash(metadataHash[:]),
+	}
 	b.metadataErr = nil
 	return b
 }
@@ -363,11 +418,20 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 	}
 	switch {
 	case !b.operatorSet:
-		return nil, fmt.Errorf("pool operator hash must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"pool operator hash must be exactly %d bytes",
+			hashSize,
+		)
 	case !b.vrfSet:
-		return nil, fmt.Errorf("VRF key hash must be exactly %d bytes", lcommon.Blake2b256Size)
+		return nil, fmt.Errorf(
+			"VRF key hash must be exactly %d bytes",
+			lcommon.Blake2b256Size,
+		)
 	case !b.rewardSet:
-		return nil, fmt.Errorf("reward account key hash must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"reward account key hash must be exactly %d bytes",
+			hashSize,
+		)
 	case b.metadataErr != nil:
 		return nil, b.metadataErr
 	case b.margin.Rat == nil:
@@ -410,7 +474,9 @@ type PoolRetirementBuilder struct {
 
 func NewPoolRetirement() *PoolRetirementBuilder { return &PoolRetirementBuilder{} }
 
-func (b *PoolRetirementBuilder) WithPoolKeyHash(hash []byte) *PoolRetirementBuilder {
+func (b *PoolRetirementBuilder) WithPoolKeyHash(
+	hash []byte,
+) *PoolRetirementBuilder {
 	b.poolKeyHash = lcommon.NewBlake2b224(hash)
 	b.poolSet = len(hash) == hashSize
 	return b
@@ -423,7 +489,10 @@ func (b *PoolRetirementBuilder) WithEpoch(epoch uint64) *PoolRetirementBuilder {
 
 func (b *PoolRetirementBuilder) Build() (*lcommon.PoolRetirementCertificate, error) {
 	if !b.poolSet {
-		return nil, fmt.Errorf("pool key hash must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"pool key hash must be exactly %d bytes",
+			hashSize,
+		)
 	}
 	return &lcommon.PoolRetirementCertificate{
 		CertType:    uint(lcommon.CertificateTypePoolRetirement),
@@ -471,7 +540,10 @@ func (b *conwayBuilder) WithAnchor(url string, dataHash []byte) *conwayBuilder {
 		return b
 	}
 	if len(dataHash) != 0 && len(dataHash) != lcommon.Blake2b256Size {
-		b.anchorErr = fmt.Errorf("anchor data hash must be exactly %d bytes", lcommon.Blake2b256Size)
+		b.anchorErr = fmt.Errorf(
+			"anchor data hash must be exactly %d bytes",
+			lcommon.Blake2b256Size,
+		)
 		return b
 	}
 	b.anchorErr = nil
@@ -503,22 +575,31 @@ type DRepRegistrationBuilder struct{ conwayBuilder }
 
 func NewDRepRegistration() *DRepRegistrationBuilder { return &DRepRegistrationBuilder{} }
 
-func (b *DRepRegistrationBuilder) WithCredential(hash []byte) *DRepRegistrationBuilder {
+func (b *DRepRegistrationBuilder) WithCredential(
+	hash []byte,
+) *DRepRegistrationBuilder {
 	b.conwayBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *DRepRegistrationBuilder) WithScriptCredential(hash []byte) *DRepRegistrationBuilder {
+func (b *DRepRegistrationBuilder) WithScriptCredential(
+	hash []byte,
+) *DRepRegistrationBuilder {
 	b.conwayBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *DRepRegistrationBuilder) WithDeposit(amount uint64) *DRepRegistrationBuilder {
+func (b *DRepRegistrationBuilder) WithDeposit(
+	amount uint64,
+) *DRepRegistrationBuilder {
 	b.conwayBuilder.WithDeposit(amount)
 	return b
 }
 
-func (b *DRepRegistrationBuilder) WithAnchor(url string, hash []byte) *DRepRegistrationBuilder {
+func (b *DRepRegistrationBuilder) WithAnchor(
+	url string,
+	hash []byte,
+) *DRepRegistrationBuilder {
 	b.conwayBuilder.WithAnchor(url, hash)
 	return b
 }
@@ -544,17 +625,23 @@ type DRepDeregistrationBuilder struct{ conwayBuilder }
 
 func NewDRepDeregistration() *DRepDeregistrationBuilder { return &DRepDeregistrationBuilder{} }
 
-func (b *DRepDeregistrationBuilder) WithCredential(hash []byte) *DRepDeregistrationBuilder {
+func (b *DRepDeregistrationBuilder) WithCredential(
+	hash []byte,
+) *DRepDeregistrationBuilder {
 	b.conwayBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *DRepDeregistrationBuilder) WithScriptCredential(hash []byte) *DRepDeregistrationBuilder {
+func (b *DRepDeregistrationBuilder) WithScriptCredential(
+	hash []byte,
+) *DRepDeregistrationBuilder {
 	b.conwayBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *DRepDeregistrationBuilder) WithDeposit(amount uint64) *DRepDeregistrationBuilder {
+func (b *DRepDeregistrationBuilder) WithDeposit(
+	amount uint64,
+) *DRepDeregistrationBuilder {
 	b.conwayBuilder.WithDeposit(amount)
 	return b
 }
@@ -584,12 +671,17 @@ func (b *DRepUpdateBuilder) WithCredential(hash []byte) *DRepUpdateBuilder {
 	return b
 }
 
-func (b *DRepUpdateBuilder) WithScriptCredential(hash []byte) *DRepUpdateBuilder {
+func (b *DRepUpdateBuilder) WithScriptCredential(
+	hash []byte,
+) *DRepUpdateBuilder {
 	b.conwayBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *DRepUpdateBuilder) WithAnchor(url string, hash []byte) *DRepUpdateBuilder {
+func (b *DRepUpdateBuilder) WithAnchor(
+	url string,
+	hash []byte,
+) *DRepUpdateBuilder {
 	b.conwayBuilder.WithAnchor(url, hash)
 	return b
 }
@@ -618,13 +710,19 @@ func (b *drepBuilder) WithDRep(drep lcommon.Drep) *drepBuilder {
 }
 
 func (b *drepBuilder) WithDRepKeyHash(hash []byte) *drepBuilder {
-	b.drep = lcommon.Drep{Type: lcommon.DrepTypeAddrKeyHash, Credential: append([]byte(nil), hash...)}
+	b.drep = lcommon.Drep{
+		Type:       lcommon.DrepTypeAddrKeyHash,
+		Credential: append([]byte(nil), hash...),
+	}
 	b.drepSet = true
 	return b
 }
 
 func (b *drepBuilder) WithDRepScriptHash(hash []byte) *drepBuilder {
-	b.drep = lcommon.Drep{Type: lcommon.DrepTypeScriptHash, Credential: append([]byte(nil), hash...)}
+	b.drep = lcommon.Drep{
+		Type:       lcommon.DrepTypeScriptHash,
+		Credential: append([]byte(nil), hash...),
+	}
 	b.drepSet = true
 	return b
 }
@@ -653,27 +751,37 @@ type VoteDelegationBuilder struct {
 
 func NewVoteDelegation() *VoteDelegationBuilder { return &VoteDelegationBuilder{} }
 
-func (b *VoteDelegationBuilder) WithCredential(hash []byte) *VoteDelegationBuilder {
+func (b *VoteDelegationBuilder) WithCredential(
+	hash []byte,
+) *VoteDelegationBuilder {
 	b.stakeBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *VoteDelegationBuilder) WithScriptCredential(hash []byte) *VoteDelegationBuilder {
+func (b *VoteDelegationBuilder) WithScriptCredential(
+	hash []byte,
+) *VoteDelegationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *VoteDelegationBuilder) WithDRep(drep lcommon.Drep) *VoteDelegationBuilder {
+func (b *VoteDelegationBuilder) WithDRep(
+	drep lcommon.Drep,
+) *VoteDelegationBuilder {
 	b.drepBuilder.WithDRep(drep)
 	return b
 }
 
-func (b *VoteDelegationBuilder) WithDRepKeyHash(hash []byte) *VoteDelegationBuilder {
+func (b *VoteDelegationBuilder) WithDRepKeyHash(
+	hash []byte,
+) *VoteDelegationBuilder {
 	b.drepBuilder.WithDRepKeyHash(hash)
 	return b
 }
 
-func (b *VoteDelegationBuilder) WithDRepScriptHash(hash []byte) *VoteDelegationBuilder {
+func (b *VoteDelegationBuilder) WithDRepScriptHash(
+	hash []byte,
+) *VoteDelegationBuilder {
 	b.drepBuilder.WithDRepScriptHash(hash)
 	return b
 }
@@ -702,32 +810,44 @@ type StakeVoteDelegationBuilder struct {
 
 func NewStakeVoteDelegation() *StakeVoteDelegationBuilder { return &StakeVoteDelegationBuilder{} }
 
-func (b *StakeVoteDelegationBuilder) WithCredential(hash []byte) *StakeVoteDelegationBuilder {
+func (b *StakeVoteDelegationBuilder) WithCredential(
+	hash []byte,
+) *StakeVoteDelegationBuilder {
 	b.stakeBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *StakeVoteDelegationBuilder) WithScriptCredential(hash []byte) *StakeVoteDelegationBuilder {
+func (b *StakeVoteDelegationBuilder) WithScriptCredential(
+	hash []byte,
+) *StakeVoteDelegationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *StakeVoteDelegationBuilder) WithDRep(drep lcommon.Drep) *StakeVoteDelegationBuilder {
+func (b *StakeVoteDelegationBuilder) WithDRep(
+	drep lcommon.Drep,
+) *StakeVoteDelegationBuilder {
 	b.drepBuilder.WithDRep(drep)
 	return b
 }
 
-func (b *StakeVoteDelegationBuilder) WithDRepKeyHash(hash []byte) *StakeVoteDelegationBuilder {
+func (b *StakeVoteDelegationBuilder) WithDRepKeyHash(
+	hash []byte,
+) *StakeVoteDelegationBuilder {
 	b.drepBuilder.WithDRepKeyHash(hash)
 	return b
 }
 
-func (b *StakeVoteDelegationBuilder) WithDRepScriptHash(hash []byte) *StakeVoteDelegationBuilder {
+func (b *StakeVoteDelegationBuilder) WithDRepScriptHash(
+	hash []byte,
+) *StakeVoteDelegationBuilder {
 	b.drepBuilder.WithDRepScriptHash(hash)
 	return b
 }
 
-func (b *StakeVoteDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeVoteDelegationBuilder {
+func (b *StakeVoteDelegationBuilder) WithPoolKeyHash(
+	hash []byte,
+) *StakeVoteDelegationBuilder {
 	b.poolKeyHash = lcommon.NewBlake2b224(hash)
 	b.poolSet = len(hash) == hashSize
 	return b
@@ -741,7 +861,10 @@ func (b *StakeVoteDelegationBuilder) Build() (*lcommon.StakeVoteDelegationCertif
 		return nil, err
 	}
 	if !b.poolSet {
-		return nil, fmt.Errorf("pool key hash must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"pool key hash must be exactly %d bytes",
+			hashSize,
+		)
 	}
 	return &lcommon.StakeVoteDelegationCertificate{
 		CertType:        uint(lcommon.CertificateTypeStakeVoteDelegation),
@@ -785,7 +908,9 @@ func (b *combinedBuilder) WithDeposit(amount uint64) {
 	b.deposit = amount
 }
 
-func (b *combinedBuilder) validateCombined(requireDRep, requirePool bool) error {
+func (b *combinedBuilder) validateCombined(
+	requireDRep, requirePool bool,
+) error {
 	if b.unsupportedErr != nil {
 		return b.unsupportedErr
 	}
@@ -813,37 +938,57 @@ func NewStakeRegistrationDelegation() *StakeRegistrationDelegationBuilder {
 	return &StakeRegistrationDelegationBuilder{}
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithCredential(hash []byte) *StakeRegistrationDelegationBuilder {
+func (b *StakeRegistrationDelegationBuilder) WithCredential(
+	hash []byte,
+) *StakeRegistrationDelegationBuilder {
 	b.combinedBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeRegistrationDelegationBuilder {
+func (b *StakeRegistrationDelegationBuilder) WithPoolKeyHash(
+	hash []byte,
+) *StakeRegistrationDelegationBuilder {
 	b.combinedBuilder.WithPoolKeyHash(hash)
 	return b
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *StakeRegistrationDelegationBuilder {
-	b.unsupportedErr = errors.New("stake registration delegation has no DRep field")
+func (b *StakeRegistrationDelegationBuilder) WithDRepKeyHash(
+	hash []byte,
+) *StakeRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New(
+		"stake registration delegation has no DRep field",
+	)
 	return b
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *StakeRegistrationDelegationBuilder {
-	b.unsupportedErr = errors.New("stake registration delegation has no DRep field")
+func (b *StakeRegistrationDelegationBuilder) WithDRep(
+	drep lcommon.Drep,
+) *StakeRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New(
+		"stake registration delegation has no DRep field",
+	)
 	return b
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *StakeRegistrationDelegationBuilder {
-	b.unsupportedErr = errors.New("stake registration delegation has no DRep field")
+func (b *StakeRegistrationDelegationBuilder) WithDRepScriptHash(
+	hash []byte,
+) *StakeRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New(
+		"stake registration delegation has no DRep field",
+	)
 	return b
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithScriptCredential(hash []byte) *StakeRegistrationDelegationBuilder {
+func (b *StakeRegistrationDelegationBuilder) WithScriptCredential(
+	hash []byte,
+) *StakeRegistrationDelegationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *StakeRegistrationDelegationBuilder) WithDeposit(amount uint64) *StakeRegistrationDelegationBuilder {
+func (b *StakeRegistrationDelegationBuilder) WithDeposit(
+	amount uint64,
+) *StakeRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDeposit(amount)
 	return b
 }
@@ -856,7 +1001,14 @@ func (b *StakeRegistrationDelegationBuilder) Build() (*lcommon.StakeRegistration
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.StakeRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeStakeRegistrationDelegation), StakeCredential: b.credential, PoolKeyHash: b.poolKeyHash, Amount: amount}, nil
+	return &lcommon.StakeRegistrationDelegationCertificate{
+		CertType: uint(
+			lcommon.CertificateTypeStakeRegistrationDelegation,
+		),
+		StakeCredential: b.credential,
+		PoolKeyHash:     b.poolKeyHash,
+		Amount:          amount,
+	}, nil
 }
 
 // VoteRegistrationDelegationBuilder builds a Conway vote registration and delegation certificate.
@@ -866,37 +1018,53 @@ func NewVoteRegistrationDelegation() *VoteRegistrationDelegationBuilder {
 	return &VoteRegistrationDelegationBuilder{}
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithCredential(hash []byte) *VoteRegistrationDelegationBuilder {
+func (b *VoteRegistrationDelegationBuilder) WithCredential(
+	hash []byte,
+) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithScriptCredential(hash []byte) *VoteRegistrationDelegationBuilder {
+func (b *VoteRegistrationDelegationBuilder) WithScriptCredential(
+	hash []byte,
+) *VoteRegistrationDelegationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *VoteRegistrationDelegationBuilder {
+func (b *VoteRegistrationDelegationBuilder) WithDRepKeyHash(
+	hash []byte,
+) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepKeyHash(hash)
 	return b
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *VoteRegistrationDelegationBuilder {
+func (b *VoteRegistrationDelegationBuilder) WithDRep(
+	drep lcommon.Drep,
+) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRep(drep)
 	return b
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *VoteRegistrationDelegationBuilder {
+func (b *VoteRegistrationDelegationBuilder) WithDRepScriptHash(
+	hash []byte,
+) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepScriptHash(hash)
 	return b
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *VoteRegistrationDelegationBuilder {
-	b.unsupportedErr = errors.New("vote registration delegation has no pool field")
+func (b *VoteRegistrationDelegationBuilder) WithPoolKeyHash(
+	hash []byte,
+) *VoteRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New(
+		"vote registration delegation has no pool field",
+	)
 	return b
 }
 
-func (b *VoteRegistrationDelegationBuilder) WithDeposit(amount uint64) *VoteRegistrationDelegationBuilder {
+func (b *VoteRegistrationDelegationBuilder) WithDeposit(
+	amount uint64,
+) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDeposit(amount)
 	return b
 }
@@ -909,7 +1077,14 @@ func (b *VoteRegistrationDelegationBuilder) Build() (*lcommon.VoteRegistrationDe
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.VoteRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeVoteRegistrationDelegation), StakeCredential: b.credential, Drep: b.drep, Amount: amount}, nil
+	return &lcommon.VoteRegistrationDelegationCertificate{
+		CertType: uint(
+			lcommon.CertificateTypeVoteRegistrationDelegation,
+		),
+		StakeCredential: b.credential,
+		Drep:            b.drep,
+		Amount:          amount,
+	}, nil
 }
 
 // StakeVoteRegistrationDelegationBuilder builds a Conway stake and vote registration and delegation certificate.
@@ -919,37 +1094,51 @@ func NewStakeVoteRegistrationDelegation() *StakeVoteRegistrationDelegationBuilde
 	return &StakeVoteRegistrationDelegationBuilder{}
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithCredential(hash []byte) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithCredential(
+	hash []byte,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithCredential(hash)
 	return b
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithScriptCredential(hash []byte) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithScriptCredential(
+	hash []byte,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.stakeBuilder.WithScriptCredential(hash)
 	return b
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithDRepKeyHash(
+	hash []byte,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepKeyHash(hash)
 	return b
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithDRep(
+	drep lcommon.Drep,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRep(drep)
 	return b
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithDRepScriptHash(
+	hash []byte,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepScriptHash(hash)
 	return b
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithPoolKeyHash(
+	hash []byte,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithPoolKeyHash(hash)
 	return b
 }
 
-func (b *StakeVoteRegistrationDelegationBuilder) WithDeposit(amount uint64) *StakeVoteRegistrationDelegationBuilder {
+func (b *StakeVoteRegistrationDelegationBuilder) WithDeposit(
+	amount uint64,
+) *StakeVoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDeposit(amount)
 	return b
 }
@@ -962,7 +1151,15 @@ func (b *StakeVoteRegistrationDelegationBuilder) Build() (*lcommon.StakeVoteRegi
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.StakeVoteRegistrationDelegationCertificate{CertType: uint(lcommon.CertificateTypeStakeVoteRegistrationDelegation), StakeCredential: b.credential, PoolKeyHash: b.poolKeyHash, Drep: b.drep, Amount: amount}, nil
+	return &lcommon.StakeVoteRegistrationDelegationCertificate{
+		CertType: uint(
+			lcommon.CertificateTypeStakeVoteRegistrationDelegation,
+		),
+		StakeCredential: b.credential,
+		PoolKeyHash:     b.poolKeyHash,
+		Drep:            b.drep,
+		Amount:          amount,
+	}, nil
 }
 
 // AuthCommitteeHotBuilder builds a Conway committee hot-key authorization certificate.
@@ -974,25 +1171,33 @@ type AuthCommitteeHotBuilder struct {
 
 func NewAuthCommitteeHot() *AuthCommitteeHotBuilder { return &AuthCommitteeHotBuilder{} }
 
-func (b *AuthCommitteeHotBuilder) WithColdCredential(hash []byte) *AuthCommitteeHotBuilder {
+func (b *AuthCommitteeHotBuilder) WithColdCredential(
+	hash []byte,
+) *AuthCommitteeHotBuilder {
 	b.cold, _ = keyCredential(hash)
 	b.coldSet = len(hash) == hashSize
 	return b
 }
 
-func (b *AuthCommitteeHotBuilder) WithColdScriptCredential(hash []byte) *AuthCommitteeHotBuilder {
+func (b *AuthCommitteeHotBuilder) WithColdScriptCredential(
+	hash []byte,
+) *AuthCommitteeHotBuilder {
 	b.cold, _ = scriptCredential(hash)
 	b.coldSet = len(hash) == hashSize
 	return b
 }
 
-func (b *AuthCommitteeHotBuilder) WithHotCredential(hash []byte) *AuthCommitteeHotBuilder {
+func (b *AuthCommitteeHotBuilder) WithHotCredential(
+	hash []byte,
+) *AuthCommitteeHotBuilder {
 	b.hot, _ = keyCredential(hash)
 	b.hotSet = len(hash) == hashSize
 	return b
 }
 
-func (b *AuthCommitteeHotBuilder) WithHotScriptCredential(hash []byte) *AuthCommitteeHotBuilder {
+func (b *AuthCommitteeHotBuilder) WithHotScriptCredential(
+	hash []byte,
+) *AuthCommitteeHotBuilder {
 	b.hot, _ = scriptCredential(hash)
 	b.hotSet = len(hash) == hashSize
 	return b
@@ -1000,9 +1205,16 @@ func (b *AuthCommitteeHotBuilder) WithHotScriptCredential(hash []byte) *AuthComm
 
 func (b *AuthCommitteeHotBuilder) Build() (*lcommon.AuthCommitteeHotCertificate, error) {
 	if !b.coldSet || !b.hotSet {
-		return nil, fmt.Errorf("committee credentials must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"committee credentials must be exactly %d bytes",
+			hashSize,
+		)
 	}
-	return &lcommon.AuthCommitteeHotCertificate{CertType: uint(lcommon.CertificateTypeAuthCommitteeHot), ColdCredential: b.cold, HotCredential: b.hot}, nil
+	return &lcommon.AuthCommitteeHotCertificate{
+		CertType:       uint(lcommon.CertificateTypeAuthCommitteeHot),
+		ColdCredential: b.cold,
+		HotCredential:  b.hot,
+	}, nil
 }
 
 // ResignCommitteeColdBuilder builds a Conway committee cold-key resignation certificate.
@@ -1015,25 +1227,35 @@ type ResignCommitteeColdBuilder struct {
 
 func NewResignCommitteeCold() *ResignCommitteeColdBuilder { return &ResignCommitteeColdBuilder{} }
 
-func (b *ResignCommitteeColdBuilder) WithColdCredential(hash []byte) *ResignCommitteeColdBuilder {
+func (b *ResignCommitteeColdBuilder) WithColdCredential(
+	hash []byte,
+) *ResignCommitteeColdBuilder {
 	b.cold, _ = keyCredential(hash)
 	b.coldSet = len(hash) == hashSize
 	return b
 }
 
-func (b *ResignCommitteeColdBuilder) WithColdScriptCredential(hash []byte) *ResignCommitteeColdBuilder {
+func (b *ResignCommitteeColdBuilder) WithColdScriptCredential(
+	hash []byte,
+) *ResignCommitteeColdBuilder {
 	b.cold, _ = scriptCredential(hash)
 	b.coldSet = len(hash) == hashSize
 	return b
 }
 
-func (b *ResignCommitteeColdBuilder) WithAnchor(url string, dataHash []byte) *ResignCommitteeColdBuilder {
+func (b *ResignCommitteeColdBuilder) WithAnchor(
+	url string,
+	dataHash []byte,
+) *ResignCommitteeColdBuilder {
 	if err := validateURL(url); err != nil {
 		b.anchorErr = err
 		return b
 	}
 	if len(dataHash) != 0 && len(dataHash) != lcommon.Blake2b256Size {
-		b.anchorErr = fmt.Errorf("anchor data hash must be exactly %d bytes", lcommon.Blake2b256Size)
+		b.anchorErr = fmt.Errorf(
+			"anchor data hash must be exactly %d bytes",
+			lcommon.Blake2b256Size,
+		)
 		return b
 	}
 	b.anchorErr = nil
@@ -1046,10 +1268,17 @@ func (b *ResignCommitteeColdBuilder) WithAnchor(url string, dataHash []byte) *Re
 
 func (b *ResignCommitteeColdBuilder) Build() (*lcommon.ResignCommitteeColdCertificate, error) {
 	if !b.coldSet {
-		return nil, fmt.Errorf("committee cold credential must be exactly %d bytes", hashSize)
+		return nil, fmt.Errorf(
+			"committee cold credential must be exactly %d bytes",
+			hashSize,
+		)
 	}
 	if b.anchorErr != nil {
 		return nil, b.anchorErr
 	}
-	return &lcommon.ResignCommitteeColdCertificate{CertType: uint(lcommon.CertificateTypeResignCommitteeCold), ColdCredential: b.cold, Anchor: b.anchor}, nil
+	return &lcommon.ResignCommitteeColdCertificate{
+		CertType:       uint(lcommon.CertificateTypeResignCommitteeCold),
+		ColdCredential: b.cold,
+		Anchor:         b.anchor,
+	}, nil
 }

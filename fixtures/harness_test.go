@@ -274,7 +274,10 @@ func TestFixtureExecutionHarness(t *testing.T) {
 			t.Fatalf("LedgerTransactionIDBytes failed: %v", err)
 		}
 		if len(txIDBytes) != 32 {
-			t.Fatalf("expected 32-byte transaction ID, got %d bytes", len(txIDBytes))
+			t.Fatalf(
+				"expected 32-byte transaction ID, got %d bytes",
+				len(txIDBytes),
+			)
 		}
 
 		canonicalTxFixture, err := harness.Fixture(
@@ -435,11 +438,8 @@ func firstSliceDifference(
 	expected []string,
 	actual []string,
 ) (int, string, string) {
-	maxIndex := len(expected)
-	if len(actual) < maxIndex {
-		maxIndex = len(actual)
-	}
-	for idx := 0; idx < maxIndex; idx++ {
+	maxIndex := min(len(actual), len(expected))
+	for idx := range maxIndex {
 		if expected[idx] != actual[idx] {
 			return idx, expected[idx], actual[idx]
 		}

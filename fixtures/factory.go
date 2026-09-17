@@ -49,28 +49,77 @@ func GenerateChain(
 			startBlockNumber, prevHash, startSlot, slotIncrement, count,
 		)
 	case 1:
-		return GenerateShelleyChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateShelleyChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	case 2:
-		return GenerateAllegraChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateAllegraChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	case 3:
-		return GenerateMaryChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateMaryChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	case 4:
-		return GenerateAlonzoChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateAlonzoChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	case 5:
-		return GenerateBabbageChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateBabbageChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	case 6:
-		return GenerateConwayChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateConwayChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	case 7:
-		return GenerateDijkstraChain(startBlockNumber, prevHash, startSlot, slotIncrement, count)
+		return GenerateDijkstraChain(
+			startBlockNumber,
+			prevHash,
+			startSlot,
+			slotIncrement,
+			count,
+		)
 	default:
-		return nil, fmt.Errorf("unsupported fixture era %d (%s)", era.Id, era.Name)
+		return nil, fmt.Errorf(
+			"unsupported fixture era %d (%s)",
+			era.Id,
+			era.Name,
+		)
 	}
 }
 
 // GenerateBlock returns one empty block for era. Byron blocks require the
 // requested slot to be aligned to a Byron epoch boundary. It is a convenience
 // wrapper around GenerateChain for tests that need a single block.
-func GenerateBlock(era common.Era, blockNumber, slot uint64) (ledger.Block, error) {
+func GenerateBlock(
+	era common.Era,
+	blockNumber, slot uint64,
+) (ledger.Block, error) {
 	blocks, err := GenerateChain(
 		era, blockNumber, common.Blake2b256{}, slot, 0, 1,
 	)
@@ -126,7 +175,10 @@ func generateByronChain(
 			return nil, fmt.Errorf("decode byron EBB %d: %w", i, err)
 		}
 		if !bytes.Equal(decoded.Cbor(), blockCbor) {
-			return nil, fmt.Errorf("byron EBB %d CBOR mismatch after round-trip", i)
+			return nil, fmt.Errorf(
+				"byron EBB %d CBOR mismatch after round-trip",
+				i,
+			)
 		}
 		blocks = append(blocks, decoded)
 		currentPrev = decoded.Hash()

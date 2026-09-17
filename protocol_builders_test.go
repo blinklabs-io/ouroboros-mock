@@ -28,10 +28,16 @@ import (
 func TestBlockFetchNoBlocksUsesOnlyNoBlocks(t *testing.T) {
 	entry := BlockFetchNoBlocks()
 	if len(entry.Messages) != 1 {
-		t.Fatalf("no-blocks response has %d messages, want 1", len(entry.Messages))
+		t.Fatalf(
+			"no-blocks response has %d messages, want 1",
+			len(entry.Messages),
+		)
 	}
 	if _, ok := entry.Messages[0].(*blockfetch.MsgNoBlocks); !ok {
-		t.Fatalf("no-blocks response message = %T, want *blockfetch.MsgNoBlocks", entry.Messages[0])
+		t.Fatalf(
+			"no-blocks response message = %T, want *blockfetch.MsgNoBlocks",
+			entry.Messages[0],
+		)
 	}
 }
 
@@ -125,7 +131,12 @@ func assertMessageRoundTrips(t *testing.T, entry ConversationEntryInput) {
 	}
 	decoded, err := entry.MsgFromCborFunc(entry.MessageType, encoded)
 	if err != nil {
-		t.Fatalf("decode %T with message type %d: %v", entry.Message, entry.MessageType, err)
+		t.Fatalf(
+			"decode %T with message type %d: %v",
+			entry.Message,
+			entry.MessageType,
+			err,
+		)
 	}
 	if reflect.TypeOf(decoded) != reflect.TypeOf(entry.Message) {
 		t.Fatalf("decoded message type = %T, want %T", decoded, entry.Message)
@@ -135,7 +146,11 @@ func assertMessageRoundTrips(t *testing.T, entry ConversationEntryInput) {
 		t.Fatalf("re-encode %T: %v", decoded, err)
 	}
 	if !bytes.Equal(reencoded, encoded) {
-		t.Fatalf("decoded message does not round-trip: got %x, want %x", reencoded, encoded)
+		t.Fatalf(
+			"decoded message does not round-trip: got %x, want %x",
+			reencoded,
+			encoded,
+		)
 	}
 	// Connection.processInputEntry clears the CBOR of the received message
 	// and compares it to the expected message with reflect.DeepEqual. An
@@ -163,16 +178,45 @@ func TestChainSyncBuildersUseNegotiatedProtocolId(t *testing.T) {
 		protocolID uint16
 		want       uint16
 	}{
-		{"request-next NtN", ChainSyncRequestNext(false).ProtocolId, chainsync.ProtocolIdNtN},
-		{"request-next NtC", ChainSyncRequestNext(true).ProtocolId, chainsync.ProtocolIdNtC},
-		{"roll-backward NtN", ChainSyncRollBackward(false, point, tip).ProtocolId, chainsync.ProtocolIdNtN},
-		{"roll-backward NtC", ChainSyncRollBackward(true, point, tip).ProtocolId, chainsync.ProtocolIdNtC},
-		{"find-intersect NtN", ChainSyncFindIntersect(false, nil).ProtocolId, chainsync.ProtocolIdNtN},
-		{"find-intersect NtC", ChainSyncFindIntersect(true, nil).ProtocolId, chainsync.ProtocolIdNtC},
+		{
+			"request-next NtN",
+			ChainSyncRequestNext(false).ProtocolId,
+			chainsync.ProtocolIdNtN,
+		},
+		{
+			"request-next NtC",
+			ChainSyncRequestNext(true).ProtocolId,
+			chainsync.ProtocolIdNtC,
+		},
+		{
+			"roll-backward NtN",
+			ChainSyncRollBackward(false, point, tip).ProtocolId,
+			chainsync.ProtocolIdNtN,
+		},
+		{
+			"roll-backward NtC",
+			ChainSyncRollBackward(true, point, tip).ProtocolId,
+			chainsync.ProtocolIdNtC,
+		},
+		{
+			"find-intersect NtN",
+			ChainSyncFindIntersect(false, nil).ProtocolId,
+			chainsync.ProtocolIdNtN,
+		},
+		{
+			"find-intersect NtC",
+			ChainSyncFindIntersect(true, nil).ProtocolId,
+			chainsync.ProtocolIdNtC,
+		},
 	}
 	for _, test := range tests {
 		if test.protocolID != test.want {
-			t.Errorf("%s protocol ID = %d, want %d", test.name, test.protocolID, test.want)
+			t.Errorf(
+				"%s protocol ID = %d, want %d",
+				test.name,
+				test.protocolID,
+				test.want,
+			)
 		}
 	}
 }
@@ -195,19 +239,33 @@ func TestTxSubmissionBuilderDirectionsFollowAgency(t *testing.T) {
 	for i, entry := range serverSends {
 		output, ok := entry.(ConversationEntryOutput)
 		if !ok {
-			t.Fatalf("server-agency entry %d is %T, want ConversationEntryOutput", i, entry)
+			t.Fatalf(
+				"server-agency entry %d is %T, want ConversationEntryOutput",
+				i,
+				entry,
+			)
 		}
 		if !output.IsResponse {
-			t.Errorf("server-agency entry %d is not marked as a response segment", i)
+			t.Errorf(
+				"server-agency entry %d is not marked as a response segment",
+				i,
+			)
 		}
 	}
 	for i, entry := range clientSends {
 		input, ok := entry.(ConversationEntryInput)
 		if !ok {
-			t.Fatalf("client-agency entry %d is %T, want ConversationEntryInput", i, entry)
+			t.Fatalf(
+				"client-agency entry %d is %T, want ConversationEntryInput",
+				i,
+				entry,
+			)
 		}
 		if input.IsResponse {
-			t.Errorf("client-agency entry %d is marked as a response segment", i)
+			t.Errorf(
+				"client-agency entry %d is marked as a response segment",
+				i,
+			)
 		}
 	}
 }
@@ -221,7 +279,10 @@ func TestChainSyncScenarioUsesCanonicalHeaderCBOR(t *testing.T) {
 		conway.EraIdConway,
 		0,
 		[][]byte{blocks[0].Header().Cbor()},
-		NewTip(NewPoint(blocks[0].SlotNumber(), blocks[0].Hash().Bytes()), blocks[0].BlockNumber()),
+		NewTip(
+			NewPoint(blocks[0].SlotNumber(), blocks[0].Hash().Bytes()),
+			blocks[0].BlockNumber(),
+		),
 	)
 	if err != nil {
 		t.Fatal(err)

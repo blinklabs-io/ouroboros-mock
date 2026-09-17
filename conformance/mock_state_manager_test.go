@@ -42,7 +42,8 @@ func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
 		Amount:          7,
 	})
 
-	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	deposit, err := manager.buildLedgerState().
+		StakeCredentialDeposit(credential)
 	require.NoError(t, err)
 	require.NotNil(t, deposit)
 	assert.Equal(t, uint64(7), *deposit)
@@ -65,7 +66,8 @@ func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
 		StakeCredential: credential,
 	})
 
-	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	deposit, err := manager.buildLedgerState().
+		StakeCredentialDeposit(credential)
 	require.NoError(t, err)
 	require.NotNil(t, deposit)
 	assert.Equal(t, uint64(11), *deposit)
@@ -94,7 +96,8 @@ func TestMockStateManagerLoadsOriginalStakeCredentialDeposit(t *testing.T) {
 		&conway.ConwayProtocolParameters{KeyDeposit: 11},
 	))
 
-	deposit, err := manager.buildLedgerState().StakeCredentialDeposit(credential)
+	deposit, err := manager.buildLedgerState().
+		StakeCredentialDeposit(credential)
 	require.NoError(t, err)
 	require.NotNil(t, deposit)
 	assert.Equal(t, uint64(2), *deposit)
@@ -139,8 +142,16 @@ func TestApplyTransactionValidatesWithdrawalsBeforeMutatingState(t *testing.T) {
 
 	err = manager.ApplyTransaction(tx, 0)
 	require.ErrorContains(t, err, "exceeds reward account balance")
-	assert.Contains(t, manager.utxos, fmt.Sprintf("%s#0", hex.EncodeToString(input.Id().Bytes())))
-	assert.NotContains(t, manager.stakeRegistrations, ledger.NewRewardAccountKey(cert.StakeCredential))
+	assert.Contains(
+		t,
+		manager.utxos,
+		fmt.Sprintf("%s#0", hex.EncodeToString(input.Id().Bytes())),
+	)
+	assert.NotContains(
+		t,
+		manager.stakeRegistrations,
+		ledger.NewRewardAccountKey(cert.StakeCredential),
+	)
 }
 
 func TestApplyTransactionAllowsWithdrawalWithStakeDeregistration(t *testing.T) {
@@ -2868,7 +2879,7 @@ func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {
 			RatifiedEpoch: &ratifiedEpoch,
 		}
 
-		for idx := 0; idx < 32; idx++ {
+		for idx := range 32 {
 			id := fmt.Sprintf("info-%02d#0", idx)
 			stateManager.govState.Proposals[id] = &ProposalState{
 				GovActionInfo: GovActionInfo{
@@ -2890,7 +2901,7 @@ func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {
 		return stateManager
 	}
 
-	for run := 0; run < runs; run++ {
+	for range runs {
 		stateManager := newStateManager()
 		expected := newStateManager()
 		for range 2 {

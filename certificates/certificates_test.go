@@ -26,19 +26,26 @@ var (
 )
 
 func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
-	registration, err := certificates.NewStakeRegistration().WithCredential(stakeHash).Build()
+	registration, err := certificates.NewStakeRegistration().
+		WithCredential(stakeHash).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCertificateRoundTrip(t, registration)
 
-	deregistration, err := certificates.NewStakeDeregistration().WithScriptCredential(stakeHash).Build()
+	deregistration, err := certificates.NewStakeDeregistration().
+		WithScriptCredential(stakeHash).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCertificateRoundTrip(t, deregistration)
 
-	delegation, err := certificates.NewStakeDelegation().WithCredential(stakeHash).WithPoolKeyHash(poolHash).Build()
+	delegation, err := certificates.NewStakeDelegation().
+		WithCredential(stakeHash).
+		WithPoolKeyHash(poolHash).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,23 +85,40 @@ func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	}
 	assertCertificateRoundTrip(t, registration)
 
-	retirement, err := certificates.NewPoolRetirement().WithPoolKeyHash(poolHash).WithEpoch(42).Build()
+	retirement, err := certificates.NewPoolRetirement().
+		WithPoolKeyHash(poolHash).
+		WithEpoch(42).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCertificateRoundTrip(t, retirement)
 }
 
-func TestGovernanceBuildersReturnCertificatesUsableInTransactions(t *testing.T) {
-	drepRegistration, err := certificates.NewDRepRegistration().WithCredential(stakeHash).WithDeposit(100).WithAnchor("https://example.test/drep", vrfHash).Build()
+func TestGovernanceBuildersReturnCertificatesUsableInTransactions(
+	t *testing.T,
+) {
+	drepRegistration, err := certificates.NewDRepRegistration().
+		WithCredential(stakeHash).
+		WithDeposit(100).
+		WithAnchor("https://example.test/drep", vrfHash).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
-	voteDelegation, err := certificates.NewVoteDelegation().WithCredential(stakeHash).WithDRepKeyHash(poolHash).Build()
+	voteDelegation, err := certificates.NewVoteDelegation().
+		WithCredential(stakeHash).
+		WithDRepKeyHash(poolHash).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
-	combined, err := certificates.NewStakeVoteRegistrationDelegation().WithCredential(stakeHash).WithDRepKeyHash(poolHash).WithPoolKeyHash(stakeHash).WithDeposit(100).Build()
+	combined, err := certificates.NewStakeVoteRegistrationDelegation().
+		WithCredential(stakeHash).
+		WithDRepKeyHash(poolHash).
+		WithPoolKeyHash(stakeHash).
+		WithDeposit(100).
+		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +163,15 @@ func TestGovernanceBuildersReturnCertificatesUsableInTransactions(t *testing.T) 
 	if err != nil {
 		t.Fatalf("combined delegation conversion: %v", err)
 	}
-	if got := combinedRPC.GetStakeVoteRegDelegCert().GetPoolKeyhash(); !bytes.Equal(got, stakeHash) {
-		t.Fatalf("combined delegation pool key hash = %x, want %x", got, stakeHash)
+	if got := combinedRPC.GetStakeVoteRegDelegCert().GetPoolKeyhash(); !bytes.Equal(
+		got,
+		stakeHash,
+	) {
+		t.Fatalf(
+			"combined delegation pool key hash = %x, want %x",
+			got,
+			stakeHash,
+		)
 	}
 }
 
@@ -153,7 +184,8 @@ func TestPoolRegistrationUsesSelectedNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := registration.RewardAccountNetworkId(); !ok || got != uint(lcommon.AddressNetworkMainnet) {
+	if got, ok := registration.RewardAccountNetworkId(); !ok ||
+		got != uint(lcommon.AddressNetworkMainnet) {
 		t.Fatalf("reward account network = %d, known %t; want mainnet", got, ok)
 	}
 }
@@ -167,11 +199,15 @@ func TestPoolRegistrationSupportsScriptRewardAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := registration.RewardAccountNetworkId(); !ok || got != uint(lcommon.AddressNetworkMainnet) {
+	if got, ok := registration.RewardAccountNetworkId(); !ok ||
+		got != uint(lcommon.AddressNetworkMainnet) {
 		t.Fatalf("reward account network = %d, known %t; want mainnet", got, ok)
 	}
 	if registration.RewardAccountCredential().CredType != lcommon.CredentialTypeScriptHash {
-		t.Fatalf("reward account credential type = %d; want script hash", registration.RewardAccountCredential().CredType)
+		t.Fatalf(
+			"reward account credential type = %d; want script hash",
+			registration.RewardAccountCredential().CredType,
+		)
 	}
 }
 
@@ -325,13 +361,21 @@ func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
 		t.Fatalf("decode certificate: %v", err)
 	}
 	if decoded.Type != cert.Type() {
-		t.Fatalf("certificate type mismatch: got %d, want %d", decoded.Type, cert.Type())
+		t.Fatalf(
+			"certificate type mismatch: got %d, want %d",
+			decoded.Type,
+			cert.Type(),
+		)
 	}
 	decodedWire, err := cbor.Encode(decoded.Certificate)
 	if err != nil {
 		t.Fatalf("re-encode decoded certificate: %v", err)
 	}
 	if !bytes.Equal(decodedWire, wire) {
-		t.Fatalf("certificate body changed during round trip: got %x, want %x", decodedWire, wire)
+		t.Fatalf(
+			"certificate body changed during round trip: got %x, want %x",
+			decodedWire,
+			wire,
+		)
 	}
 }

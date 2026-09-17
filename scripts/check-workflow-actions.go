@@ -13,7 +13,10 @@ import (
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: check-workflow-actions.go WORKFLOW_DIRECTORY")
+		fmt.Fprintln(
+			os.Stderr,
+			"usage: check-workflow-actions.go WORKFLOW_DIRECTORY",
+		)
 		os.Exit(2)
 	}
 
@@ -24,28 +27,32 @@ func main() {
 	}
 	defer func() { _ = root.Close() }()
 
-	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
+	err = fs.WalkDir(
+		root.FS(),
+		".",
+		func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			ext := filepath.Ext(path)
+			if ext != ".yml" && ext != ".yaml" {
+				return nil
+			}
+			data, err := root.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			var document any
+			if err := yaml.Unmarshal(data, &document); err != nil {
+				return fmt.Errorf("parse %s: %w", path, err)
+			}
+			emitUses(document)
 			return nil
-		}
-		ext := filepath.Ext(path)
-		if ext != ".yml" && ext != ".yaml" {
-			return nil
-		}
-		data, err := root.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		var document any
-		if err := yaml.Unmarshal(data, &document); err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
-		}
-		emitUses(document)
-		return nil
-	})
+		},
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

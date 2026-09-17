@@ -43,9 +43,16 @@ type AddressBuilder struct {
 // NewAddress returns a builder using the testnet network ID.
 func NewAddress() *AddressBuilder { return &AddressBuilder{networkID: Testnet} }
 
-func (b *AddressBuilder) WithMainnet() *AddressBuilder           { return b.WithNetworkId(Mainnet) }
-func (b *AddressBuilder) WithTestnet() *AddressBuilder           { return b.WithNetworkId(Testnet) }
-func (b *AddressBuilder) WithNetworkId(id uint8) *AddressBuilder { b.networkID = id; return b }
+func (b *AddressBuilder) WithMainnet() *AddressBuilder { return b.WithNetworkId(Mainnet) }
+
+func (b *AddressBuilder) WithTestnet() *AddressBuilder { return b.WithNetworkId(Testnet) }
+
+func (b *AddressBuilder) WithNetworkId(
+	id uint8,
+) *AddressBuilder {
+	b.networkID = id
+	return b
+}
 
 func (b *AddressBuilder) WithPaymentKeyHash(hash []byte) *AddressBuilder {
 	b.payment, b.paymentScript = clone(hash), false
@@ -58,7 +65,9 @@ func (b *AddressBuilder) WithPaymentScript(hash []byte) *AddressBuilder {
 }
 
 func (b *AddressBuilder) WithStakingKeyHash(hash []byte) *AddressBuilder {
-	b.stake, b.stakeScript, b.noStake, b.pointer = clone(hash), false, false, nil
+	b.stake, b.stakeScript, b.noStake, b.pointer = clone(
+		hash,
+	), false, false, nil
 	return b
 }
 
@@ -67,9 +76,15 @@ func (b *AddressBuilder) WithStakingScript(hash []byte) *AddressBuilder {
 	return b
 }
 
-func (b *AddressBuilder) WithStakePointer(slot, txIndex, certIndex uint64) *AddressBuilder {
+func (b *AddressBuilder) WithStakePointer(
+	slot, txIndex, certIndex uint64,
+) *AddressBuilder {
 	b.stake, b.noStake = nil, false
-	b.pointer = &common.AddressPayloadPointer{Slot: slot, TxIndex: txIndex, CertIndex: certIndex}
+	b.pointer = &common.AddressPayloadPointer{
+		Slot:      slot,
+		TxIndex:   txIndex,
+		CertIndex: certIndex,
+	}
 	return b
 }
 
@@ -81,10 +96,16 @@ func (b *AddressBuilder) WithNoStaking() *AddressBuilder {
 // Build constructs and validates the address using gouroboros' address parser.
 func (b *AddressBuilder) Build() (common.Address, error) {
 	if len(b.payment) != common.AddressHashSize {
-		return common.Address{}, fmt.Errorf("payment hash must be %d bytes", common.AddressHashSize)
+		return common.Address{}, fmt.Errorf(
+			"payment hash must be %d bytes",
+			common.AddressHashSize,
+		)
 	}
 	if b.networkID != Testnet && b.networkID != Mainnet {
-		return common.Address{}, fmt.Errorf("unsupported network ID: %d", b.networkID)
+		return common.Address{}, fmt.Errorf(
+			"unsupported network ID: %d",
+			b.networkID,
+		)
 	}
 	var addrType uint8
 	switch {
@@ -94,7 +115,9 @@ func (b *AddressBuilder) Build() (common.Address, error) {
 			addrType = common.AddressTypeScriptPointer
 		}
 		payload := append(clone(b.payment), encodePointer(*b.pointer)...)
-		return common.NewAddressFromBytes(append([]byte{addrType<<4 | b.networkID}, payload...))
+		return common.NewAddressFromBytes(
+			append([]byte{addrType<<4 | b.networkID}, payload...),
+		)
 	case b.noStake:
 		addrType = common.AddressTypeKeyNone
 		if b.paymentScript {
@@ -112,11 +135,19 @@ func (b *AddressBuilder) Build() (common.Address, error) {
 		default:
 			addrType = common.AddressTypeKeyKey
 		}
-		return common.NewAddressFromParts(addrType, b.networkID, b.payment, b.stake)
+		return common.NewAddressFromParts(
+			addrType,
+			b.networkID,
+			b.payment,
+			b.stake,
+		)
 	case b.stake == nil:
 		return common.Address{}, errors.New("staking credential is required")
 	default:
-		return common.Address{}, fmt.Errorf("staking hash must be %d bytes", common.AddressHashSize)
+		return common.Address{}, fmt.Errorf(
+			"staking hash must be %d bytes",
+			common.AddressHashSize,
+		)
 	}
 }
 
@@ -144,7 +175,10 @@ type ByronAddressBuilder struct {
 }
 
 func NewByronAddress() *ByronAddressBuilder { return &ByronAddressBuilder{} }
-func (b *ByronAddressBuilder) WithPaymentKeyHash(hash []byte) *ByronAddressBuilder {
+
+func (b *ByronAddressBuilder) WithPaymentKeyHash(
+	hash []byte,
+) *ByronAddressBuilder {
 	b.hash = clone(hash)
 	return b
 }
@@ -154,16 +188,25 @@ func (b *ByronAddressBuilder) WithNetworkId(id uint32) *ByronAddressBuilder {
 	return b
 }
 
-func (b *ByronAddressBuilder) WithAddressType(addrType uint64) *ByronAddressBuilder {
+func (b *ByronAddressBuilder) WithAddressType(
+	addrType uint64,
+) *ByronAddressBuilder {
 	b.addrType = addrType
 	return b
 }
 
 func (b *ByronAddressBuilder) Build() (common.Address, error) {
 	if len(b.hash) != common.AddressHashSize {
-		return common.Address{}, fmt.Errorf("payment hash must be %d bytes", common.AddressHashSize)
+		return common.Address{}, fmt.Errorf(
+			"payment hash must be %d bytes",
+			common.AddressHashSize,
+		)
 	}
-	return common.NewByronAddressFromParts(b.addrType, b.hash, common.ByronAddressAttributes{Network: b.network})
+	return common.NewByronAddressFromParts(
+		b.addrType,
+		b.hash,
+		common.ByronAddressAttributes{Network: b.network},
+	)
 }
 
 func (b *ByronAddressBuilder) BuildBase58() (string, error) {
@@ -174,11 +217,30 @@ func (b *ByronAddressBuilder) BuildBase58() (string, error) {
 	return addr.String(), nil
 }
 
-func PaymentKeyHash(publicKey []byte) common.Blake2b224 { return common.Blake2b224Hash(publicKey) }
-func StakingKeyHash(publicKey []byte) common.Blake2b224 { return common.Blake2b224Hash(publicKey) }
-func ScriptHash(script []byte) common.Blake2b224        { return common.Blake2b224Hash(script) }
+func PaymentKeyHash(
+	publicKey []byte,
+) common.Blake2b224 {
+	return common.Blake2b224Hash(publicKey)
+}
 
-func ParseAddress(value string) (common.Address, error) { return common.NewAddress(value) }
+func StakingKeyHash(
+	publicKey []byte,
+) common.Blake2b224 {
+	return common.Blake2b224Hash(publicKey)
+}
+
+func ScriptHash(
+	script []byte,
+) common.Blake2b224 {
+	return common.Blake2b224Hash(script)
+}
+
+func ParseAddress(
+	value string,
+) (common.Address, error) {
+	return common.NewAddress(value)
+}
+
 func MustParseAddress(value string) common.Address {
 	addr, err := ParseAddress(value)
 	if err != nil {
@@ -188,6 +250,7 @@ func MustParseAddress(value string) common.Address {
 }
 
 func RandomMainnet() (common.Address, error) { return randomAddress(Mainnet, cryptorand.Reader) }
+
 func RandomTestnet() (common.Address, error) { return randomAddress(Testnet, cryptorand.Reader) }
 func RandomBase(networkID uint8) (common.Address, error) {
 	return randomAddress(networkID, cryptorand.Reader)
@@ -198,7 +261,10 @@ func RandomEnterprise(networkID uint8) (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
-	return NewAddress().WithNetworkId(networkID).WithPaymentKeyHash(hash).WithNoStaking().Build()
+	return NewAddress().WithNetworkId(networkID).
+		WithPaymentKeyHash(hash).
+		WithNoStaking().
+		Build()
 }
 
 func RandomReward(networkID uint8) (common.Address, error) {
@@ -206,37 +272,60 @@ func RandomReward(networkID uint8) (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
-	return NewAddress().WithNetworkId(networkID).WithStakingKeyHash(hash).BuildReward()
+	return NewAddress().WithNetworkId(networkID).
+		WithStakingKeyHash(hash).
+		BuildReward()
 }
 
 // NewRand returns a deterministic source for the Random*WithRand helpers.
 //
 //nolint:gosec // deterministic test fixtures do not need cryptographic randomness.
-func NewRand(seed int64) *mathrand.Rand { return mathrand.New(mathrand.NewSource(seed)) }
+func NewRand(
+	seed int64,
+) *mathrand.Rand {
+	return mathrand.New(mathrand.NewSource(seed))
+}
 
-func RandomBaseWithRand(r *mathrand.Rand, networkID uint8) (common.Address, error) {
+func RandomBaseWithRand(
+	r *mathrand.Rand,
+	networkID uint8,
+) (common.Address, error) {
 	return randomAddress(networkID, r)
 }
 
-func RandomEnterpriseWithRand(r *mathrand.Rand, networkID uint8) (common.Address, error) {
+func RandomEnterpriseWithRand(
+	r *mathrand.Rand,
+	networkID uint8,
+) (common.Address, error) {
 	hash, err := randomHash(r)
 	if err != nil {
 		return common.Address{}, err
 	}
-	return NewAddress().WithNetworkId(networkID).WithPaymentKeyHash(hash).WithNoStaking().Build()
+	return NewAddress().WithNetworkId(networkID).
+		WithPaymentKeyHash(hash).
+		WithNoStaking().
+		Build()
 }
 
-func RandomRewardWithRand(r *mathrand.Rand, networkID uint8) (common.Address, error) {
+func RandomRewardWithRand(
+	r *mathrand.Rand,
+	networkID uint8,
+) (common.Address, error) {
 	hash, err := randomHash(r)
 	if err != nil {
 		return common.Address{}, err
 	}
-	return NewAddress().WithNetworkId(networkID).WithStakingKeyHash(hash).BuildReward()
+	return NewAddress().WithNetworkId(networkID).
+		WithStakingKeyHash(hash).
+		BuildReward()
 }
 
 func (b *AddressBuilder) BuildReward() (common.Address, error) {
 	if len(b.stake) != common.AddressHashSize {
-		return common.Address{}, fmt.Errorf("staking hash must be %d bytes", common.AddressHashSize)
+		return common.Address{}, fmt.Errorf(
+			"staking hash must be %d bytes",
+			common.AddressHashSize,
+		)
 	}
 	var typ uint8 = common.AddressTypeNoneKey
 	if b.stakeScript {
@@ -245,7 +334,10 @@ func (b *AddressBuilder) BuildReward() (common.Address, error) {
 	return common.NewAddressFromParts(typ, b.networkID, nil, b.stake)
 }
 
-func randomAddress(networkID uint8, r interface{ Read([]byte) (int, error) }) (common.Address, error) {
+func randomAddress(
+	networkID uint8,
+	r interface{ Read([]byte) (int, error) },
+) (common.Address, error) {
 	payment, err := randomHash(r)
 	if err != nil {
 		return common.Address{}, err
@@ -254,7 +346,10 @@ func randomAddress(networkID uint8, r interface{ Read([]byte) (int, error) }) (c
 	if err != nil {
 		return common.Address{}, err
 	}
-	return NewAddress().WithNetworkId(networkID).WithPaymentKeyHash(payment).WithStakingKeyHash(stake).Build()
+	return NewAddress().WithNetworkId(networkID).
+		WithPaymentKeyHash(payment).
+		WithStakingKeyHash(stake).
+		Build()
 }
 
 func randomHash(r interface{ Read([]byte) (int, error) }) ([]byte, error) {

@@ -269,8 +269,15 @@ func TestHarnessRejectsWrongRollbackAndDownstreamObservations(t *testing.T) {
 			downstream:    capture.ExpectedOutput.DownstreamChainSync,
 		}
 		stub.switches = []format.SwitchEvent{
-			{NewTip: capture.ExpectedOutput.FinalTip, RollbackPoint: &wantPoint},
-			{PreviousTip: previous, NewTip: capture.ExpectedOutput.FinalTip, RollbackPoint: &wrongPoint},
+			{
+				NewTip:        capture.ExpectedOutput.FinalTip,
+				RollbackPoint: &wantPoint,
+			},
+			{
+				PreviousTip:   previous,
+				NewTip:        capture.ExpectedOutput.FinalTip,
+				RollbackPoint: &wrongPoint,
+			},
 		}
 		err = consensus.RunConsensusVector(t, cv.Vector, stub)
 		require.ErrorContains(t, err, "rollback point")

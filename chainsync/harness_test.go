@@ -566,9 +566,7 @@ func TestRequestNextAsyncRollForwardViaCallerRegistry(t *testing.T) {
 					)
 				}
 				resolved <- ctx.ConnectionId
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					select {
 					case <-blockReady:
 						_ = ctx.Server.RollForward(
@@ -578,7 +576,7 @@ func TestRequestNextAsyncRollForwardViaCallerRegistry(t *testing.T) {
 						)
 					case <-conn.ErrorChan():
 					}
-				}()
+				})
 				return nil
 			}
 
@@ -612,7 +610,11 @@ func TestRequestNextAsyncRollForwardViaCallerRegistry(t *testing.T) {
 			close(blockReady)
 
 			fwdMsg := observe(t, h)
-			require.True(t, fwdMsg.IsRollForward(), "expected async RollForward")
+			require.True(
+				t,
+				fwdMsg.IsRollForward(),
+				"expected async RollForward",
+			)
 			gotTip, ok := fwdMsg.Tip()
 			require.True(t, ok)
 			require.Equal(t, tip, gotTip)
@@ -654,9 +656,7 @@ func TestRegistryResolvedPeerErrorChanWakesOnDisconnect(t *testing.T) {
 				ctx.ConnectionId.String(),
 			)
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			select {
 			case <-blockReady:
 				_ = ctx.Server.RollForward(
@@ -667,7 +667,7 @@ func TestRegistryResolvedPeerErrorChanWakesOnDisconnect(t *testing.T) {
 			case <-conn.ErrorChan():
 				close(abandoned)
 			}
-		}()
+		})
 		return nil
 	}
 

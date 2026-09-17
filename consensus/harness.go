@@ -247,8 +247,10 @@ func assertRollbackPoint(
 		!bytes.Equal(switchEvent.RollbackPoint.Hash, want.Hash) {
 		return fmt.Errorf(
 			"got slot %d hash %x, want slot %d hash %x",
-			switchEvent.RollbackPoint.Slot, []byte(switchEvent.RollbackPoint.Hash),
-			want.Slot, []byte(want.Hash),
+			switchEvent.RollbackPoint.Slot,
+			[]byte(switchEvent.RollbackPoint.Hash),
+			want.Slot,
+			[]byte(want.Hash),
 		)
 	}
 	return nil
@@ -259,7 +261,8 @@ func servedMessagesEqual(got, want []format.ServedMessage) bool {
 		return false
 	}
 	for i := range want {
-		if got[i].Protocol != want[i].Protocol || got[i].MsgType != want[i].MsgType ||
+		if got[i].Protocol != want[i].Protocol ||
+			got[i].MsgType != want[i].MsgType ||
 			!bytes.Equal(got[i].HeaderCbor, want[i].HeaderCbor) ||
 			!bytes.Equal(got[i].BlockCbor, want[i].BlockCbor) ||
 			!pointsEqual(got[i].Point, want[i].Point) ||
@@ -300,7 +303,8 @@ func pointsSliceEqual(got, want []format.Point) bool {
 		return false
 	}
 	for i := range want {
-		if got[i].Slot != want[i].Slot || !bytes.Equal(got[i].Hash, want[i].Hash) {
+		if got[i].Slot != want[i].Slot ||
+			!bytes.Equal(got[i].Hash, want[i].Hash) {
 			return false
 		}
 	}

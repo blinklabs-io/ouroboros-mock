@@ -19,17 +19,22 @@ import (
 
 func TestLeiosConversationBuilders(t *testing.T) {
 	fetch := mock.NewConversationEntryLeiosFetchRequest(leiosfetch.NewMsgDone())
-	if fetch.ProtocolId != leiosfetch.ProtocolId || fetch.MsgFromCborFunc == nil {
+	if fetch.ProtocolId != leiosfetch.ProtocolId ||
+		fetch.MsgFromCborFunc == nil {
 		t.Fatalf("unexpected Leios fetch entry: %#v", fetch)
 	}
 
-	notify := mock.NewConversationEntryLeiosNotifyRequest(leiosnotify.NewMsgDone())
-	if notify.ProtocolId != leiosnotify.ProtocolId || notify.MsgFromCborFunc == nil {
+	notify := mock.NewConversationEntryLeiosNotifyRequest(
+		leiosnotify.NewMsgDone(),
+	)
+	if notify.ProtocolId != leiosnotify.ProtocolId ||
+		notify.MsgFromCborFunc == nil {
 		t.Fatalf("unexpected Leios notify entry: %#v", notify)
 	}
 
 	votes := mock.NewConversationEntryLeiosVotesRequest(leiosvotes.NewMsgDone())
-	if votes.ProtocolId != leiosvotes.ProtocolId || votes.MsgFromCborFunc == nil {
+	if votes.ProtocolId != leiosvotes.ProtocolId ||
+		votes.MsgFromCborFunc == nil {
 		t.Fatalf("unexpected Leios votes entry: %#v", votes)
 	}
 
@@ -47,12 +52,17 @@ func TestLeiosConversationBuilders(t *testing.T) {
 		{leiosvotes.ProtocolId, leiosvotes.MessageTypeDone},
 	}
 	for i, response := range responses {
-		if response.ProtocolId != expectedResponses[i].protocolID || !response.IsResponse {
+		if response.ProtocolId != expectedResponses[i].protocolID ||
+			!response.IsResponse {
 			t.Errorf("response %d has unexpected shape: %#v", i, response)
 			continue
 		}
 		if len(response.Messages) != 1 {
-			t.Fatalf("response %d contains %d messages, want 1", i, len(response.Messages))
+			t.Fatalf(
+				"response %d contains %d messages, want 1",
+				i,
+				len(response.Messages),
+			)
 		}
 		if response.Messages[0].Type() != expectedResponses[i].messageID {
 			t.Errorf(
@@ -91,19 +101,42 @@ func TestLeiosConversationBuilders(t *testing.T) {
 			t.Fatalf("%s conversation length = %d, want 3", name, len(entries))
 		}
 		handshakeRequest, ok := entries[0].(mock.ConversationEntryInput)
-		if !ok || handshakeRequest.ProtocolId != mock.ConversationEntryHandshakeRequestGeneric.ProtocolId || handshakeRequest.MessageType != mock.ConversationEntryHandshakeRequestGeneric.MessageType {
-			t.Fatalf("%s handshake request has unexpected shape: %#v", name, entries[0])
+		if !ok ||
+			handshakeRequest.ProtocolId != mock.ConversationEntryHandshakeRequestGeneric.ProtocolId ||
+			handshakeRequest.MessageType != mock.ConversationEntryHandshakeRequestGeneric.MessageType {
+			t.Fatalf(
+				"%s handshake request has unexpected shape: %#v",
+				name,
+				entries[0],
+			)
 		}
 		handshakeResponse, ok := entries[1].(mock.ConversationEntryOutput)
-		if !ok || handshakeResponse.ProtocolId != mock.ConversationEntryHandshakeNtNResponse.ProtocolId || !handshakeResponse.IsResponse {
-			t.Fatalf("%s handshake response has unexpected shape: %#v", name, entries[1])
+		if !ok ||
+			handshakeResponse.ProtocolId != mock.ConversationEntryHandshakeNtNResponse.ProtocolId ||
+			!handshakeResponse.IsResponse {
+			t.Fatalf(
+				"%s handshake response has unexpected shape: %#v",
+				name,
+				entries[1],
+			)
 		}
 		completion, ok := entries[2].(mock.ConversationEntryInput)
-		if !ok || completion.ProtocolId != conversation.protocolID || completion.IsResponse || completion.Message == nil {
-			t.Fatalf("%s completion entry has unexpected shape: %#v", name, entries[2])
+		if !ok || completion.ProtocolId != conversation.protocolID ||
+			completion.IsResponse ||
+			completion.Message == nil {
+			t.Fatalf(
+				"%s completion entry has unexpected shape: %#v",
+				name,
+				entries[2],
+			)
 		}
 		if completion.Message.Type() != conversation.completionID {
-			t.Errorf("%s completion message type = %d, want %d", name, completion.Message.Type(), conversation.completionID)
+			t.Errorf(
+				"%s completion message type = %d, want %d",
+				name,
+				completion.Message.Type(),
+				conversation.completionID,
+			)
 		}
 	}
 }

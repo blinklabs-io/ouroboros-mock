@@ -18,7 +18,6 @@ import (
 
 func TestGenerateChainSupportsRegisteredEras(t *testing.T) {
 	for _, era := range fixtures.SupportedEras() {
-		era := era
 		t.Run(era.Name, func(t *testing.T) {
 			slotIncrement := uint64(1)
 			if era.Id == 0 {
@@ -56,7 +55,11 @@ func TestGenerateBlockUsesRequestedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	if block.BlockNumber() != 11 || block.SlotNumber() != 22 {
-		t.Fatalf("got block %d at slot %d", block.BlockNumber(), block.SlotNumber())
+		t.Fatalf(
+			"got block %d at slot %d",
+			block.BlockNumber(),
+			block.SlotNumber(),
+		)
 	}
 }
 

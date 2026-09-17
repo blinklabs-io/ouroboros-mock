@@ -133,7 +133,9 @@ func ExtractBlueprintVectors(destDir string) error {
 		if prev, ok := seen[rel]; ok {
 			return fmt.Errorf(
 				"blueprint vectors: colliding normalized path %q from %q and %q",
-				rel, prev, header.Name,
+				rel,
+				prev,
+				header.Name,
 			)
 		}
 		seen[rel] = header.Name

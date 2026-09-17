@@ -218,10 +218,7 @@ func (s *RequestNextStep) Run(ctx context.Context, sc *Sidecar) error {
 		if remaining <= 0 {
 			return nil // implicit AwaitReply
 		}
-		wait := slice
-		if remaining < wait {
-			wait = remaining
-		}
+		wait := min(remaining, slice)
 		if sc.recorder.WaitForNextOrDeadline(before, wait) {
 			return nil
 		}

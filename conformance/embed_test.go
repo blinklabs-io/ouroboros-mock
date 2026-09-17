@@ -89,7 +89,14 @@ func TestExtractEmbeddedTestdataShipsEras(t *testing.T) {
 	}
 
 	pparams, err := os.ReadDir(
-		filepath.Join(root, "eras", "conway", "impl", "dump", "pparams-by-hash"),
+		filepath.Join(
+			root,
+			"eras",
+			"conway",
+			"impl",
+			"dump",
+			"pparams-by-hash",
+		),
 	)
 	if err != nil {
 		t.Fatalf("failed to read pparams directory: %v", err)
@@ -104,7 +111,10 @@ func TestExtractEmbeddedTestdataShipsEras(t *testing.T) {
 
 	// The harness requires both roots, and a consumer only ever gets them
 	// from the embedded data extracted above.
-	harness := NewHarness(NewMockStateManager(), HarnessConfig{TestdataRoot: root})
+	harness := NewHarness(
+		NewMockStateManager(),
+		HarnessConfig{TestdataRoot: root},
+	)
 	all, err := harness.collectAllVectors()
 	if err != nil {
 		t.Fatalf("failed to collect vectors from extracted root: %v", err)
@@ -125,7 +135,9 @@ func TestExtractEmbeddedTestdataShipsEras(t *testing.T) {
 func TestEmbeddedErasMatchesWorkingCopy(t *testing.T) {
 	workingCopy := filepath.Join("testdata", "eras")
 	if _, err := os.Stat(workingCopy); os.IsNotExist(err) {
-		t.Skip("run `make prepare-blueprint-testdata` to compare against the working copy")
+		t.Skip(
+			"run `make prepare-blueprint-testdata` to compare against the working copy",
+		)
 	}
 
 	extracted := filepath.Join(t.TempDir(), "eras")
@@ -174,7 +186,12 @@ func TestNormalizeVectorName(t *testing.T) {
 		{name: "  ", want: ""},
 	} {
 		if got := normalizeVectorName(test.name); got != test.want {
-			t.Errorf("normalizeVectorName(%q) = %q, want %q", test.name, got, test.want)
+			t.Errorf(
+				"normalizeVectorName(%q) = %q, want %q",
+				test.name,
+				got,
+				test.want,
+			)
 		}
 	}
 }

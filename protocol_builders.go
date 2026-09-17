@@ -61,7 +61,11 @@ func ChainSyncRequestNext(nodeToClient bool) ConversationEntryInput {
 }
 
 // ChainSyncRollForwardNtN builds a node-to-node roll-forward output entry.
-func ChainSyncRollForwardNtN(era, byronType uint, header []byte, tip chainsync.Tip) (ConversationEntryOutput, error) {
+func ChainSyncRollForwardNtN(
+	era, byronType uint,
+	header []byte,
+	tip chainsync.Tip,
+) (ConversationEntryOutput, error) {
 	message, err := chainsync.NewMsgRollForwardNtN(era, byronType, header, tip)
 	if err != nil {
 		return ConversationEntryOutput{}, err
@@ -76,7 +80,11 @@ func ChainSyncRollForwardNtN(era, byronType uint, header []byte, tip chainsync.T
 }
 
 // ChainSyncRollForwardNtC builds a node-to-client roll-forward output entry.
-func ChainSyncRollForwardNtC(blockType uint, block []byte, tip chainsync.Tip) (ConversationEntryOutput, error) {
+func ChainSyncRollForwardNtC(
+	blockType uint,
+	block []byte,
+	tip chainsync.Tip,
+) (ConversationEntryOutput, error) {
 	message, err := chainsync.NewMsgRollForwardNtC(blockType, block, tip)
 	if err != nil {
 		return ConversationEntryOutput{}, err
@@ -103,7 +111,11 @@ func chainSyncMode(nodeToClient bool) (uint16, protocol.MessageFromCborFunc) {
 
 // ChainSyncRollBackward builds a rollback output entry. nodeToClient
 // selects the mini-protocol the segment is sent on.
-func ChainSyncRollBackward(nodeToClient bool, point pcommon.Point, tip chainsync.Tip) ConversationEntryOutput {
+func ChainSyncRollBackward(
+	nodeToClient bool,
+	point pcommon.Point,
+	tip chainsync.Tip,
+) ConversationEntryOutput {
 	protocolID, _ := chainSyncMode(nodeToClient)
 	return ConversationEntryOutput{
 		ProtocolId: protocolID,
@@ -116,7 +128,10 @@ func ChainSyncRollBackward(nodeToClient bool, point pcommon.Point, tip chainsync
 
 // ChainSyncFindIntersect builds a find-intersect input entry. nodeToClient
 // selects the mini-protocol and decoder for the negotiated mode.
-func ChainSyncFindIntersect(nodeToClient bool, points []pcommon.Point) ConversationEntryInput {
+func ChainSyncFindIntersect(
+	nodeToClient bool,
+	points []pcommon.Point,
+) ConversationEntryInput {
 	protocolID, messageFromCbor := chainSyncMode(nodeToClient)
 	if points == nil {
 		points = []pcommon.Point{}
@@ -130,7 +145,11 @@ func ChainSyncFindIntersect(nodeToClient bool, points []pcommon.Point) Conversat
 }
 
 // ChainSyncScenario returns a server-side forward chain-sync conversation.
-func ChainSyncScenario(era, byronType uint, headers [][]byte, tip chainsync.Tip) ([]ConversationEntry, error) {
+func ChainSyncScenario(
+	era, byronType uint,
+	headers [][]byte,
+	tip chainsync.Tip,
+) ([]ConversationEntry, error) {
 	conversation := []ConversationEntry{ChainSyncRequestNext(false)}
 	for _, header := range headers {
 		entry, err := ChainSyncRollForwardNtN(era, byronType, header, tip)
@@ -193,7 +212,10 @@ func TxSubmissionInit() ConversationEntryInput {
 // TxSubmissionRequestTxIds builds a transaction-ID request output entry.
 // The server holds agency in the Idle state, so the mock sends this
 // message and the client answers with a reply.
-func TxSubmissionRequestTxIds(blocking bool, ack, request uint16) ConversationEntryOutput {
+func TxSubmissionRequestTxIds(
+	blocking bool,
+	ack, request uint16,
+) ConversationEntryOutput {
 	return ConversationEntryOutput{
 		ProtocolId: txsubmission.ProtocolId,
 		IsResponse: true,
@@ -218,7 +240,9 @@ func TxSubmissionRequestTxs(ids []txsubmission.TxId) ConversationEntryOutput {
 // TxSubmissionReplyTxIds builds a transaction-ID reply input entry. The
 // client holds agency in both TxIds states, so the mock receives this
 // message in answer to a request.
-func TxSubmissionReplyTxIds(ids []txsubmission.TxIdAndSize) ConversationEntryInput {
+func TxSubmissionReplyTxIds(
+	ids []txsubmission.TxIdAndSize,
+) ConversationEntryInput {
 	if ids == nil {
 		ids = []txsubmission.TxIdAndSize{}
 	}

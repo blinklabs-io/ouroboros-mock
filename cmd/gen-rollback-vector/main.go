@@ -166,7 +166,10 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 		}
 		usable, err := transactionUsableAt(event.TxBytes, 2)
 		if err != nil {
-			return fmt.Errorf("inspect Blueprint transaction at slot 2: %w", err)
+			return fmt.Errorf(
+				"inspect Blueprint transaction at slot 2: %w",
+				err,
+			)
 		}
 		if usable {
 			tx = event
@@ -206,7 +209,12 @@ func generateBlueprintRollback(basePath, outPath, titleOverride string) error {
 	if err := os.WriteFile(outPath, outBytes, 0o600); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "wrote %s from Blueprint base %s\n", outPath, basePath)
+	fmt.Fprintf(
+		os.Stderr,
+		"wrote %s from Blueprint base %s\n",
+		outPath,
+		basePath,
+	)
 	return nil
 }
 

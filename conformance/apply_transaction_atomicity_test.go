@@ -126,7 +126,9 @@ func TestApplyTransactionAllowsWithdrawalAfterDeregistrationAndReregistration(
 	builder := ledger.NewTransactionBuilder().
 		WithCertificates(
 			&common.StakeDeregistrationCertificate{
-				CertType:        uint(common.CertificateTypeStakeDeregistration),
+				CertType: uint(
+					common.CertificateTypeStakeDeregistration,
+				),
 				StakeCredential: credential,
 			},
 			&common.RegistrationCertificate{

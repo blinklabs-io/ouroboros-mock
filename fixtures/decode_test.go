@@ -126,7 +126,10 @@ func TestDecodeDijkstraProtocolParametersMapsRefScriptFields(
 	if !ok {
 		t.Fatalf("expected Dijkstra parameters, got %T", params)
 	}
-	if dijkstraParams.MaxRefScriptSizePerBlock == 0 || dijkstraParams.MaxRefScriptSizePerTx == 0 || dijkstraParams.RefScriptCostStride == 0 || dijkstraParams.RefScriptCostMultiplier == nil {
+	if dijkstraParams.MaxRefScriptSizePerBlock == 0 ||
+		dijkstraParams.MaxRefScriptSizePerTx == 0 ||
+		dijkstraParams.RefScriptCostStride == 0 ||
+		dijkstraParams.RefScriptCostMultiplier == nil {
 		t.Fatal("expected Dijkstra ref-script fields to be mapped")
 	}
 
