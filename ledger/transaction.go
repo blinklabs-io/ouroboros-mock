@@ -180,6 +180,14 @@ func (t *MockTransaction) Build() (lcommon.Transaction, error) {
 			)
 		}
 	}
+	for i, certificate := range t.certs {
+		if certificate == nil {
+			return nil, fmt.Errorf(
+				"transaction contains nil certificate at index %d",
+				i,
+			)
+		}
+	}
 	return t, nil
 }
 

@@ -252,21 +252,22 @@ func (b *StakeDelegationBuilder) Build() (*lcommon.StakeDelegationCertificate, e
 
 // PoolRegistrationBuilder builds a stake pool registration certificate.
 type PoolRegistrationBuilder struct {
-	operator      lcommon.PoolKeyHash
-	operatorSet   bool
-	vrfKeyHash    lcommon.VrfKeyHash
-	vrfSet        bool
-	pledge        uint64
-	cost          uint64
-	margin        cbor.Rat
-	owners        []lcommon.AddrKeyHash
-	ownersErr     error
-	rewardAccount lcommon.AddrKeyHash
-	rewardSet     bool
-	relays        []lcommon.PoolRelay
-	metadata      *lcommon.PoolMetadata
-	metadataErr   error
-	network       uint
+	operator         lcommon.PoolKeyHash
+	operatorSet      bool
+	vrfKeyHash       lcommon.VrfKeyHash
+	vrfSet           bool
+	pledge           uint64
+	cost             uint64
+	margin           cbor.Rat
+	owners           []lcommon.AddrKeyHash
+	ownersErr        error
+	rewardAccount    lcommon.AddrKeyHash
+	rewardCredential lcommon.Credential
+	rewardSet        bool
+	relays           []lcommon.PoolRelay
+	metadata         *lcommon.PoolMetadata
+	metadataErr      error
+	network          uint
 }
 
 func NewPoolRegistration(network uint) *PoolRegistrationBuilder {
@@ -312,6 +313,14 @@ func (b *PoolRegistrationBuilder) WithMargin(numerator, denominator uint64) *Poo
 func (b *PoolRegistrationBuilder) WithRewardAccountKey(hash []byte) *PoolRegistrationBuilder {
 	b.rewardAccount = lcommon.NewBlake2b224(hash)
 	b.rewardSet = len(hash) == hashSize
+	b.rewardCredential, _ = keyCredential(hash)
+	return b
+}
+
+func (b *PoolRegistrationBuilder) WithRewardAccountScript(hash []byte) *PoolRegistrationBuilder {
+	b.rewardAccount = lcommon.NewBlake2b224(hash)
+	b.rewardSet = len(hash) == hashSize
+	b.rewardCredential, _ = scriptCredential(hash)
 	return b
 }
 
@@ -379,10 +388,9 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 		Relays:        b.relays,
 		PoolMetadata:  b.metadata,
 	}
-	if err := cert.SetRewardAccountCredential(lcommon.Credential{
-		CredType:   lcommon.CredentialTypeAddrKeyHash,
-		Credential: lcommon.CredentialHash(cert.RewardAccount),
-	}, b.network); err != nil {
+	if err := cert.SetRewardAccountCredential(
+		b.rewardCredential, b.network,
+	); err != nil {
 		return nil, err
 	}
 	for i := range cert.Relays {
@@ -746,9 +754,10 @@ func (b *StakeVoteDelegationBuilder) Build() (*lcommon.StakeVoteDelegationCertif
 type combinedBuilder struct {
 	stakeBuilder
 	drepBuilder
-	poolKeyHash lcommon.PoolKeyHash
-	poolSet     bool
-	deposit     uint64
+	poolKeyHash    lcommon.PoolKeyHash
+	poolSet        bool
+	deposit        uint64
+	unsupportedErr error
 }
 
 func (b *combinedBuilder) WithCredential(hash []byte) {
@@ -777,6 +786,9 @@ func (b *combinedBuilder) WithDeposit(amount uint64) {
 }
 
 func (b *combinedBuilder) validateCombined(requireDRep, requirePool bool) error {
+	if b.unsupportedErr != nil {
+		return b.unsupportedErr
+	}
 	if err := b.validate(); err != nil {
 		return err
 	}
@@ -808,6 +820,21 @@ func (b *StakeRegistrationDelegationBuilder) WithCredential(hash []byte) *StakeR
 
 func (b *StakeRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *StakeRegistrationDelegationBuilder {
 	b.combinedBuilder.WithPoolKeyHash(hash)
+	return b
+}
+
+func (b *StakeRegistrationDelegationBuilder) WithDRepKeyHash(hash []byte) *StakeRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New("stake registration delegation has no DRep field")
+	return b
+}
+
+func (b *StakeRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *StakeRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New("stake registration delegation has no DRep field")
+	return b
+}
+
+func (b *StakeRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *StakeRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New("stake registration delegation has no DRep field")
 	return b
 }
 
@@ -861,6 +888,11 @@ func (b *VoteRegistrationDelegationBuilder) WithDRep(drep lcommon.Drep) *VoteReg
 
 func (b *VoteRegistrationDelegationBuilder) WithDRepScriptHash(hash []byte) *VoteRegistrationDelegationBuilder {
 	b.combinedBuilder.WithDRepScriptHash(hash)
+	return b
+}
+
+func (b *VoteRegistrationDelegationBuilder) WithPoolKeyHash(hash []byte) *VoteRegistrationDelegationBuilder {
+	b.unsupportedErr = errors.New("vote registration delegation has no pool field")
 	return b
 }
 

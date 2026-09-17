@@ -158,6 +158,59 @@ func TestPoolRegistrationUsesSelectedNetwork(t *testing.T) {
 	}
 }
 
+func TestPoolRegistrationSupportsScriptRewardAccount(t *testing.T) {
+	registration, err := certificates.NewPoolRegistration(lcommon.AddressNetworkMainnet).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountScript(stakeHash).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := registration.RewardAccountNetworkId(); !ok || got != uint(lcommon.AddressNetworkMainnet) {
+		t.Fatalf("reward account network = %d, known %t; want mainnet", got, ok)
+	}
+	if registration.RewardAccountCredential().CredType != lcommon.CredentialTypeScriptHash {
+		t.Fatalf("reward account credential type = %d; want script hash", registration.RewardAccountCredential().CredType)
+	}
+}
+
+func TestCombinedBuildersRejectUnsupportedFields(t *testing.T) {
+	if _, err := certificates.NewStakeRegistrationDelegation().
+		WithCredential(stakeHash).WithPoolKeyHash(poolHash).
+		WithDRepKeyHash(poolHash).Build(); err == nil {
+		t.Fatal("expected unsupported DRep field to be rejected")
+	}
+	if _, err := certificates.NewVoteRegistrationDelegation().
+		WithCredential(stakeHash).WithDRepKeyHash(poolHash).
+		WithPoolKeyHash(poolHash).Build(); err == nil {
+		t.Fatal("expected unsupported pool field to be rejected")
+	}
+}
+
+func TestTransactionRejectsNilCertificate(t *testing.T) {
+	input, err := ledger.NewTransactionInputBuilder().
+		WithTxId(bytes.Repeat([]byte{0x04}, lcommon.Blake2b256Size)).
+		WithIndex(0).Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := ledger.NewTransactionOutputBuilder().
+		WithAddress("addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp").
+		WithLovelace(5_000_000).Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := ledger.NewTransactionBuilder()
+	tx.WithInputs(input)
+	tx.WithOutputs(output)
+	tx.WithCertificates(nil)
+	_, err = tx.Build()
+	if err == nil {
+		t.Fatal("expected nil certificate to be rejected")
+	}
+}
+
 func TestBuildersRejectInvalidHashes(t *testing.T) {
 	if _, err := certificates.NewStakeRegistration().WithCredential([]byte{1}).Build(); err == nil {
 		t.Fatal("expected invalid stake credential hash to be rejected")
