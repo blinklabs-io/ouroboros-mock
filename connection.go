@@ -16,6 +16,7 @@ package ouroboros_mock
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -110,14 +111,11 @@ func (c *Connection) Close() error {
 	c.onceClose.Do(func() {
 		close(c.doneChan)
 		c.muxer.Stop()
-		if err := c.conn.Close(); err != nil {
-			retErr = err
-			return
-		}
-		if err := c.mockConn.Close(); err != nil {
-			retErr = err
-			return
-		}
+		// Close both halves unconditionally and report both outcomes.
+		// sync.Once never runs this body a second time, so giving up on
+		// the first error would strand the other half of the pipe for the
+		// life of the process with no way to retry.
+		retErr = errors.Join(c.conn.Close(), c.mockConn.Close())
 	})
 	return retErr
 }

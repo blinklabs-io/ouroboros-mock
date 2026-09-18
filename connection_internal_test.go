@@ -16,12 +16,54 @@ package ouroboros_mock
 
 import (
 	"errors"
+	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+// closeRecorder wraps a net.Conn to record that Close was reached and, when
+// err is set, to fail the call without touching the wrapped connection.
+type closeRecorder struct {
+	net.Conn
+	err    error
+	closed atomic.Bool
+}
+
+func (c *closeRecorder) Close() error {
+	c.closed.Store(true)
+	if c.err != nil {
+		return c.err
+	}
+	return c.Conn.Close()
+}
+
+func TestCloseClosesBothHalvesWhenTheClientHalfFails(t *testing.T) {
+	conn := NewConnection(ProtocolRoleClient, nil).(*Connection)
+
+	// A nil conversation means asyncLoop returns without reading either
+	// half, so swapping them here races nothing.
+	wantErr := errors.New("client half refused to close")
+	client := &closeRecorder{Conn: conn.conn, err: wantErr}
+	mock := &closeRecorder{Conn: conn.mockConn}
+	conn.conn, conn.mockConn = client, mock
+
+	err := conn.Close()
+
+	require.ErrorIs(t, err, wantErr)
+	require.True(t, mock.closed.Load(),
+		"the mock half must still be closed when the client half fails: "+
+			"onceClose never runs the body again, so an early return "+
+			"strands this half of the pipe permanently")
+}
+
+func TestCloseReportsNoErrorOnAHealthyConnection(t *testing.T) {
+	conn := NewConnection(ProtocolRoleClient, nil).(*Connection)
+	require.NoError(t, conn.Close())
+}
 
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {
 	conn := &Connection{errorChan: make(chan error, 1)}
