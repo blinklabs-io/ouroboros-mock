@@ -35,16 +35,25 @@ func NewScriptSig(keyHash lcommon.Blake2b224) (lcommon.NativeScript, error) {
 	return native(lcommon.NativeScriptPubkey{Type: 0, Hash: keyHash[:]})
 }
 
-func NewScriptAll(scripts ...lcommon.NativeScript) (lcommon.NativeScript, error) {
+func NewScriptAll(
+	scripts ...lcommon.NativeScript,
+) (lcommon.NativeScript, error) {
 	return native(lcommon.NativeScriptAll{Type: 1, Scripts: scripts})
 }
 
-func NewScriptAny(scripts ...lcommon.NativeScript) (lcommon.NativeScript, error) {
+func NewScriptAny(
+	scripts ...lcommon.NativeScript,
+) (lcommon.NativeScript, error) {
 	return native(lcommon.NativeScriptAny{Type: 2, Scripts: scripts})
 }
 
-func NewScriptAtLeast(required uint, scripts ...lcommon.NativeScript) (lcommon.NativeScript, error) {
-	return native(lcommon.NativeScriptNofK{Type: 3, N: required, Scripts: scripts})
+func NewScriptAtLeast(
+	required uint,
+	scripts ...lcommon.NativeScript,
+) (lcommon.NativeScript, error) {
+	return native(
+		lcommon.NativeScriptNofK{Type: 3, N: required, Scripts: scripts},
+	)
 }
 
 func NewInvalidBefore(slot uint64) (lcommon.NativeScript, error) {
@@ -80,8 +89,18 @@ func plutus(version uint) (lcommon.Script, error) {
 		return nil, fmt.Errorf("unsupported Plutus version %d", version)
 	}
 }
-func NewPlutusScript(version uint) (lcommon.Script, error)      { return plutus(version) }
-func AlwaysSucceedsScript(version uint) (lcommon.Script, error) { return plutus(version) }
+
+func NewPlutusScript(
+	version uint,
+) (lcommon.Script, error) {
+	return plutus(version)
+}
+
+func AlwaysSucceedsScript(
+	version uint,
+) (lcommon.Script, error) {
+	return plutus(version)
+}
 
 func AlwaysFailsScript(version uint) (lcommon.Script, error) {
 	if version < 1 || version > 3 {
@@ -108,9 +127,26 @@ func ScriptHash(script lcommon.Script) lcommon.ScriptHash {
 	}
 	return script.Hash()
 }
-func NewDatum(value data.PlutusData) lcommon.Datum { return lcommon.Datum{Data: value} }
-func NewRedeemer(tag lcommon.RedeemerTag, index uint32, value data.PlutusData, exUnits lcommon.ExUnits) (lcommon.RedeemerKey, lcommon.RedeemerValue) {
-	return lcommon.RedeemerKey{Tag: tag, Index: index}, lcommon.RedeemerValue{Data: NewDatum(value), ExUnits: exUnits}
+
+func NewDatum(
+	value data.PlutusData,
+) lcommon.Datum {
+	return lcommon.Datum{Data: value}
+}
+
+func NewRedeemer(
+	tag lcommon.RedeemerTag,
+	index uint32,
+	value data.PlutusData,
+	exUnits lcommon.ExUnits,
+) (lcommon.RedeemerKey, lcommon.RedeemerValue) {
+	return lcommon.RedeemerKey{
+			Tag:   tag,
+			Index: index,
+		}, lcommon.RedeemerValue{
+			Data:    NewDatum(value),
+			ExUnits: exUnits,
+		}
 }
 
 func ReferenceScript(script lcommon.Script) (lcommon.ScriptRef, error) {

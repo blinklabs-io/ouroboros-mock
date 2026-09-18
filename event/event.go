@@ -59,8 +59,19 @@ type BlockEvent struct {
 func NewBlockEvent() Event { return newEvent(TypeBlock, BlockContext{}, BlockEvent{}) }
 
 func BlockEventFromBlock(block ledger.Block, networkMagic uint32) Event {
-	ctx := BlockContext{Era: block.Era().Name, BlockNumber: block.BlockNumber(), SlotNumber: block.SlotNumber(), NetworkMagic: networkMagic}
-	payload := BlockEvent{Block: block, BlockHash: block.Hash().String(), BlockCbor: block.Cbor(), BlockBodySize: block.BlockBodySize(), TransactionCount: uint64(len(block.Transactions()))}
+	ctx := BlockContext{
+		Era:          block.Era().Name,
+		BlockNumber:  block.BlockNumber(),
+		SlotNumber:   block.SlotNumber(),
+		NetworkMagic: networkMagic,
+	}
+	payload := BlockEvent{
+		Block:            block,
+		BlockHash:        block.Hash().String(),
+		BlockCbor:        block.Cbor(),
+		BlockBodySize:    block.BlockBodySize(),
+		TransactionCount: uint64(len(block.Transactions())),
+	}
 	return newEvent(TypeBlock, ctx, payload)
 }
 
@@ -87,9 +98,30 @@ func NewTransactionEvent() Event {
 	return newEvent(TypeTransaction, TransactionContext{}, TransactionEvent{})
 }
 
-func TransactionEventFromTx(tx ledger.Transaction, blockHash string, blockNumber, slot uint64, txIdx uint32, networkMagic uint32) Event {
-	ctx := TransactionContext{TransactionHash: tx.Hash().String(), BlockNumber: blockNumber, SlotNumber: slot, TransactionIdx: txIdx, NetworkMagic: networkMagic}
-	payload := TransactionEvent{Transaction: tx, BlockHash: blockHash, Inputs: tx.Inputs(), Outputs: tx.Outputs(), Certificates: tx.Certificates(), TransactionCbor: tx.Cbor(), Fee: tx.Fee().Uint64(), TTL: tx.TTL()}
+func TransactionEventFromTx(
+	tx ledger.Transaction,
+	blockHash string,
+	blockNumber, slot uint64,
+	txIdx uint32,
+	networkMagic uint32,
+) Event {
+	ctx := TransactionContext{
+		TransactionHash: tx.Hash().String(),
+		BlockNumber:     blockNumber,
+		SlotNumber:      slot,
+		TransactionIdx:  txIdx,
+		NetworkMagic:    networkMagic,
+	}
+	payload := TransactionEvent{
+		Transaction:     tx,
+		BlockHash:       blockHash,
+		Inputs:          tx.Inputs(),
+		Outputs:         tx.Outputs(),
+		Certificates:    tx.Certificates(),
+		TransactionCbor: tx.Cbor(),
+		Fee:             tx.Fee().Uint64(),
+		TTL:             tx.TTL(),
+	}
 	return newEvent(TypeTransaction, ctx, payload)
 }
 
@@ -107,7 +139,14 @@ type RollbackEvent struct {
 
 func NewRollbackEvent() Event { return newEvent(TypeRollback, nil, RollbackEvent{}) }
 func RollbackEventAtSlot(slot uint64, blockHash []byte) Event {
-	return newEvent(TypeRollback, nil, RollbackEvent{BlockHash: hex.EncodeToString(blockHash), SlotNumber: slot})
+	return newEvent(
+		TypeRollback,
+		nil,
+		RollbackEvent{
+			BlockHash:  hex.EncodeToString(blockHash),
+			SlotNumber: slot,
+		},
+	)
 }
 
 type EventSequence struct{ Events []Event }
@@ -118,18 +157,34 @@ func (s *EventSequence) Add(events ...Event) *EventSequence {
 	return s
 }
 
-func EventSequenceFromBlocks(blocks []ledger.Block, networkMagic uint32) EventSequence {
+func EventSequenceFromBlocks(
+	blocks []ledger.Block,
+	networkMagic uint32,
+) EventSequence {
 	var seq EventSequence
 	for _, block := range blocks {
 		seq.Add(BlockEventFromBlock(block, networkMagic))
 		for idx, tx := range block.Transactions() {
-			seq.Add(TransactionEventFromTx(tx, block.Hash().String(), block.BlockNumber(), block.SlotNumber(), uint32(idx), networkMagic))
+			seq.Add(
+				TransactionEventFromTx(
+					tx,
+					block.Hash().String(),
+					block.BlockNumber(),
+					block.SlotNumber(),
+					uint32(idx),
+					networkMagic,
+				),
+			)
 		}
 	}
 	return seq
 }
 
-func RollbackScenarioEvents(forwardBlocks []ledger.Block, rollbackTo ocommon.Point, networkMagic uint32) EventSequence {
+func RollbackScenarioEvents(
+	forwardBlocks []ledger.Block,
+	rollbackTo ocommon.Point,
+	networkMagic uint32,
+) EventSequence {
 	seq := EventSequenceFromBlocks(forwardBlocks, networkMagic)
 	return *seq.Add(RollbackEventAtSlot(rollbackTo.Slot, rollbackTo.Hash))
 }

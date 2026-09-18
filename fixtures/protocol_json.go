@@ -290,15 +290,24 @@ func (p protocolParametersJSON) toDijkstraProtocolParameters() (*dijkstra.Dijkst
 	if err != nil {
 		return nil, err
 	}
-	maxBlock, err := optionalUint32Field("maxRefScriptSizePerBlock", p.MaxRefScriptSizePerBlock)
+	maxBlock, err := optionalUint32Field(
+		"maxRefScriptSizePerBlock",
+		p.MaxRefScriptSizePerBlock,
+	)
 	if err != nil {
 		return nil, err
 	}
-	maxTx, err := optionalUint32Field("maxRefScriptSizePerTx", p.MaxRefScriptSizePerTx)
+	maxTx, err := optionalUint32Field(
+		"maxRefScriptSizePerTx",
+		p.MaxRefScriptSizePerTx,
+	)
 	if err != nil {
 		return nil, err
 	}
-	stride, err := optionalUint32Field("refScriptCostStride", p.RefScriptCostStride)
+	stride, err := optionalUint32Field(
+		"refScriptCostStride",
+		p.RefScriptCostStride,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -313,15 +322,24 @@ func (p protocolParametersJSON) toDijkstraProtocolParameters() (*dijkstra.Dijkst
 
 func (p protocolParametersJSON) toDijkstraProtocolParameterUpdate() (*dijkstra.DijkstraProtocolParameterUpdate, error) {
 	u := p.toConwayProtocolParameterUpdate()
-	maxBlock, err := optionalUint32Pointer("maxRefScriptSizePerBlock", p.MaxRefScriptSizePerBlock)
+	maxBlock, err := optionalUint32Pointer(
+		"maxRefScriptSizePerBlock",
+		p.MaxRefScriptSizePerBlock,
+	)
 	if err != nil {
 		return nil, err
 	}
-	maxTx, err := optionalUint32Pointer("maxRefScriptSizePerTx", p.MaxRefScriptSizePerTx)
+	maxTx, err := optionalUint32Pointer(
+		"maxRefScriptSizePerTx",
+		p.MaxRefScriptSizePerTx,
+	)
 	if err != nil {
 		return nil, err
 	}
-	stride, err := optionalUint32Pointer("refScriptCostStride", p.RefScriptCostStride)
+	stride, err := optionalUint32Pointer(
+		"refScriptCostStride",
+		p.RefScriptCostStride,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1426,9 +1444,9 @@ func parseJSONDecimalRat(raw string) (*big.Rat, error) {
 
 	intPart := raw
 	fracPart := ""
-	if idx := strings.IndexByte(raw, '.'); idx >= 0 {
-		intPart = raw[:idx]
-		fracPart = raw[idx+1:]
+	if before, after, ok := strings.Cut(raw, "."); ok {
+		intPart = before
+		fracPart = after
 	}
 
 	digits := intPart + fracPart

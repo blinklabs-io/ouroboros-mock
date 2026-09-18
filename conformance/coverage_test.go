@@ -22,8 +22,14 @@ import (
 
 func TestSummarizeCoverage(t *testing.T) {
 	results := []VectorResult{
-		{Path: "testdata/eras/conway/ConwayImpSpec_-_Version_10.GOV.0", Success: true},
-		{Path: "testdata/eras/conway/ConwayImpSpec_-_Version_10.GOVCERT.0", Success: false},
+		{
+			Path:    "testdata/eras/conway/ConwayImpSpec_-_Version_10.GOV.0",
+			Success: true,
+		},
+		{
+			Path:    "testdata/eras/conway/ConwayImpSpec_-_Version_10.GOVCERT.0",
+			Success: false,
+		},
 		{Path: "testdata/eras/conway/AlonzoImpSpec.UTXOS.0", Success: true},
 		{Path: "synthetic/rollback/CurrentTreasuryValue_V1", Success: true},
 	}

@@ -1074,7 +1074,11 @@ func TestDRepRegistrationCallbackPreservesCredentialIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, scriptRegistration)
 	require.Equal(t, scriptCredential, scriptRegistration.Credential)
-	require.Equal(t, []lcommon.Credential{keyCredential, scriptCredential}, lookups)
+	require.Equal(
+		t,
+		[]lcommon.Credential{keyCredential, scriptCredential},
+		lookups,
+	)
 }
 
 func TestNewDRepRegistrationBuilder(t *testing.T) {

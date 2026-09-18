@@ -63,7 +63,12 @@ func TestPlutusScriptBuilders(t *testing.T) {
 
 func TestDatumAndRedeemerBuilders(t *testing.T) {
 	datum := NewDatum(data.NewInteger(big.NewInt(7)))
-	key, value := NewRedeemer(lcommon.RedeemerTagSpend, 2, datum.Data, lcommon.ExUnits{Memory: 10, Steps: 20})
+	key, value := NewRedeemer(
+		lcommon.RedeemerTagSpend,
+		2,
+		datum.Data,
+		lcommon.ExUnits{Memory: 10, Steps: 20},
+	)
 	if key.Tag != lcommon.RedeemerTagSpend || key.Index != 2 {
 		t.Fatalf("unexpected key: %#v", key)
 	}

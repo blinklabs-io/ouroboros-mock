@@ -174,8 +174,16 @@ func TestParseDelegationStateCardanoAccountWireOffsets(t *testing.T) {
 	require.True(t, state.StakeRegistrationsByCredential[keyAccount])
 	require.True(t, state.StakeRegistrationsByCredential[scriptAccount])
 	require.Equal(t, uint64(100), state.RewardAccounts[sharedHash])
-	require.Equal(t, filledBlake2b224(0xaa), state.PoolDelegationsByCredential[keyAccount])
-	require.Equal(t, filledBlake2b224(0xac), state.PoolDelegationsByCredential[scriptAccount])
+	require.Equal(
+		t,
+		filledBlake2b224(0xaa),
+		state.PoolDelegationsByCredential[keyAccount],
+	)
+	require.Equal(
+		t,
+		filledBlake2b224(0xac),
+		state.PoolDelegationsByCredential[scriptAccount],
+	)
 	require.Equal(t, common.Drep{
 		Type:       int(common.CredentialTypeScriptHash),
 		Credential: bytes.Repeat([]byte{0xab}, common.Blake2b224Size),
@@ -219,14 +227,22 @@ func TestParseProposalCardanoWireOffsets(t *testing.T) {
 		CredType:   common.CredentialTypeAddrKeyHash,
 		Credential: filledBlake2b224(0xa1),
 	}])
-	require.Equal(t, uint64(500), info.ProposedMembersByCredential[ledger.RewardAccountKey{
-		CredType:   common.CredentialTypeAddrKeyHash,
-		Credential: filledBlake2b224(0xb1),
-	}])
-	require.Equal(t, uint64(600), info.ProposedMembersByCredential[ledger.RewardAccountKey{
-		CredType:   common.CredentialTypeScriptHash,
-		Credential: filledBlake2b224(0xc1),
-	}])
+	require.Equal(
+		t,
+		uint64(500),
+		info.ProposedMembersByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeAddrKeyHash,
+			Credential: filledBlake2b224(0xb1),
+		}],
+	)
+	require.Equal(
+		t,
+		uint64(600),
+		info.ProposedMembersByCredential[ledger.RewardAccountKey{
+			CredType:   common.CredentialTypeScriptHash,
+			Credential: filledBlake2b224(0xc1),
+		}],
+	)
 }
 
 func TestExtractVotesFromTypedCredentialMap(t *testing.T) {
@@ -642,7 +658,11 @@ func TestDecodeCompactBlueprintTransactionOutput(t *testing.T) {
 	shelleyOutput, ok := output.(*shelley.ShelleyTransactionOutput)
 	require.True(t, ok)
 	require.Equal(t, uint64(45000000000000000), shelleyOutput.OutputAmount)
-	require.Equal(t, "addr_test1vzyq9ppc89y5vfulnmvdvmt3seumstexkaferjmdlqg8ercx8lee2", shelleyOutput.OutputAddress.String())
+	require.Equal(
+		t,
+		"addr_test1vzyq9ppc89y5vfulnmvdvmt3seumstexkaferjmdlqg8ercx8lee2",
+		shelleyOutput.OutputAddress.String(),
+	)
 	require.NotEmpty(t, output.Cbor())
 
 	_, ok = decodeCompactTransactionOutput(append([]byte{6}, raw[1:]...))

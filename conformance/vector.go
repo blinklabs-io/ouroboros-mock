@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -109,12 +110,7 @@ type TestVector struct {
 // Conway.Imp.ConwayImpSpec - Version 10.UTXOS.can use reference scripts, which a
 // strings.Contains check for "scripts/" silently excluded.
 func hasPathSegment(normalizedPath, name string) bool {
-	for _, segment := range strings.Split(normalizedPath, "/") {
-		if segment == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(normalizedPath, "/"), name)
 }
 
 // CollectVectorFiles walks the testdata directory and returns all vector file paths.
@@ -235,7 +231,11 @@ type blueprintVector struct {
 func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
 	var source blueprintVector
 	if err := json.Unmarshal(data, &source); err != nil {
-		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint JSON", Err: err}
+		return nil, &VectorError{
+			Path:    path,
+			Message: "failed to decode Blueprint JSON",
+			Err:     err,
+		}
 	}
 	decode := func(name, value string) ([]byte, error) {
 		decoded, err := hex.DecodeString(value)
@@ -246,17 +246,29 @@ func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
 	}
 	tx, err := decode("cbor", source.CBOR)
 	if err != nil {
-		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+		return nil, &VectorError{
+			Path:    path,
+			Message: "failed to decode Blueprint vector",
+			Err:     err,
+		}
 	}
 	oldState, err := decode("oldLedgerState", source.OldLedgerState)
 	if err != nil {
-		return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+		return nil, &VectorError{
+			Path:    path,
+			Message: "failed to decode Blueprint vector",
+			Err:     err,
+		}
 	}
 	var newState []byte
 	if source.NewLedgerState != "" {
 		newState, err = decode("newLedgerState", source.NewLedgerState)
 		if err != nil {
-			return nil, &VectorError{Path: path, Message: "failed to decode Blueprint vector", Err: err}
+			return nil, &VectorError{
+				Path:    path,
+				Message: "failed to decode Blueprint vector",
+				Err:     err,
+			}
 		}
 	} else if source.Success {
 		// An absent newLedgerState is only meaningful for a vector whose
@@ -296,8 +308,10 @@ func decodeBlueprintVector(path string, data []byte) (*TestVector, error) {
 // them from the legacy event envelope when the Blueprint pin changes.
 func blueprintExecutionEpoch(path string) uint64 {
 	const defaultEpoch = 899
-	if strings.HasSuffix(filepath.ToSlash(path),
-		"Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5") {
+	if strings.HasSuffix(
+		filepath.ToSlash(path),
+		"Conway.Imp.ConwayImpSpec_-_Version_10.GOV.Voting.expired_gov-actions/5",
+	) {
 		return 902
 	}
 	return defaultEpoch
@@ -367,7 +381,12 @@ func wrapBlueprintLedgerStateAtEpoch(ledgerState []byte, epoch uint64) []byte {
 		0x82, 0x82, 0x00, 0x00, // begin epoch account state
 	)
 	wrapped = append(wrapped, ledgerState...)
-	wrapped = append(wrapped, 0x80, 0x80, 0x80) // snapshots, pool distribution, non-myopic
+	wrapped = append(
+		wrapped,
+		0x80,
+		0x80,
+		0x80,
+	) // snapshots, pool distribution, non-myopic
 	return wrapped
 }
 

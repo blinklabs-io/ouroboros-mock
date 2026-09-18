@@ -126,9 +126,11 @@ func SnapshotFromParsedState(state *ParsedInitialState) *StateSnapshot {
 		UtxoIDs:                        ids,
 		StakeRegistrationsByCredential: registrations,
 		RewardAccountBalances:          maps.Clone(state.RewardAccountBalances),
-		StakeCredentialDeposits:        maps.Clone(state.StakeCredentialDeposits),
-		PoolRegistrations:              maps.Clone(state.PoolRegistrations),
-		Governance:                     governance,
+		StakeCredentialDeposits: maps.Clone(
+			state.StakeCredentialDeposits,
+		),
+		PoolRegistrations: maps.Clone(state.PoolRegistrations),
+		Governance:        governance,
 	}
 }
 

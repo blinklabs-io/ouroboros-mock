@@ -810,11 +810,13 @@ func (m *MockStateManager) deregisterStakeCredential(
 }
 
 func keyDepositAmount(pp common.ProtocolParameters) uint64 {
-	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok && conwayPP != nil {
+	if conwayPP, ok := pp.(*conway.ConwayProtocolParameters); ok &&
+		conwayPP != nil {
 		return uint64(conwayPP.KeyDeposit)
 	}
 	provider, ok := pp.(interface{ KeyDepositAmount() *big.Int })
-	if !ok || provider.KeyDepositAmount() == nil || !provider.KeyDepositAmount().IsUint64() {
+	if !ok || provider.KeyDepositAmount() == nil ||
+		!provider.KeyDepositAmount().IsUint64() {
 		return 0
 	}
 	return provider.KeyDepositAmount().Uint64()
@@ -1535,7 +1537,10 @@ func (m *MockStateManager) GetStateSnapshot() *StateSnapshot {
 		utxoIDs = append(utxoIDs, id)
 	}
 	sort.Strings(utxoIDs)
-	registrations := make(map[ledger.RewardAccountKey]bool, len(m.stakeRegistrations))
+	registrations := make(
+		map[ledger.RewardAccountKey]bool,
+		len(m.stakeRegistrations),
+	)
 	for credential := range m.stakeRegistrations {
 		registrations[credential] = true
 	}

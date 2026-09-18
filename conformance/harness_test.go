@@ -616,11 +616,18 @@ func TestFinalStateComparisonRejectsNoOpStateManager(t *testing.T) {
 	failed := 0
 	for _, result := range results {
 		if !result.Success && result.Error != nil &&
-			strings.Contains(result.Error.Error(), "final state comparison failed") {
+			strings.Contains(
+				result.Error.Error(),
+				"final state comparison failed",
+			) {
 			failed++
 		}
 	}
-	require.Positive(t, failed, "no-op StateManager must fail final-state comparison")
+	require.Positive(
+		t,
+		failed,
+		"no-op StateManager must fail final-state comparison",
+	)
 }
 
 func TestSuccessfulVectorRequiresFinalState(t *testing.T) {
@@ -669,8 +676,12 @@ func TestProposalStatesEqualComparesGovernancePayload(t *testing.T) {
 				gotInfo.ParameterUpdate = &update
 			}
 			mutate(&gotInfo)
-			got := map[string]*ProposalState{"proposal#0": {GovActionInfo: gotInfo}}
-			want := map[string]*ProposalState{"proposal#0": {GovActionInfo: base}}
+			got := map[string]*ProposalState{
+				"proposal#0": {GovActionInfo: gotInfo},
+			}
+			want := map[string]*ProposalState{
+				"proposal#0": {GovActionInfo: base},
+			}
 			require.False(t, proposalStatesEqual(got, want, 1))
 		})
 	}
@@ -814,7 +825,11 @@ func TestSnapshotIncludesStakeCredentialDeposits(t *testing.T) {
 	snapshot := SnapshotFromParsedState(&ParsedInitialState{
 		StakeCredentialDeposits: map[ledger.RewardAccountKey]uint64{key: 7},
 	})
-	require.Equal(t, map[ledger.RewardAccountKey]uint64{key: 7}, snapshot.StakeCredentialDeposits)
+	require.Equal(
+		t,
+		map[ledger.RewardAccountKey]uint64{key: 7},
+		snapshot.StakeCredentialDeposits,
+	)
 }
 
 // TestHarnessRollback exercises the rollback dispatch and journal-filtering
@@ -908,9 +923,7 @@ func (r *recordingStateManager) SetRewardBalances(
 	b map[common.Blake2b224]uint64,
 ) {
 	snapshot := make(map[common.Blake2b224]uint64, len(b))
-	for k, v := range b {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, b)
 	r.setRewardBalancesCalls = append(r.setRewardBalancesCalls, snapshot)
 	r.MockStateManager.SetRewardBalances(b)
 }

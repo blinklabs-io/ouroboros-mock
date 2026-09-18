@@ -278,7 +278,9 @@ func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
 	want := SnapshotFromParsedState(finalState)
 	snapshotProvider, ok := h.stateManager.(StateSnapshotProvider)
 	if !ok {
-		return errors.New("state manager does not implement StateSnapshotProvider")
+		return errors.New(
+			"state manager does not implement StateSnapshotProvider",
+		)
 	}
 	got := snapshotProvider.GetStateSnapshot()
 	if got == nil {
@@ -312,8 +314,13 @@ func (h *Harness) compareFinalState(raw cbor.RawMessage) error {
 	if !reflect.DeepEqual(got.PoolRegistrations, want.PoolRegistrations) {
 		mismatches = append(mismatches, "pool registrations")
 	}
-	if governance := governanceMismatches(got.Governance, want.Governance); len(governance) > 0 {
-		mismatches = append(mismatches, "governance: "+strings.Join(governance, ", "))
+	if governance := governanceMismatches(got.Governance, want.Governance); len(
+		governance,
+	) > 0 {
+		mismatches = append(
+			mismatches,
+			"governance: "+strings.Join(governance, ", "),
+		)
 	}
 	if len(mismatches) > 0 {
 		return fmt.Errorf(
@@ -335,13 +342,29 @@ func governanceMismatches(got, want *GovernanceState) []string {
 		want any
 	}{
 		{"epoch", got.CurrentEpoch, want.CurrentEpoch},
-		{"drep registrations", got.DRepRegistrationsByCredential, want.DRepRegistrationsByCredential},
-		{"drep delegations", got.DRepDelegationsByCredential, want.DRepDelegationsByCredential},
+		{
+			"drep registrations",
+			got.DRepRegistrationsByCredential,
+			want.DRepRegistrationsByCredential,
+		},
+		{
+			"drep delegations",
+			got.DRepDelegationsByCredential,
+			want.DRepDelegationsByCredential,
+		},
 		{"resignations", got.CommitteeResignations, want.CommitteeResignations},
-		{"stakes", got.StakeRegistrationsByCredential, want.StakeRegistrationsByCredential},
+		{
+			"stakes",
+			got.StakeRegistrationsByCredential,
+			want.StakeRegistrationsByCredential,
+		},
 		{"pools", got.PoolRegistrations, want.PoolRegistrations},
 		{"pool rewards", got.PoolRewardAccounts, want.PoolRewardAccounts},
-		{"pool delegations", got.PoolDelegationsByCredential, want.PoolDelegationsByCredential},
+		{
+			"pool delegations",
+			got.PoolDelegationsByCredential,
+			want.PoolDelegationsByCredential,
+		},
 		{"enacted", got.EnactedProposals, want.EnactedProposals},
 		{"roots", got.Roots, want.Roots},
 		{"constitution", got.Constitution, want.Constitution},
@@ -352,13 +375,23 @@ func governanceMismatches(got, want *GovernanceState) []string {
 			mismatches = append(mismatches, check.name)
 		}
 	}
-	if !committeeMembersEqual(got.CommitteeMembersByCredential, want.CommitteeMembersByCredential) {
+	if !committeeMembersEqual(
+		got.CommitteeMembersByCredential,
+		want.CommitteeMembersByCredential,
+	) {
 		mismatches = append(mismatches, "committee")
 	}
-	if !hotKeysEqual(got.HotKeyAuthorizationsByCredential, want.HotKeyAuthorizationsByCredential) {
+	if !hotKeysEqual(
+		got.HotKeyAuthorizationsByCredential,
+		want.HotKeyAuthorizationsByCredential,
+	) {
 		mismatches = append(mismatches, "hot keys")
 	}
-	if !drepExpiriesEqual(got.DRepExpiries, want.DRepExpiries, want.CurrentEpoch) {
+	if !drepExpiriesEqual(
+		got.DRepExpiries,
+		want.DRepExpiries,
+		want.CurrentEpoch,
+	) {
 		mismatches = append(mismatches, "drep expiries")
 	}
 	if !proposalStatesEqual(got.Proposals, want.Proposals, want.CurrentEpoch) {
@@ -393,17 +426,32 @@ func proposalStatesEqual(
 		policyMismatch := len(wantInfo.PolicyHash) > 0 &&
 			!bytes.Equal(gotInfo.PolicyHash, wantInfo.PolicyHash)
 		parameterMismatch := wantInfo.ParameterUpdate != nil &&
-			!parameterUpdatesEqual(gotInfo.ParameterUpdate, wantInfo.ParameterUpdate)
+			!parameterUpdatesEqual(
+				gotInfo.ParameterUpdate,
+				wantInfo.ParameterUpdate,
+			)
 		if gotInfo.ActionType != wantInfo.ActionType ||
 			!proposalEpochsEqual(gotInfo, wantInfo, currentEpoch) ||
 			parentMismatch || votesMismatch ||
 			gotInfo.Deposit != wantInfo.Deposit ||
 			!reflect.DeepEqual(gotInfo.ReturnAccount, wantInfo.ReturnAccount) ||
-			!reflect.DeepEqual(gotInfo.RemovedMembers, wantInfo.RemovedMembers) ||
-			!reflect.DeepEqual(gotInfo.ProposedMembers, wantInfo.ProposedMembers) ||
-			!reflect.DeepEqual(gotInfo.ProposedMembersByCredential, wantInfo.ProposedMembersByCredential) ||
+			!reflect.DeepEqual(
+				gotInfo.RemovedMembers,
+				wantInfo.RemovedMembers,
+			) ||
+			!reflect.DeepEqual(
+				gotInfo.ProposedMembers,
+				wantInfo.ProposedMembers,
+			) ||
+			!reflect.DeepEqual(
+				gotInfo.ProposedMembersByCredential,
+				wantInfo.ProposedMembersByCredential,
+			) ||
 			policyMismatch || parameterMismatch ||
-			!reflect.DeepEqual(gotInfo.ProtocolVersion, wantInfo.ProtocolVersion) {
+			!reflect.DeepEqual(
+				gotInfo.ProtocolVersion,
+				wantInfo.ProtocolVersion,
+			) {
 			return false
 		}
 	}
@@ -435,10 +483,12 @@ func drepExpiriesEqual(
 }
 
 func proposalEpochsEqual(got, want GovActionInfo, currentEpoch uint64) bool {
-	if want.ExpiresAfter < want.SubmittedEpoch || got.ExpiresAfter < got.SubmittedEpoch {
+	if want.ExpiresAfter < want.SubmittedEpoch ||
+		got.ExpiresAfter < got.SubmittedEpoch {
 		return false
 	}
-	if want.SubmittedEpoch <= currentEpoch && got.SubmittedEpoch <= currentEpoch {
+	if want.SubmittedEpoch <= currentEpoch &&
+		got.SubmittedEpoch <= currentEpoch {
 		return got.SubmittedEpoch == want.SubmittedEpoch &&
 			got.ExpiresAfter == want.ExpiresAfter
 	}
@@ -487,7 +537,10 @@ func hotKeysEqual(
 	for key, gotCredential := range got {
 		wantCredential, ok := want[key]
 		if !ok || gotCredential.CredType != wantCredential.CredType ||
-			!bytes.Equal(gotCredential.Credential[:], wantCredential.Credential[:]) {
+			!bytes.Equal(
+				gotCredential.Credential[:],
+				wantCredential.Credential[:],
+			) {
 			return false
 		}
 	}

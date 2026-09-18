@@ -35,7 +35,12 @@ func TestCollectVectorFilesMatchesWholeSegments(t *testing.T) {
 	root := t.TempDir()
 
 	// A directory whose name ends in a filter word: its vector must be kept.
-	kept := filepath.Join(root, "eras", "conway", "UTXOS.can_use_reference_scripts")
+	kept := filepath.Join(
+		root,
+		"eras",
+		"conway",
+		"UTXOS.can_use_reference_scripts",
+	)
 	if err := os.MkdirAll(kept, 0o755); err != nil {
 		t.Fatalf("mkdir kept: %v", err)
 	}
@@ -92,9 +97,12 @@ func TestCollectVectorFilesMatchesWholeSegments(t *testing.T) {
 	}
 	for _, path := range got {
 		slashed := filepath.ToSlash(path)
-		for _, segment := range strings.Split(slashed, "/") {
+		for segment := range strings.SplitSeq(slashed, "/") {
 			if segment == "scripts" || segment == "pparams-by-hash" {
-				t.Errorf("a genuinely filtered directory was collected: %s", path)
+				t.Errorf(
+					"a genuinely filtered directory was collected: %s",
+					path,
+				)
 			}
 		}
 	}

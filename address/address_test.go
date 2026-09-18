@@ -29,28 +29,55 @@ func TestAddressBuilderTypes(t *testing.T) {
 		want  uint8
 	}{
 		{"base key-key", func() (common.Address, error) {
-			return NewAddress().WithMainnet().WithPaymentKeyHash(hash).WithStakingKeyHash(hash).Build()
+			return NewAddress().WithMainnet().
+				WithPaymentKeyHash(hash).
+				WithStakingKeyHash(hash).
+				Build()
 		}, common.AddressTypeKeyKey},
 		{"base script-key", func() (common.Address, error) {
-			return NewAddress().WithPaymentScript(hash).WithStakingKeyHash(hash).Build()
+			return NewAddress().WithPaymentScript(hash).
+				WithStakingKeyHash(hash).
+				Build()
 		}, common.AddressTypeScriptKey},
 		{"base key-script", func() (common.Address, error) {
-			return NewAddress().WithPaymentKeyHash(hash).WithStakingScript(hash).Build()
+			return NewAddress().WithPaymentKeyHash(hash).
+				WithStakingScript(hash).
+				Build()
 		}, common.AddressTypeKeyScript},
 		{"base script-script", func() (common.Address, error) {
-			return NewAddress().WithPaymentScript(hash).WithStakingScript(hash).Build()
+			return NewAddress().WithPaymentScript(hash).
+				WithStakingScript(hash).
+				Build()
 		}, common.AddressTypeScriptScript},
-		{"enterprise key", func() (common.Address, error) { return NewAddress().WithPaymentKeyHash(hash).WithNoStaking().Build() }, common.AddressTypeKeyNone},
-		{"enterprise script", func() (common.Address, error) { return NewAddress().WithPaymentScript(hash).WithNoStaking().Build() }, common.AddressTypeScriptNone},
+		{
+			"enterprise key",
+			func() (common.Address, error) { return NewAddress().WithPaymentKeyHash(hash).WithNoStaking().Build() },
+			common.AddressTypeKeyNone,
+		},
+		{
+			"enterprise script",
+			func() (common.Address, error) { return NewAddress().WithPaymentScript(hash).WithNoStaking().Build() },
+			common.AddressTypeScriptNone,
+		},
 		{"reward key", func() (common.Address, error) {
-			return NewAddress().WithMainnet().WithStakingKeyHash(hash).BuildReward()
+			return NewAddress().WithMainnet().
+				WithStakingKeyHash(hash).
+				BuildReward()
 		}, common.AddressTypeNoneKey},
-		{"reward script", func() (common.Address, error) { return NewAddress().WithStakingScript(hash).BuildReward() }, common.AddressTypeNoneScript},
+		{
+			"reward script",
+			func() (common.Address, error) { return NewAddress().WithStakingScript(hash).BuildReward() },
+			common.AddressTypeNoneScript,
+		},
 		{"pointer key", func() (common.Address, error) {
-			return NewAddress().WithPaymentKeyHash(hash).WithStakePointer(300, 2, 1).Build()
+			return NewAddress().WithPaymentKeyHash(hash).
+				WithStakePointer(300, 2, 1).
+				Build()
 		}, common.AddressTypeKeyPointer},
 		{"pointer script", func() (common.Address, error) {
-			return NewAddress().WithPaymentScript(hash).WithStakePointer(300, 2, 1).Build()
+			return NewAddress().WithPaymentScript(hash).
+				WithStakePointer(300, 2, 1).
+				Build()
 		}, common.AddressTypeScriptPointer},
 	}
 	for _, tc := range cases {
@@ -174,9 +201,15 @@ func TestAddressBuilderPointerCoordinates(t *testing.T) {
 	}
 	pointer, ok := addr.StakingPayload().(common.AddressPayloadPointer)
 	if !ok {
-		t.Fatalf("staking payload type = %T, want pointer", addr.StakingPayload())
+		t.Fatalf(
+			"staking payload type = %T, want pointer",
+			addr.StakingPayload(),
+		)
 	}
 	if pointer.Slot != 300 || pointer.TxIndex != 2 || pointer.CertIndex != 1 {
-		t.Fatalf("pointer = %#v, want slot 300, tx index 2, cert index 1", pointer)
+		t.Fatalf(
+			"pointer = %#v, want slot 300, tx index 2, cert index 1",
+			pointer,
+		)
 	}
 }

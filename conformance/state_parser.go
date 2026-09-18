@@ -293,7 +293,8 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 	// decode into cbor.Value. Keep this separate from the UTxO map: reference
 	// scripts in that map are what make whole-state decoding unsafe.
 	var certState []cbor.RawMessage
-	if _, err := cbor.Decode(ls[0], &certState); err == nil && len(certState) > 1 {
+	if _, err := cbor.Decode(ls[0], &certState); err == nil &&
+		len(certState) > 1 {
 		var poolState cbor.Value
 		if _, err := cbor.Decode(certState[1], &poolState); err == nil {
 			_ = parsePoolState(state, poolState.Value())
@@ -309,7 +310,8 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		}
 		if len(utxoState) > 3 {
 			var govState []cbor.RawMessage
-			if _, err := cbor.Decode(utxoState[3], &govState); err == nil && len(govState) > 2 {
+			if _, err := cbor.Decode(utxoState[3], &govState); err == nil &&
+				len(govState) > 2 {
 				var proposals cbor.Value
 				if _, err := cbor.Decode(govState[0], &proposals); err == nil {
 					_ = parseProposals(state, proposals.Value())
@@ -506,11 +508,13 @@ func parseProposalsFromRawCBOR(
 			var id rawGovActionID
 			if _, err := cbor.Decode(idRaw, &id); err != nil {
 				var idParts []cbor.RawMessage
-				if _, err := cbor.Decode(idRaw, &idParts); err != nil || len(idParts) != 2 {
+				if _, err := cbor.Decode(idRaw, &idParts); err != nil ||
+					len(idParts) != 2 {
 					continue
 				}
 				var hash []byte
-				if _, err := cbor.Decode(idParts[0], &hash); err != nil || len(hash) != len(id.TxID) {
+				if _, err := cbor.Decode(idParts[0], &hash); err != nil ||
+					len(hash) != len(id.TxID) {
 					continue
 				}
 				copy(id.TxID[:], hash)
@@ -588,14 +592,20 @@ func parseProposalInfoFromRawCBOR(
 	if _, err := cbor.Decode(action[0], &actionType); err != nil {
 		return info, true
 	}
-	if actionType == uint64(common.GovActionTypeHardForkInitiation) && len(action) >= 3 {
+	if actionType == uint64(common.GovActionTypeHardForkInitiation) &&
+		len(action) >= 3 {
 		var version []uint64
-		if _, err := cbor.Decode(action[2], &version); err == nil && len(version) >= 2 {
-			info.ProtocolVersion = &ProtocolVersionInfo{Major: uint(version[0]), Minor: uint(version[1])}
+		if _, err := cbor.Decode(action[2], &version); err == nil &&
+			len(version) >= 2 {
+			info.ProtocolVersion = &ProtocolVersionInfo{
+				Major: uint(version[0]),
+				Minor: uint(version[1]),
+			}
 		}
 		return info, true
 	}
-	if actionType != uint64(common.GovActionTypeUpdateCommittee) || len(action) < 4 {
+	if actionType != uint64(common.GovActionTypeUpdateCommittee) ||
+		len(action) < 4 {
 		return info, true
 	}
 	var members map[stakeCredential]uint64
@@ -836,7 +846,9 @@ func parseUtxosFromRawCBOR(raw cbor.RawMessage) (map[string]ParsedUtxo, error) {
 // the Blueprint UTxO map: a compact address followed by a tagged variable
 // length coin. The address is self-delimiting, so try prefixes rather than
 // assuming a fixed Shelley address size (Byron addresses are variable-sized).
-func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool) {
+func decodeCompactTransactionOutput(
+	raw []byte,
+) (common.TransactionOutput, bool) {
 	// Tags 0 and 1 are the compact-address forms (without and with a datum
 	// hash). The trailing datum hash is not needed for UTxO identity or the
 	// current state-provider contract, so the shared address/value decoder can
@@ -884,7 +896,9 @@ func decodeCompactTransactionOutput(raw []byte) (common.TransactionOutput, bool)
 		})
 	}
 	if raw[0] == 1 && valueEnd+32 <= len(raw)-(2+addressLen) {
-		datumHash := common.Blake2b256(raw[2+addressLen+valueEnd : 2+addressLen+valueEnd+32])
+		datumHash := common.Blake2b256(
+			raw[2+addressLen+valueEnd : 2+addressLen+valueEnd+32],
+		)
 		return canonicalizeCompactOutput(&alonzo.AlonzoTransactionOutput{
 			OutputAddress:   address,
 			OutputAmount:    mary.MaryTransactionOutputValue{Amount: coin},
@@ -1087,7 +1101,11 @@ func decodeCompactValueCoinWithEnd(raw []byte) (uint64, int, bool) {
 	if !ok {
 		return 0, 0, false
 	}
-	end, ok := compactSliceEnd(1+consumed+countBytes+lengthBytes, length, len(raw))
+	end, ok := compactSliceEnd(
+		1+consumed+countBytes+lengthBytes,
+		length,
+		len(raw),
+	)
 	if !ok {
 		return 0, 0, false
 	}
@@ -1309,7 +1327,9 @@ func parseDelegationState(
 			if cred == nil {
 				continue
 			}
-			balance, deposit, hasDeposit, registered := extractRewardAccountState(v)
+			balance, deposit, hasDeposit, registered := extractRewardAccountState(
+				v,
+			)
 			if !registered {
 				continue
 			}
@@ -1692,10 +1712,16 @@ func parseProposals(state *ParsedInitialState, proposalsRaw any) error {
 	}
 	if canonical {
 		if roots, ok := proposalsArr[0].([]any); ok && len(roots) >= 4 {
-			state.ProposalRoots.ProtocolParameters = extractWrappedEnactedRoot(roots[0])
+			state.ProposalRoots.ProtocolParameters = extractWrappedEnactedRoot(
+				roots[0],
+			)
 			state.ProposalRoots.HardFork = extractWrappedEnactedRoot(roots[1])
-			state.ProposalRoots.ConstitutionalCommittee = extractWrappedEnactedRoot(roots[2])
-			state.ProposalRoots.Constitution = extractWrappedEnactedRoot(roots[3])
+			state.ProposalRoots.ConstitutionalCommittee = extractWrappedEnactedRoot(
+				roots[2],
+			)
+			state.ProposalRoots.Constitution = extractWrappedEnactedRoot(
+				roots[3],
+			)
 		}
 		if proposals, ok := proposalsArr[1].([]any); ok {
 			for _, proposal := range proposals {
@@ -2273,10 +2299,12 @@ func extractPParamsHashFromRawCBOR(ls []cbor.RawMessage) []byte {
 		}
 
 		var nested []cbor.RawMessage
-		if _, err := cbor.Decode(item[3], &nested); err != nil || len(nested) <= 3 {
+		if _, err := cbor.Decode(item[3], &nested); err != nil ||
+			len(nested) <= 3 {
 			continue
 		}
-		if _, err := cbor.Decode(nested[3], &hash); err == nil && len(hash) > 0 {
+		if _, err := cbor.Decode(nested[3], &hash); err == nil &&
+			len(hash) > 0 {
 			return hash
 		}
 	}

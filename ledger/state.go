@@ -1009,9 +1009,7 @@ func (b *LedgerStateBuilder) WithStakeRegistrations(
 func (b *LedgerStateBuilder) WithStakeCredentialDeposits(
 	deposits map[RewardAccountKey]uint64,
 ) *LedgerStateBuilder {
-	for credential, deposit := range deposits {
-		b.state.stakeCredentialDeposits[credential] = deposit
-	}
+	maps.Copy(b.state.stakeCredentialDeposits, deposits)
 	return b
 }
 

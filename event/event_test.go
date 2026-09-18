@@ -35,12 +35,24 @@ func TestBaseBuildersUseStableEventShapes(t *testing.T) {
 }
 
 func TestRollbackScenarioPreservesOrder(t *testing.T) {
-	blocks, err := fixtures.GenerateConwayChainWithTransactions(1, common.Blake2b256{}, 10, 10, 1)
+	blocks, err := fixtures.GenerateConwayChainWithTransactions(
+		1,
+		common.Blake2b256{},
+		10,
+		10,
+		1,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seq := RollbackScenarioEvents(blocks, ocommon.Point{Slot: 42, Hash: []byte{1, 2, 3}}, 764824073)
-	if len(seq.Events) != 3 || seq.Events[0].Type != TypeBlock || seq.Events[1].Type != TypeTransaction || seq.Events[2].Type != TypeRollback {
+	seq := RollbackScenarioEvents(
+		blocks,
+		ocommon.Point{Slot: 42, Hash: []byte{1, 2, 3}},
+		764824073,
+	)
+	if len(seq.Events) != 3 || seq.Events[0].Type != TypeBlock ||
+		seq.Events[1].Type != TypeTransaction ||
+		seq.Events[2].Type != TypeRollback {
 		t.Fatalf("unexpected sequence: %#v", seq.Events)
 	}
 	blockPayload := seq.Events[0].Payload.(BlockEvent)
@@ -48,7 +60,8 @@ func TestRollbackScenarioPreservesOrder(t *testing.T) {
 		t.Fatal("block CBOR is empty")
 	}
 	txPayload := seq.Events[1].Payload.(TransactionEvent)
-	if txPayload.BlockHash != blocks[0].Hash().String() || len(txPayload.TransactionCbor) == 0 {
+	if txPayload.BlockHash != blocks[0].Hash().String() ||
+		len(txPayload.TransactionCbor) == 0 {
 		t.Fatalf("unexpected transaction metadata: %#v", txPayload)
 	}
 	payload := seq.Events[2].Payload.(RollbackEvent)
