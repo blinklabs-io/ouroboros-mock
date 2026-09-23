@@ -140,13 +140,12 @@ func NewRedeemer(
 	value data.PlutusData,
 	exUnits lcommon.ExUnits,
 ) (lcommon.RedeemerKey, lcommon.RedeemerValue) {
-	return lcommon.RedeemerKey{
-			Tag:   tag,
-			Index: index,
-		}, lcommon.RedeemerValue{
-			Data:    NewDatum(value),
-			ExUnits: exUnits,
-		}
+	key := lcommon.RedeemerKey{Tag: tag, Index: index}
+	redeemer := lcommon.RedeemerValue{
+		Data:    NewDatum(value),
+		ExUnits: exUnits,
+	}
+	return key, redeemer
 }
 
 func ReferenceScript(script lcommon.Script) (lcommon.ScriptRef, error) {
