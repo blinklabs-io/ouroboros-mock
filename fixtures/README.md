@@ -101,9 +101,10 @@ Current upstream exceptions are encoded in the harness rather than ignored:
 
 - the current `Block_Dijkstra` consensus payload is truncated upstream, so the
   runner validates the outer wrapper/header path instead of full block decode
-- Byron `GenTxId_*` fixtures do not currently line up with
-  `gouroboros`'s Byron transaction hash semantics, so they are validated
-  independently rather than as a paired tx/txid round-trip
+- The upstream `GenTx_Byron` and `GenTxId_Byron` files are not a matching
+  transaction/ID pair. The ID value matches the GenTx's referenced input ID,
+  not its transaction-body hash. Both fixtures are decoded and checked
+  independently; pair comparisons use the explicit unpaired-fixture metadata.
 - Dijkstra `GenTx_*` fixtures currently validate through payload/body-hash
   semantics because the imported fixture shape is ahead of full
   `gouroboros` transaction decoding support

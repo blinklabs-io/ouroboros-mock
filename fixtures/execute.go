@@ -474,9 +474,6 @@ func executeTransactionFixture(
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindTransactionID); ok {
-		if fixture.Repo == RepoOuroborosConsensus && fixture.Era == "byron" {
-			return 1, nil
-		}
 		txIDBytes, err := counterpart.LedgerTransactionIDBytes()
 		if err != nil {
 			return 0, fmt.Errorf(
@@ -545,9 +542,6 @@ func executeTransactionIDFixture(
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindTransaction); ok {
-		if fixture.Repo == RepoOuroborosConsensus && fixture.Era == "byron" {
-			return 1, nil
-		}
 		tx, err := counterpart.DecodeLedgerTransaction()
 		if err != nil {
 			return 0, fmt.Errorf(
@@ -1215,8 +1209,31 @@ func relatedFixture(
 	}
 
 	targetPath := path.Join(path.Dir(fixture.RelPath), targetName)
+	if _, unpaired := unpairedFixturePairs[fixturePairKey(
+		fixture.RelPath,
+		targetPath,
+	)]; unpaired {
+		return Fixture{}, false
+	}
 	related, ok := fixtureMap[targetPath]
 	return related, ok
+}
+
+func fixturePairKey(firstPath, secondPath string) string {
+	if firstPath > secondPath {
+		firstPath, secondPath = secondPath, firstPath
+	}
+	return firstPath + "\x00" + secondPath
+}
+
+// The upstream Byron GenTx and GenTxId files share an era but are not a
+// transaction/id pair: the ID golden equals the GenTx's referenced input ID,
+// not the hash of its transaction body.
+var unpairedFixturePairs = map[string]struct{}{
+	fixturePairKey(
+		consensusV2FixtureRoot+"GenTx_Byron",
+		consensusV2FixtureRoot+"GenTxId_Byron",
+	): {},
 }
 
 func sameDirectoryFixture(

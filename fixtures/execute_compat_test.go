@@ -20,6 +20,40 @@ import (
 	"testing"
 )
 
+func TestByronConsensusGenTxFixturesAreUnpaired(t *testing.T) {
+	harness := NewHarness(HarnessConfig{})
+	allFixtures, err := harness.Collect()
+	if err != nil {
+		t.Fatalf("failed to collect fixtures: %v", err)
+	}
+	fixtureMap := make(map[string]Fixture, len(allFixtures))
+	for _, fixture := range allFixtures {
+		fixtureMap[fixture.RelPath] = fixture
+	}
+	byronTxPath := consensusV2FixtureRoot + "GenTx_Byron"
+	byronTxIDPath := consensusV2FixtureRoot + "GenTxId_Byron"
+	byronTx, ok := fixtureMap[byronTxPath]
+	if !ok {
+		t.Fatalf("missing fixture %s", byronTxPath)
+	}
+	byronTxID, ok := fixtureMap[byronTxIDPath]
+	if !ok {
+		t.Fatalf("missing fixture %s", byronTxIDPath)
+	}
+	if _, ok := relatedFixture(fixtureMap, byronTx, KindTransactionID); ok {
+		t.Fatal("Byron GenTx fixture must not pair with the independent ID golden")
+	}
+	if _, ok := relatedFixture(fixtureMap, byronTxID, KindTransaction); ok {
+		t.Fatal("Byron GenTxId fixture must not pair with the independent transaction golden")
+	}
+
+	shelleyTxPath := consensusV2FixtureRoot + "GenTx_Shelley"
+	shelleyTx := fixtureMap[shelleyTxPath]
+	if _, ok := relatedFixture(fixtureMap, shelleyTx, KindTransactionID); !ok {
+		t.Fatal("expected Shelley GenTx fixture to pair with its transaction ID")
+	}
+}
+
 func TestStrictDecodePlaceholderMatcher(t *testing.T) {
 	exactStrictDecodeErrors := []string{
 		"invalid blake2b-256 hash: expected 32 bytes, got 2",
