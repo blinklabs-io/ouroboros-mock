@@ -148,28 +148,32 @@ func generateByronChain(
 	}
 	blocks := make([]ledger.Block, 0, count)
 	currentPrev := prevHash
+	// The reference decoders require an indefinite-length body
+	// (dropBoundaryBody) and [attributes] for both the extra header and
+	// extra body data, so these are written as raw CBOR: re-encoding the
+	// struct would emit a definite-length body and a null ExtraData.
+	bodyCbor := []byte{0x9f, 0xff}
+	extraBodyCbor := []byte{0x81, 0xa0}
 	for i := range count {
-		body := [][]byte{}
-		bodyCbor, err := cbor.Encode(body)
-		if err != nil {
-			return nil, fmt.Errorf("encode byron EBB body %d: %w", i, err)
-		}
 		header := &byron.ByronEpochBoundaryBlockHeader{
 			ProtocolMagic: byron.TestnetProtocolMagic,
 			PrevBlock:     currentPrev,
 			BodyProof:     common.Blake2b256Hash(bodyCbor).Bytes(),
+			ExtraData:     []any{map[uint8][]byte{}},
 		}
 		header.ConsensusData.Epoch = (startSlot + uint64(i)*slotIncrement) / byron.ByronSlotsPerEpoch
 		header.ConsensusData.Difficulty.Value = startBlockNumber + uint64(i)
-		block := &byron.ByronEpochBoundaryBlock{
-			BlockHeader: header,
-			Body:        body,
-			Extra:       []any{},
-		}
-		blockCbor, err := cbor.Encode(block)
+		headerCbor, err := cbor.Encode(header)
 		if err != nil {
-			return nil, fmt.Errorf("encode byron EBB %d: %w", i, err)
+			return nil, fmt.Errorf("encode byron EBB header %d: %w", i, err)
 		}
+		blockCbor := make(
+			[]byte, 0, 1+len(headerCbor)+len(bodyCbor)+len(extraBodyCbor),
+		)
+		blockCbor = append(blockCbor, 0x83)
+		blockCbor = append(blockCbor, headerCbor...)
+		blockCbor = append(blockCbor, bodyCbor...)
+		blockCbor = append(blockCbor, extraBodyCbor...)
 		decoded, err := byron.NewByronEpochBoundaryBlockFromCbor(blockCbor)
 		if err != nil {
 			return nil, fmt.Errorf("decode byron EBB %d: %w", i, err)
