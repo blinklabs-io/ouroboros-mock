@@ -9,7 +9,10 @@
 package fixtures_test
 
 import (
+	"bytes"
 	"testing"
+
+	"github.com/blinklabs-io/gouroboros/cbor"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -70,5 +73,42 @@ func TestGenerateBlockByronRequiresEpochAlignedSlot(t *testing.T) {
 	}
 	if _, err := fixtures.GenerateBlock(era, 1, 0); err != nil {
 		t.Fatalf("aligned Byron slot failed: %v", err)
+	}
+}
+
+// TestGenerateBlockByronEBBUsesReferenceShape pins the wire shapes the
+// reference boundary-block decoders require: an indefinite-length body and
+// [attributes] for both the extra header and extra body data.
+func TestGenerateBlockByronEBBUsesReferenceShape(t *testing.T) {
+	block, err := fixtures.GenerateBlock(ledger.GetEraById(0), 1, 0)
+	if err != nil {
+		t.Fatalf("generate Byron EBB: %v", err)
+	}
+	var blockParts []cbor.RawMessage
+	if _, err := cbor.Decode(block.Cbor(), &blockParts); err != nil {
+		t.Fatalf("decode EBB: %v", err)
+	}
+	if len(blockParts) != 3 {
+		t.Fatalf("EBB has %d fields, expected 3", len(blockParts))
+	}
+	var headerParts []cbor.RawMessage
+	if _, err := cbor.Decode(blockParts[0], &headerParts); err != nil {
+		t.Fatalf("decode EBB header: %v", err)
+	}
+	if len(headerParts) != 5 {
+		t.Fatalf("EBB header has %d fields, expected 5", len(headerParts))
+	}
+	for name, got := range map[string][]byte{
+		"body":              blockParts[1],
+		"extra body data":   blockParts[2],
+		"extra header data": headerParts[4],
+	} {
+		want := []byte{0x81, 0xa0}
+		if name == "body" {
+			want = []byte{0x9f, 0xff}
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s is %x, expected %x", name, got, want)
+		}
 	}
 }
