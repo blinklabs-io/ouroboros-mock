@@ -16,8 +16,10 @@ package fixtures
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -145,6 +147,30 @@ func TestDecodeDijkstraProtocolParametersMapsRefScriptFields(
 	}
 	if _, ok := update.Value().(*dijkstra.DijkstraProtocolParameterUpdate); !ok {
 		t.Fatalf("expected Dijkstra update, got %T", update.Value())
+	}
+}
+
+func TestDecodeShelleyProtocolParameterUpdatePreservesWord64MaxEpoch(
+	t *testing.T,
+) {
+	fixture := writeTempJSONFixture(
+		t,
+		"cardano-ledger/eras/shelley/impl/golden/pparams-update.json",
+		`{"poolRetireMaxEpoch":18446744073709551615}`,
+	)
+	update, err := fixture.DecodeProtocolParameterUpdate()
+	if err != nil {
+		t.Fatalf("DecodeProtocolParameterUpdate failed: %v", err)
+	}
+	value := reflect.ValueOf(update.Value()).Elem().FieldByName("MaxEpoch")
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		t.Fatalf("expected MaxEpoch pointer, got %v", value.Type())
+	}
+	if value.Type().Elem().Bits() < 64 {
+		t.Skip("the current Gouroboros model cannot represent a Word64 MaxEpoch")
+	}
+	if got := value.Elem().Uint(); got != math.MaxUint64 {
+		t.Fatalf("MaxEpoch = %d, want %d", got, uint64(math.MaxUint64))
 	}
 }
 
