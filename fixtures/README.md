@@ -122,6 +122,38 @@ Use `GenerateBabbageChainWithProtocolVersion` when a test needs valid Babbage
 bytes with a specific header protocol version, including an unknown version for
 fail-closed classification coverage.
 
+`NewDijkstraBlockBuilder` builds one Dijkstra block with transactions in the
+non-segregated body format. It derives the body size and hash, supports the
+optional Leios and Peras certificate slots, and decodes its output before
+returning it. `GenerateConwayToDijkstraChain` builds a connected chain spanning
+the PV12 era boundary.
+
+Use `ledger.NewDijkstraTransactionBuilder` to construct Dijkstra block
+transactions with guards, subtransactions, Plutus V4 witnesses, redeemers, and
+the `TxIsValid` flag. The builder round-trips through the Dijkstra block-body
+decoder, where that validity flag is encoded.
+
+```go
+tx, err := ledger.NewDijkstraTransactionBuilder().
+	WithTxGuards(guards).
+	WithPlutusV4Scripts(script).
+	WithRedeemers(redeemers).
+	WithTxIsValid(false).
+	Build()
+if err != nil {
+	t.Fatal(err)
+}
+
+block, err := fixtures.NewDijkstraBlockBuilder().
+	WithBlockNumber(42).
+	WithSlot(1200).
+	WithTransactions(*tx).
+	Build()
+if err != nil {
+	t.Fatal(err)
+}
+```
+
 ### Strict decoder compatibility
 
 The curated upstream corpus is retained byte-for-byte. A small explicit set of
