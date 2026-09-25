@@ -246,6 +246,49 @@ func TestLedgerStateBuilder_WithNetworkId(t *testing.T) {
 	}
 }
 
+func TestLedgerState_ProtocolParameterUpdateWindow(t *testing.T) {
+	tests := []struct {
+		name           string
+		slot           uint64
+		currentEpoch   uint64
+		slotOfNoReturn uint64
+	}{
+		{name: "epoch start", slot: 0, currentEpoch: 0, slotOfNoReturn: 406080},
+		{name: "last slot before no return", slot: 406079, currentEpoch: 0, slotOfNoReturn: 406080},
+		{name: "next epoch", slot: 432000, currentEpoch: 1, slotOfNoReturn: 838080},
+	}
+
+	state := ledger.NewLedgerStateBuilder().Build()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			currentEpoch, slotOfNoReturn, err := state.ProtocolParameterUpdateWindow(tt.slot)
+			require.NoError(t, err)
+			assert.Equal(t, tt.currentEpoch, currentEpoch)
+			assert.Equal(t, tt.slotOfNoReturn, slotOfNoReturn)
+		})
+	}
+}
+
+func TestLedgerState_ProtocolParameterUpdateWindowCallback(t *testing.T) {
+	state := ledger.NewLedgerStateBuilder().
+		WithProtocolParameterUpdateWindow(func(slot uint64) (uint64, uint64, error) {
+			assert.Equal(t, uint64(42), slot)
+			return 3, 99, nil
+		}).
+		Build()
+
+	currentEpoch, slotOfNoReturn, err := state.ProtocolParameterUpdateWindow(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(3), currentEpoch)
+	assert.Equal(t, uint64(99), slotOfNoReturn)
+}
+
+func TestLedgerState_ProtocolParameterUpdateWindowOverflow(t *testing.T) {
+	state := ledger.NewLedgerStateBuilder().Build()
+	_, _, err := state.ProtocolParameterUpdateWindow(^uint64(0))
+	require.Error(t, err)
+}
+
 func TestLedgerStateBuilder_WithAdaPots(t *testing.T) {
 	pots := lcommon.AdaPots{
 		Reserves: 10000000000000,

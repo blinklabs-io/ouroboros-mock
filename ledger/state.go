@@ -73,6 +73,11 @@ const (
 	PlutusV3 PlutusLanguage = 3
 )
 
+const (
+	mockSlotsPerEpoch   uint64 = 432_000
+	mockStabilityWindow uint64 = 25_920
+)
+
 // Callback function types for customizable behavior
 
 // UtxoByIdFunc is a callback for UTxO lookups by transaction input
@@ -86,6 +91,10 @@ type SlotToTimeFunc func(uint64) (time.Time, error)
 
 // TimeToSlotFunc is a callback for converting time to slots
 type TimeToSlotFunc func(time.Time) (uint64, error)
+
+// ProtocolParameterUpdateWindowFunc is a callback for classic PPUP epoch and
+// no-return window lookups.
+type ProtocolParameterUpdateWindowFunc func(uint64) (uint64, uint64, error)
 
 // PoolCurrentStateFunc is a callback for pool state lookups
 type PoolCurrentStateFunc func(lcommon.PoolKeyHash) (*lcommon.PoolRegistrationCertificate, *uint64, error)
@@ -145,8 +154,9 @@ type MockLedgerState struct {
 	stakeCredentialDeposits   map[RewardAccountKey]uint64 // credential -> original deposit
 
 	// SlotState callbacks
-	SlotToTimeCallback SlotToTimeFunc
-	TimeToSlotCallback TimeToSlotFunc
+	SlotToTimeCallback                    SlotToTimeFunc
+	TimeToSlotCallback                    TimeToSlotFunc
+	ProtocolParameterUpdateWindowCallback ProtocolParameterUpdateWindowFunc
 
 	// PoolState callbacks and state
 	PoolCurrentStateCallback PoolCurrentStateFunc
@@ -189,6 +199,23 @@ type MockLedgerState struct {
 // NetworkId returns the network identifier
 func (ls *MockLedgerState) NetworkId() uint {
 	return ls.networkId
+}
+
+// ProtocolParameterUpdateWindow returns the current epoch and classic PPUP
+// no-return slot. The default schedule matches the conformance harness; callers
+// with another schedule can provide a callback through the builder.
+func (ls *MockLedgerState) ProtocolParameterUpdateWindow(
+	slot uint64,
+) (uint64, uint64, error) {
+	if ls.ProtocolParameterUpdateWindowCallback != nil {
+		return ls.ProtocolParameterUpdateWindowCallback(slot)
+	}
+	currentEpoch := slot / mockSlotsPerEpoch
+	if currentEpoch >= ^uint64(0)/mockSlotsPerEpoch {
+		return 0, 0, errors.New("slot overflows classic PPUP window calculation")
+	}
+	slotOfNoReturn := (currentEpoch+1)*mockSlotsPerEpoch - mockStabilityWindow
+	return currentEpoch, slotOfNoReturn, nil
 }
 
 // UtxoById looks up a UTxO by transaction input
@@ -591,6 +618,14 @@ func NewLedgerStateBuilder() *LedgerStateBuilder {
 // WithNetworkId sets the network ID
 func (b *LedgerStateBuilder) WithNetworkId(networkId uint) *LedgerStateBuilder {
 	b.state.networkId = networkId
+	return b
+}
+
+// WithProtocolParameterUpdateWindow sets the classic PPUP window callback.
+func (b *LedgerStateBuilder) WithProtocolParameterUpdateWindow(
+	fn ProtocolParameterUpdateWindowFunc,
+) *LedgerStateBuilder {
+	b.state.ProtocolParameterUpdateWindowCallback = fn
 	return b
 }
 
