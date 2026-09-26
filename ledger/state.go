@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -215,6 +216,11 @@ type MockLedgerState struct {
 	TimeToSlotCallback                    TimeToSlotFunc
 	ProtocolParameterUpdateWindowCallback ProtocolParameterUpdateWindowFunc
 
+	// Genesis delegation state: genesis key hash -> delegate key hash. A nil
+	// map means the capability is not configured.
+	genesisDelegates    map[lcommon.Blake2b224]lcommon.Blake2b224
+	genesisUpdateQuorum uint
+
 	// PoolState callbacks and state
 	PoolCurrentStateCallback PoolCurrentStateFunc
 	poolRegistrations        []lcommon.PoolRegistrationCertificate
@@ -272,6 +278,51 @@ func (ls *MockLedgerState) ProtocolParameterUpdateWindow(
 		return 0, 0, lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError{}
 	}
 	return ls.ProtocolParameterUpdateWindowCallback(slot)
+}
+
+// GenesisDelegateKeyHashes returns the delegate key hashes configured with
+// WithGenesisDelegation, sorted and without duplicates. Without that
+// configuration it returns lcommon.GenesisDelegationStateUnavailableError, so
+// MIR and PPUP validation fail closed exactly as for a state without the
+// capability.
+func (ls *MockLedgerState) GenesisDelegateKeyHashes(
+	uint64,
+) ([]lcommon.Blake2b224, error) {
+	if ls.genesisDelegates == nil {
+		return nil, lcommon.GenesisDelegationStateUnavailableError{}
+	}
+	ret := make([]lcommon.Blake2b224, 0, len(ls.genesisDelegates))
+	for _, delegate := range ls.genesisDelegates {
+		ret = append(ret, delegate)
+	}
+	slices.SortFunc(ret, func(a, b lcommon.Blake2b224) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	return slices.Compact(ret), nil
+}
+
+// GenesisDelegateForGenesisKey returns the delegate configured for genesisKey
+// with WithGenesisDelegation, or false when genesisKey has none. The mock's
+// delegation map does not change with the slot.
+func (ls *MockLedgerState) GenesisDelegateForGenesisKey(
+	genesisKey lcommon.Blake2b224,
+	_ uint64,
+) (lcommon.Blake2b224, bool, error) {
+	if ls.genesisDelegates == nil {
+		return lcommon.Blake2b224{}, false,
+			lcommon.GenesisDelegationStateUnavailableError{}
+	}
+	delegate, ok := ls.genesisDelegates[genesisKey]
+	return delegate, ok, nil
+}
+
+// GenesisUpdateQuorum returns the quorum configured with
+// WithGenesisDelegation.
+func (ls *MockLedgerState) GenesisUpdateQuorum() (uint, error) {
+	if ls.genesisDelegates == nil {
+		return 0, lcommon.GenesisDelegationStateUnavailableError{}
+	}
+	return ls.genesisUpdateQuorum, nil
 }
 
 // UtxoById looks up a UTxO by transaction input
@@ -674,6 +725,23 @@ func NewLedgerStateBuilder() *LedgerStateBuilder {
 // WithNetworkId sets the network ID
 func (b *LedgerStateBuilder) WithNetworkId(networkId uint) *LedgerStateBuilder {
 	b.state.networkId = networkId
+	return b
+}
+
+// WithGenesisDelegation configures the Shelley genesis delegation map
+// (genesis key hash -> delegate key hash) and the update quorum answered by
+// the GenesisDelegationState methods. The map is copied; an empty map
+// configures a state with no delegates.
+func (b *LedgerStateBuilder) WithGenesisDelegation(
+	delegates map[lcommon.Blake2b224]lcommon.Blake2b224,
+	quorum uint,
+) *LedgerStateBuilder {
+	b.state.genesisDelegates = make(
+		map[lcommon.Blake2b224]lcommon.Blake2b224,
+		len(delegates),
+	)
+	maps.Copy(b.state.genesisDelegates, delegates)
+	b.state.genesisUpdateQuorum = quorum
 	return b
 }
 
