@@ -246,6 +246,174 @@ func TestLedgerStateBuilder_WithNetworkId(t *testing.T) {
 	}
 }
 
+func TestLedgerState_ProtocolParameterUpdateWindowRequiresSchedule(
+	t *testing.T,
+) {
+	state := ledger.NewLedgerStateBuilder().Build()
+	_, _, err := state.ProtocolParameterUpdateWindow(0)
+	require.ErrorIs(t, err, ledger.ErrProtocolParameterUpdateWindowUnavailable)
+}
+
+// The reference slot of no return is
+// epochInfoFirst (succ e) *- Duration (2 * stabilityWindow), with
+// stabilityWindow = ceiling (3k/f) and *- saturating at slot 0
+// (cardano-ledger Cardano.Ledger.Slot.getTheSlotOfNoReturn and
+// Cardano.Ledger.Shelley.StabilityWindow.computeStabilityWindow).
+func TestFixedEpochProtocolParameterUpdateWindow(t *testing.T) {
+	tests := []struct {
+		name             string
+		epochLength      uint64
+		securityParam    uint64
+		activeSlotsCoeff *big.Rat
+		epoch            uint64
+		slotOfNoReturn   uint64
+	}{
+		{
+			// 2 * 3 * 2160 / 0.05 = 259200
+			name:             "mainnet parameters",
+			epochLength:      432_000,
+			securityParam:    2160,
+			activeSlotsCoeff: big.NewRat(1, 20),
+			epoch:            3,
+			slotOfNoReturn:   4*432_000 - 259_200,
+		},
+		{
+			// 2 * 3 * 432 / 0.05 = 51840
+			name:             "preview parameters",
+			epochLength:      86_400,
+			securityParam:    432,
+			activeSlotsCoeff: big.NewRat(1, 20),
+			epoch:            0,
+			slotOfNoReturn:   86_400 - 51_840,
+		},
+		{
+			// 3k/f = 30/7 rounds up to 5; floor(6k/f) would give 8
+			name:             "fractional window below one half",
+			epochLength:      100,
+			securityParam:    1,
+			activeSlotsCoeff: big.NewRat(7, 10),
+			epoch:            2,
+			slotOfNoReturn:   300 - 10,
+		},
+		{
+			// 3k/f = 300/7 rounds up to 43; floor(6k/f) would give 85
+			name:             "fractional window above one half",
+			epochLength:      200,
+			securityParam:    1,
+			activeSlotsCoeff: big.NewRat(7, 100),
+			epoch:            1,
+			slotOfNoReturn:   400 - 86,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			window := ledger.FixedEpochProtocolParameterUpdateWindow(
+				tt.epochLength,
+				tt.securityParam,
+				tt.activeSlotsCoeff,
+			)
+			state := ledger.NewLedgerStateBuilder().
+				WithProtocolParameterUpdateWindow(window).
+				Build()
+			epochStart := tt.epoch * tt.epochLength
+			for _, slot := range []uint64{
+				epochStart,
+				tt.slotOfNoReturn - 1,
+				tt.slotOfNoReturn,
+				epochStart + tt.epochLength - 1,
+			} {
+				epoch, slotOfNoReturn, err := state.ProtocolParameterUpdateWindow(
+					slot,
+				)
+				require.NoError(t, err, "slot %d", slot)
+				assert.Equal(t, tt.epoch, epoch, "slot %d", slot)
+				assert.Equal(
+					t,
+					tt.slotOfNoReturn,
+					slotOfNoReturn,
+					"slot %d",
+					slot,
+				)
+			}
+			epoch, _, err := state.ProtocolParameterUpdateWindow(
+				epochStart + tt.epochLength,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, tt.epoch+1, epoch)
+		})
+	}
+}
+
+func TestFixedEpochProtocolParameterUpdateWindowCoversEpoch(t *testing.T) {
+	// 2 * ceiling(3 * 1 / 0.01) = 600 slots exceeds the 100-slot epoch, so the
+	// point of no return precedes the epoch and every slot targets the next
+	// epoch. Epoch 0 saturates at slot 0.
+	window := ledger.FixedEpochProtocolParameterUpdateWindow(
+		100,
+		1,
+		big.NewRat(1, 100),
+	)
+	epoch, slotOfNoReturn, err := window(0)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0), epoch)
+	assert.Equal(t, uint64(0), slotOfNoReturn)
+	epoch, slotOfNoReturn, err = window(1000)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(10), epoch)
+	assert.Equal(t, uint64(1100-600), slotOfNoReturn)
+}
+
+func TestFixedEpochProtocolParameterUpdateWindowRejectsInvalidSchedule(
+	t *testing.T,
+) {
+	tests := []struct {
+		name             string
+		epochLength      uint64
+		securityParam    uint64
+		activeSlotsCoeff *big.Rat
+		slot             uint64
+	}{
+		{"zero epoch length", 0, 2160, big.NewRat(1, 20), 0},
+		{"zero security parameter", 432_000, 0, big.NewRat(1, 20), 0},
+		{"nil coefficient", 432_000, 2160, nil, 0},
+		{"zero coefficient", 432_000, 2160, big.NewRat(0, 1), 0},
+		{"coefficient above one", 432_000, 2160, big.NewRat(3, 2), 0},
+		{
+			"next epoch start overflows",
+			432_000,
+			2160,
+			big.NewRat(1, 20),
+			^uint64(0),
+		},
+		{"unit epochs overflow", 1, 2160, big.NewRat(1, 20), ^uint64(0)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			window := ledger.FixedEpochProtocolParameterUpdateWindow(
+				tt.epochLength,
+				tt.securityParam,
+				tt.activeSlotsCoeff,
+			)
+			_, _, err := window(tt.slot)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLedgerState_ProtocolParameterUpdateWindowCallback(t *testing.T) {
+	state := ledger.NewLedgerStateBuilder().
+		WithProtocolParameterUpdateWindow(func(slot uint64) (uint64, uint64, error) {
+			assert.Equal(t, uint64(42), slot)
+			return 3, 99, nil
+		}).
+		Build()
+
+	currentEpoch, slotOfNoReturn, err := state.ProtocolParameterUpdateWindow(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(3), currentEpoch)
+	assert.Equal(t, uint64(99), slotOfNoReturn)
+}
+
 func TestLedgerStateBuilder_WithAdaPots(t *testing.T) {
 	pots := lcommon.AdaPots{
 		Reserves: 10000000000000,
