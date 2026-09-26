@@ -74,12 +74,6 @@ const (
 	PlutusV3 PlutusLanguage = 3
 )
 
-// ErrProtocolParameterUpdateWindowUnavailable is returned by
-// ProtocolParameterUpdateWindow when no classic PPUP schedule is configured.
-var ErrProtocolParameterUpdateWindowUnavailable = errors.New(
-	"ledger: classic protocol parameter update window not configured",
-)
-
 // Callback function types for customizable behavior
 
 // UtxoByIdFunc is a callback for UTxO lookups by transaction input
@@ -267,14 +261,15 @@ func (ls *MockLedgerState) NetworkId() uint {
 // ProtocolParameterUpdateWindow returns the epoch containing slot and the
 // first slot at which classic PPUP proposals target the following epoch, from
 // the callback set with WithProtocolParameterUpdateWindow. Without one it
-// returns ErrProtocolParameterUpdateWindowUnavailable: the window depends on
-// the epoch schedule and the Shelley genesis k and f, which the mock does not
-// otherwise carry.
+// returns lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError,
+// the error the gouroboros rule reports for a state without the capability:
+// the window depends on the epoch schedule and the Shelley genesis k and f,
+// which the mock does not otherwise carry.
 func (ls *MockLedgerState) ProtocolParameterUpdateWindow(
 	slot uint64,
 ) (uint64, uint64, error) {
 	if ls.ProtocolParameterUpdateWindowCallback == nil {
-		return 0, 0, ErrProtocolParameterUpdateWindowUnavailable
+		return 0, 0, lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError{}
 	}
 	return ls.ProtocolParameterUpdateWindowCallback(slot)
 }

@@ -251,7 +251,11 @@ func TestLedgerState_ProtocolParameterUpdateWindowRequiresSchedule(
 ) {
 	state := ledger.NewLedgerStateBuilder().Build()
 	_, _, err := state.ProtocolParameterUpdateWindow(0)
-	require.ErrorIs(t, err, ledger.ErrProtocolParameterUpdateWindowUnavailable)
+	require.ErrorAs(
+		t,
+		err,
+		&lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError{},
+	)
 }
 
 // The reference slot of no return is
