@@ -20,11 +20,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
+	"github.com/blinklabs-io/gouroboros/ledger/babbage"
+	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
+	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
 
 func TestConsensusEnvelopeKindGuards(t *testing.T) {
@@ -150,27 +155,284 @@ func TestDecodeDijkstraProtocolParametersMapsRefScriptFields(
 	}
 }
 
-func TestDecodeShelleyProtocolParameterUpdatePreservesWord64MaxEpoch(
+func TestSetMaxEpochValueSupportsWord64Models(t *testing.T) {
+	const want = uint64(math.MaxUint64)
+
+	t.Run("value field", func(t *testing.T) {
+		var target struct{ MaxEpoch uint64 }
+		if err := setMaxEpochValue(&target, want); err != nil {
+			t.Fatalf("setMaxEpochValue failed: %v", err)
+		}
+		if target.MaxEpoch != want {
+			t.Fatalf("MaxEpoch = %d, want %d", target.MaxEpoch, want)
+		}
+	})
+
+	t.Run("pointer field", func(t *testing.T) {
+		var target struct{ MaxEpoch *uint64 }
+		if err := setMaxEpochValue(&target, want); err != nil {
+			t.Fatalf("setMaxEpochValue failed: %v", err)
+		}
+		if target.MaxEpoch == nil {
+			t.Fatal("MaxEpoch was not set")
+		}
+		if *target.MaxEpoch != want {
+			t.Fatalf("MaxEpoch = %d, want %d", *target.MaxEpoch, want)
+		}
+	})
+}
+
+func TestSetOptionalMaxEpoch(t *testing.T) {
+	const want = uint64(math.MaxUint64)
+	var target struct{ MaxEpoch *uint64 }
+
+	if err := setOptionalMaxEpoch(&target, nil); err != nil {
+		t.Fatalf("setOptionalMaxEpoch with nil value failed: %v", err)
+	}
+	if target.MaxEpoch != nil {
+		t.Fatal("nil MaxEpoch unexpectedly changed the destination")
+	}
+
+	if err := setOptionalMaxEpoch(
+		&target,
+		&jsonUint64{value: want},
+	); err != nil {
+		t.Fatalf("setOptionalMaxEpoch failed: %v", err)
+	}
+	if target.MaxEpoch == nil || *target.MaxEpoch != want {
+		t.Fatalf("MaxEpoch = %v, want %d", target.MaxEpoch, want)
+	}
+}
+
+func TestSetMaxEpochValueRejectsUnsupportedDestinations(t *testing.T) {
+	tests := []struct {
+		name   string
+		target any
+		value  uint64
+		want   string
+	}{
+		{
+			name:   "nil destination",
+			target: nil,
+			want:   "non-nil pointer",
+		},
+		{
+			name:   "non-pointer destination",
+			target: struct{ MaxEpoch uint64 }{},
+			want:   "non-nil pointer",
+		},
+		{
+			name:   "nil pointer destination",
+			target: (*struct{ MaxEpoch uint64 })(nil),
+			want:   "non-nil pointer",
+		},
+		{
+			name:   "non-struct pointer destination",
+			target: new(uint64),
+			want:   "must point to a struct",
+		},
+		{
+			name:   "missing field",
+			target: &struct{ Other uint64 }{},
+			want:   "no writable MaxEpoch field",
+		},
+		{
+			name:   "unsupported field",
+			target: &struct{ MaxEpoch string }{},
+			want:   "unsupported type string",
+		},
+		{
+			name:   "unsupported unsigned field",
+			target: &struct{ MaxEpoch *uint32 }{},
+			want:   "unsupported type *uint32",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := setMaxEpochValue(tt.target, tt.value)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("setMaxEpochValue error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetMaxEpochValueChecksUintOverflow(t *testing.T) {
+	const want = uint64(math.MaxUint64)
+	var target struct{ MaxEpoch *uint }
+	err := setMaxEpochValue(&target, want)
+	if reflect.TypeOf(uint(0)).Bits() == 64 {
+		if err != nil {
+			t.Fatalf("setMaxEpochValue failed: %v", err)
+		}
+		if target.MaxEpoch == nil || uint64(*target.MaxEpoch) != want {
+			t.Fatalf("MaxEpoch = %v, want %d", target.MaxEpoch, want)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "exceeds uint") {
+		t.Fatalf("setMaxEpochValue error = %v, want uint overflow", err)
+	}
+	if target.MaxEpoch != nil {
+		t.Fatalf("MaxEpoch = %d after overflow, want nil", *target.MaxEpoch)
+	}
+}
+
+func TestDecodeProtocolParametersMapsMaxEpochAcrossEras(t *testing.T) {
+	const maxEpoch = uint64(math.MaxUint64)
+	const parameters = `{
+		"txFeePerByte": 1,
+		"txFeeFixed": 2,
+		"maxBlockBodySize": 3,
+		"maxTxSize": 4,
+		"maxBlockHeaderSize": 5,
+		"stakeAddressDeposit": 6,
+		"stakePoolDeposit": 7,
+		"poolRetireMaxEpoch": 18446744073709551615,
+		"stakePoolTargetNum": 9,
+		"poolPledgeInfluence": 1,
+		"monetaryExpansion": 1,
+		"treasuryCut": 1,
+		"executionUnitPrices": {
+			"priceMemory": 1,
+			"priceSteps": 1
+		},
+		"maxTxExecutionUnits": {"memory": 1, "steps": 1},
+		"maxBlockExecutionUnits": {"memory": 1, "steps": 1},
+		"protocolVersion": {"major": 2, "minor": 0}
+	}`
+	const update = `{"poolRetireMaxEpoch":18446744073709551615}`
+
+	eras := []struct {
+		name        string
+		paramsModel any
+		updateModel any
+	}{
+		{
+			name:        "shelley",
+			paramsModel: (*shelley.ShelleyProtocolParameters)(nil),
+			updateModel: (*shelley.ShelleyProtocolParameterUpdate)(nil),
+		},
+		{
+			name:        "alonzo",
+			paramsModel: (*alonzo.AlonzoProtocolParameters)(nil),
+			updateModel: (*alonzo.AlonzoProtocolParameterUpdate)(nil),
+		},
+		{
+			name:        "babbage",
+			paramsModel: (*babbage.BabbageProtocolParameters)(nil),
+			updateModel: (*babbage.BabbageProtocolParameterUpdate)(nil),
+		},
+		{
+			name:        "conway",
+			paramsModel: (*conway.ConwayProtocolParameters)(nil),
+			updateModel: (*conway.ConwayProtocolParameterUpdate)(nil),
+		},
+		{
+			name:        "dijkstra",
+			paramsModel: (*dijkstra.DijkstraProtocolParameters)(nil),
+			updateModel: (*dijkstra.DijkstraProtocolParameterUpdate)(nil),
+		},
+	}
+	for _, era := range eras {
+		t.Run(era.name+" parameters", func(t *testing.T) {
+			fixture := writeTempJSONFixture(
+				t,
+				filepath.Join("cardano-ledger", "eras", era.name, "impl", "golden", "pparams.json"),
+				parameters,
+			)
+			params, err := fixture.DecodeProtocolParameters()
+			assertMaxEpochDecodeResult(
+				t,
+				params,
+				err,
+				maxEpoch,
+				maxEpochFieldBits(t, era.paramsModel),
+			)
+		})
+
+		t.Run(era.name+" update", func(t *testing.T) {
+			fixture := writeTempJSONFixture(
+				t,
+				filepath.Join("cardano-ledger", "eras", era.name, "impl", "golden", "pparams-update.json"),
+				update,
+			)
+			params, err := fixture.DecodeProtocolParameterUpdate()
+			assertMaxEpochDecodeResult(
+				t,
+				params.Value(),
+				err,
+				maxEpoch,
+				maxEpochFieldBits(t, era.updateModel),
+			)
+		})
+	}
+}
+
+func assertMaxEpochDecodeResult(
 	t *testing.T,
+	target any,
+	err error,
+	want uint64,
+	fieldBits int,
 ) {
-	fixture := writeTempJSONFixture(
-		t,
-		"cardano-ledger/eras/shelley/impl/golden/pparams-update.json",
-		`{"poolRetireMaxEpoch":18446744073709551615}`,
-	)
-	update, err := fixture.DecodeProtocolParameterUpdate()
+	t.Helper()
 	if err != nil {
-		t.Fatalf("DecodeProtocolParameterUpdate failed: %v", err)
+		wantError := "MaxEpoch value " + strconv.FormatUint(want, 10) + " exceeds uint"
+		if fieldBits >= 64 || err.Error() != wantError {
+			t.Fatalf("decode error = %v, want uint overflow", err)
+		}
+		return
 	}
-	value := reflect.ValueOf(update.Value()).Elem().FieldByName("MaxEpoch")
+	if fieldBits < 64 {
+		// A narrow uint model cannot preserve the full JSON Word64 value.
+		t.Fatalf("decode unexpectedly accepted a Word64 value into %d-bit field", fieldBits)
+	}
+	assertMaxEpochValue(t, target, want)
+}
+
+func maxEpochFieldBits(t *testing.T, model any) int {
+	t.Helper()
+	typeOf := reflect.TypeOf(model)
+	if typeOf.Kind() != reflect.Pointer {
+		t.Fatalf("expected a pointer model type, got %T", model)
+	}
+	field, ok := typeOf.Elem().FieldByName("MaxEpoch")
+	if !ok {
+		t.Fatalf("%s has no MaxEpoch field", typeOf.Elem())
+	}
+	fieldType := field.Type
+	if fieldType.Kind() == reflect.Pointer {
+		fieldType = fieldType.Elem()
+	}
+	if fieldType.Kind() != reflect.Uint && fieldType.Kind() != reflect.Uint64 {
+		t.Fatalf("%s has unsupported MaxEpoch type %s", typeOf.Elem(), fieldType)
+	}
+	return fieldType.Bits()
+}
+
+func assertMaxEpochValue(t *testing.T, target any, want uint64) {
+	t.Helper()
+	value := reflect.ValueOf(target)
 	if value.Kind() != reflect.Pointer || value.IsNil() {
-		t.Fatalf("expected MaxEpoch pointer, got %v", value.Type())
+		t.Fatalf("expected a non-nil pointer, got %T", target)
 	}
-	if value.Type().Elem().Bits() < 64 {
-		t.Skip("the current Gouroboros model cannot represent a Word64 MaxEpoch")
+	field := value.Elem().FieldByName("MaxEpoch")
+	if !field.IsValid() {
+		t.Fatalf("%T has no MaxEpoch field", target)
 	}
-	if got := value.Elem().Uint(); got != math.MaxUint64 {
-		t.Fatalf("MaxEpoch = %d, want %d", got, uint64(math.MaxUint64))
+	if field.Kind() == reflect.Pointer {
+		if field.IsNil() {
+			t.Fatalf("%T MaxEpoch is nil", target)
+		}
+		field = field.Elem()
+	}
+	if field.Kind() != reflect.Uint && field.Kind() != reflect.Uint64 {
+		t.Fatalf("%T MaxEpoch has unsupported type %s", target, field.Type())
+	}
+	if got := field.Uint(); got != want {
+		t.Fatalf("%T MaxEpoch = %d, want %d", target, got, want)
 	}
 }
 

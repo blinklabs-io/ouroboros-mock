@@ -438,10 +438,7 @@ func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyP
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(
-		"poolRetireMaxEpoch",
-		p.PoolRetireMaxEpoch,
-	)
+	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -531,10 +528,7 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(
-		"poolRetireMaxEpoch",
-		p.PoolRetireMaxEpoch,
-	)
+	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -650,10 +644,7 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(
-		"poolRetireMaxEpoch",
-		p.PoolRetireMaxEpoch,
-	)
+	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -766,10 +757,7 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(
-		"poolRetireMaxEpoch",
-		p.PoolRetireMaxEpoch,
-	)
+	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,9 +1350,9 @@ func requireUintField(name string, value *jsonUint) (uint, error) {
 	return value.value, nil
 }
 
-func requireUint64Field(name string, value *jsonUint64) (uint64, error) {
+func requireUint64Field(value *jsonUint64) (uint64, error) {
 	if value == nil {
-		return 0, fmt.Errorf("missing required uint64 field %s", name)
+		return 0, errors.New("missing required uint64 field poolRetireMaxEpoch")
 	}
 	return value.value, nil
 }
@@ -1380,7 +1368,10 @@ func setOptionalMaxEpoch(target any, value *jsonUint64) error {
 func setMaxEpochValue(target any, value uint64) error {
 	destination := reflect.ValueOf(target)
 	if destination.Kind() != reflect.Pointer || destination.IsNil() {
-		return fmt.Errorf("MaxEpoch destination must be a non-nil pointer")
+		return errors.New("MaxEpoch destination must be a non-nil pointer")
+	}
+	if destination.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("%T MaxEpoch destination must point to a struct", target)
 	}
 	field := destination.Elem().FieldByName("MaxEpoch")
 	if !field.IsValid() || !field.CanSet() {
