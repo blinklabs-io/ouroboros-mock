@@ -23,11 +23,10 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
-	mockledger "github.com/blinklabs-io/ouroboros-mock/ledger"
 )
 
 func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
-	tx, err := mockledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithTxIsValid(false).
 		Build()
 	if err != nil {
@@ -40,10 +39,6 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 		WithSlot(600).
 		WithPreviousHash(prevHash).
 		WithTransactions(*tx).
-		WithLeiosCertificate(&dijkstra.DijkstraLeiosCertificate{
-			Signers:             []byte{0x80},
-			AggregatedSignature: make([]byte, common.LeiosBlsSignatureSize),
-		}).
 		WithPerasCertificate(perasCertificate).
 		Build()
 	if err != nil {
@@ -72,9 +67,6 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 		block.BlockBody.Transactions[0].TxIsValid {
 		t.Fatal("Dijkstra block transaction validity flag was not preserved")
 	}
-	if block.BlockBody.LeiosCertificate == nil {
-		t.Fatal("Leios certificate slot was not populated")
-	}
 	if !bytes.Equal(block.BlockBody.PerasCertificate, perasCertificate) {
 		t.Fatalf("unexpected Peras certificate: %x", block.BlockBody.PerasCertificate)
 	}
@@ -84,6 +76,25 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 	}
 	if decoded.Hash() != block.Hash() {
 		t.Fatal("generic decoder changed the Dijkstra block hash")
+	}
+
+	// CIP-0164: a ranking block carries a Leios certificate or transactions,
+	// not both, and gouroboros rejects a body with both when decoding.
+	certified, err := fixtures.NewDijkstraBlockBuilder().
+		WithPreviousHash(block.Hash()).
+		WithLeiosCertificate(&dijkstra.DijkstraLeiosCertificate{
+			Signers:             []byte{0x80},
+			AggregatedSignature: make([]byte, common.LeiosBlsSignatureSize),
+		}).
+		Build()
+	if err != nil {
+		t.Fatalf("build certified Dijkstra block: %s", err)
+	}
+	if certified.BlockBody.LeiosCertificate == nil {
+		t.Fatal("Leios certificate slot was not populated")
+	}
+	if len(certified.BlockBody.Transactions) != 0 {
+		t.Fatal("certified Dijkstra block carries transactions")
 	}
 }
 

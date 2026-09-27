@@ -132,16 +132,20 @@ spanning the PV12 era boundary from the same builder. `GenerateDijkstraChain`
 keeps the 10-field Babbage header body, which `ledger.DetermineBlockType`
 classifies; that function rejects the 12-field Dijkstra header body.
 
-Use `ledger.NewDijkstraTransactionBuilder` to construct Dijkstra block
+Use `NewDijkstraTransactionBuilder` to construct Dijkstra block
 transactions with guards, subtransactions, redeemers, metadata, and the
 `TxIsValid` flag. The builder encodes the `block_transaction` form, including
 the required transaction-body keys gouroboros omits when empty, and decodes it
 through the Dijkstra block-body decoder, where that validity flag is encoded.
 The Dijkstra witness set has no Plutus V4 script field, so a Plutus V4 script
-can only be supplied as a reference script.
+can only be supplied as a reference script. The builder lives in `fixtures`
+rather than `ledger` because gouroboros's in-package `ledger/dijkstra` tests
+import this module's `ledger` package, which therefore cannot import
+`gouroboros/ledger/dijkstra`; gouroboros uses the builder from external
+`dijkstra_test` test packages.
 
 ```go
-tx, err := ledger.NewDijkstraTransactionBuilder().
+tx, err := fixtures.NewDijkstraTransactionBuilder().
 	WithTxGuards(guards).
 	WithRedeemers(redeemers).
 	WithTxIsValid(false).

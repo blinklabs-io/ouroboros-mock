@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ledger_test
+package fixtures_test
 
 import (
 	"math/big"
@@ -21,7 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
-	"github.com/blinklabs-io/ouroboros-mock/ledger"
+	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 	"github.com/blinklabs-io/plutigo/data"
 	"github.com/stretchr/testify/require"
 )
@@ -66,7 +66,7 @@ func TestDijkstraTransactionBuilder(t *testing.T) {
 		Body: dijkstra.DijkstraSubTransactionBody{TxGuards: guard},
 	}
 
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithTxGuards(guard).
 		WithSubTransactions(subtransaction).
 		WithRedeemers(redeemers).
@@ -81,17 +81,21 @@ func TestDijkstraTransactionBuilder(t *testing.T) {
 }
 
 func TestDijkstraTransactionBuilderRejectsInvalidGuards(t *testing.T) {
-	_, err := ledger.NewDijkstraTransactionBuilder().
+	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithTxGuards(&dijkstra.DijkstraGuards{}).
 		Build()
 	require.Error(t, err)
 }
 
 func TestDijkstraTransactionBuilderPreservesValidTransactions(t *testing.T) {
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithBody(dijkstra.DijkstraTransactionBody{
 			TxSubTransactions: cbor.NewSetType(
-				[]dijkstra.DijkstraSubTransaction{}, true,
+				[]dijkstra.DijkstraSubTransaction{{
+					Body: dijkstra.DijkstraSubTransactionBody{
+						TxGuards: testDijkstraGuard(),
+					},
+				}}, true,
 			),
 		}).
 		WithTxIsValid(true).
@@ -100,10 +104,22 @@ func TestDijkstraTransactionBuilderPreservesValidTransactions(t *testing.T) {
 	require.True(t, tx.TxIsValid)
 }
 
+// sub_transactions is a nonempty_oset, so an empty set has no valid encoding.
+func TestDijkstraTransactionBuilderRejectsEmptySubTransactions(t *testing.T) {
+	_, err := fixtures.NewDijkstraTransactionBuilder().
+		WithBody(dijkstra.DijkstraTransactionBody{
+			TxSubTransactions: cbor.NewSetType(
+				[]dijkstra.DijkstraSubTransaction{}, true,
+			),
+		}).
+		Build()
+	require.ErrorContains(t, err, "sub-transactions must not be empty")
+}
+
 // The Dijkstra CDDL requires transaction_body keys 0 (inputs), 1 (outputs),
 // and 2 (fee), and sub_transaction_body keys 0 and 1, whatever their values.
 func TestDijkstraTransactionBuilderEncodesRequiredBodyKeys(t *testing.T) {
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{
 			Body: dijkstra.DijkstraSubTransactionBody{TxGuards: testDijkstraGuard()},
 		}).
@@ -138,7 +154,7 @@ func TestDijkstraTransactionBuilderEncodesMetadata(t *testing.T) {
 		Key:   common.MetaInt{Value: big.NewInt(674)},
 		Value: common.MetaText{Value: "fixture"},
 	}}}
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithMetadata(metadata).
 		Build()
 	require.NoError(t, err)
@@ -156,7 +172,7 @@ func TestDijkstraTransactionBuilderEncodesMetadata(t *testing.T) {
 
 func TestDijkstraTransactionBuilderKeepsCallerAuxiliaryDataHash(t *testing.T) {
 	callerHash := common.Blake2b256Hash([]byte("caller"))
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithBody(dijkstra.DijkstraTransactionBody{TxAuxDataHash: &callerHash}).
 		WithMetadata(common.MetaMap{Pairs: []common.MetaPair{{
 			Key:   common.MetaInt{Value: big.NewInt(1)},
@@ -168,12 +184,12 @@ func TestDijkstraTransactionBuilderKeepsCallerAuxiliaryDataHash(t *testing.T) {
 }
 
 func TestDijkstraTransactionBuilderRejectsNonMapMetadata(t *testing.T) {
-	_, err := ledger.NewDijkstraTransactionBuilder().
+	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithMetadata(common.MetaText{Value: "not auxiliary data"}).
 		Build()
 	require.ErrorContains(t, err, "must be a map")
 
-	_, err = ledger.NewDijkstraTransactionBuilder().
+	_, err = fixtures.NewDijkstraTransactionBuilder().
 		WithMetadata(common.MetaMap{Pairs: []common.MetaPair{{
 			Key:   common.MetaText{Value: "label"},
 			Value: common.MetaInt{Value: big.NewInt(1)},
@@ -183,18 +199,18 @@ func TestDijkstraTransactionBuilderRejectsNonMapMetadata(t *testing.T) {
 }
 
 func TestDijkstraTransactionBuilderRebuildsDecodedBody(t *testing.T) {
-	base, err := ledger.NewDijkstraTransactionBuilder().Build()
+	base, err := fixtures.NewDijkstraTransactionBuilder().Build()
 	require.NoError(t, err)
 	require.NotNil(t, base.Body.Cbor())
 
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithBody(base.Body).
 		WithTxGuards(testDijkstraGuard()).
 		Build()
 	require.NoError(t, err)
 	require.NotNil(t, tx.Body.TxGuards)
 
-	tx, err = ledger.NewDijkstraTransactionBuilder().
+	tx, err = fixtures.NewDijkstraTransactionBuilder().
 		WithBody(base.Body).
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{
 			Body: dijkstra.DijkstraSubTransactionBody{TxGuards: testDijkstraGuard()},
@@ -205,13 +221,13 @@ func TestDijkstraTransactionBuilderRebuildsDecodedBody(t *testing.T) {
 }
 
 func TestDijkstraTransactionBuilderRebuildsDecodedWitnessSet(t *testing.T) {
-	base, err := ledger.NewDijkstraTransactionBuilder().
+	base, err := fixtures.NewDijkstraTransactionBuilder().
 		WithRedeemers(testDijkstraRedeemers(1)).
 		Build()
 	require.NoError(t, err)
 
 	replacement := testDijkstraRedeemers(2)
-	tx, err := ledger.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(base.WitnessSet).
 		WithRedeemers(replacement).
 		Build()

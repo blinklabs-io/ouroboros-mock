@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ledger
+package fixtures
 
 import (
 	"errors"
@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	dijkstraTxBodyOutputsKey = 1
-	dijkstraTxBodyFeeKey     = 2
+	dijkstraTxBodyOutputsKey         = 1
+	dijkstraTxBodyFeeKey             = 2
+	dijkstraTxBodySubTransactionsKey = 23
 )
 
 // DijkstraTransactionBuilder constructs Dijkstra block transactions with
@@ -259,10 +260,35 @@ func encodeDijkstraTransactionBody(
 			err,
 		)
 	}
+	if err := rejectEmptySubTransactions(encoded); err != nil {
+		return nil, err
+	}
 	return withRequiredMapKeys(encoded, map[uint64][]byte{
 		dijkstraTxBodyOutputsKey: {0x80},
 		dijkstraTxBodyFeeKey:     {0x00},
 	})
+}
+
+// rejectEmptySubTransactions refuses key 23 encoded as an empty set.
+// sub_transactions is a nonempty_oset, and gouroboros encodes an empty tagged
+// set instead of omitting the key.
+func rejectEmptySubTransactions(encoded []byte) error {
+	var fields map[uint64]cbor.RawMessage
+	if _, err := cbor.Decode(encoded, &fields); err != nil {
+		return fmt.Errorf("decode transaction body map: %w", err)
+	}
+	raw, ok := fields[dijkstraTxBodySubTransactionsKey]
+	if !ok {
+		return nil
+	}
+	var subtransactions cbor.SetType[cbor.RawMessage]
+	if _, err := cbor.Decode(raw, &subtransactions); err != nil {
+		return fmt.Errorf("decode sub-transactions: %w", err)
+	}
+	if len(subtransactions.Items()) == 0 {
+		return errors.New("dijkstra sub-transactions must not be empty")
+	}
+	return nil
 }
 
 func normalizeDijkstraSubTransaction(
