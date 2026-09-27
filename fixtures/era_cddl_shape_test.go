@@ -77,6 +77,9 @@ func TestGeneratedBlocksUseEraCDDLShapes(t *testing.T) {
 				if _, err := cbor.Decode(block.Cbor(), &blockFields); err != nil {
 					t.Fatalf("decode block %d: %s", i, err)
 				}
+				if len(blockFields) < 2 {
+					t.Fatalf("block %d has %d elements", i, len(blockFields))
+				}
 				var header []cbor.RawMessage
 				if _, err := cbor.Decode(blockFields[0], &header); err != nil {
 					t.Fatalf("decode block %d header: %s", i, err)

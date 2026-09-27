@@ -149,6 +149,9 @@ func dijkstraHeaderBodyFields(
 	if _, err := cbor.Decode(block.Cbor(), &blockFields); err != nil {
 		t.Fatalf("decode block: %s", err)
 	}
+	if len(blockFields) != 2 {
+		t.Fatalf("block has %d elements, want 2", len(blockFields))
+	}
 	var header []cbor.RawMessage
 	if _, err := cbor.Decode(blockFields[0], &header); err != nil {
 		t.Fatalf("decode header: %s", err)
@@ -204,6 +207,9 @@ func TestDijkstraBlockBuilderEncodesPinnedHeaderShape(t *testing.T) {
 		t.Fatalf("build certified Dijkstra block: %s", err)
 	}
 	headerBody, _ = dijkstraHeaderBodyFields(t, certified)
+	if len(headerBody) != 12 {
+		t.Fatalf("header body has %d fields, want 12", len(headerBody))
+	}
 	if !bytes.Equal(headerBody[10], []byte{0xf5}) {
 		t.Fatalf("block_body_contains_leios_cert = %x, want true", headerBody[10])
 	}

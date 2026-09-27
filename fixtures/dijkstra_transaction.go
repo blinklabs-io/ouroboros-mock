@@ -326,6 +326,9 @@ func withRequiredMapKeys(
 	if _, err := cbor.Decode(encoded, &fields); err != nil {
 		return nil, fmt.Errorf("decode transaction body map: %w", err)
 	}
+	if fields == nil {
+		return nil, errors.New("transaction body is not a map")
+	}
 	missing := false
 	for key, value := range required {
 		if _, ok := fields[key]; !ok {
