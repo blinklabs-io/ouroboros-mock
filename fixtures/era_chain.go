@@ -88,7 +88,7 @@ func GenerateDijkstraChain(
 							Major: dijkstra.MinProtocolVersionDijkstra,
 						},
 					},
-					Signature: make([]byte, 64),
+					Signature: make([]byte, 448),
 				},
 			},
 			BlockBody: body,
@@ -204,7 +204,11 @@ func GenerateAllegraChain(
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Allegra witnesses: %w", err)
 	}
-	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	emptyAux, err := emptyAuxiliaryDataSet()
+	if err != nil {
+		return nil, err
+	}
+	emptyAuxCbor, err := cbor.Encode(emptyAux)
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Allegra metadata set: %w", err)
 	}
@@ -237,12 +241,12 @@ func GenerateAllegraChain(
 						ProtoMajorVersion: allegra.MinProtocolVersionAllegra,
 						ProtoMinorVersion: 0,
 					},
-					Signature: make([]byte, 64),
+					Signature: make([]byte, 448),
 				},
 			},
 			TransactionBodies:      []allegra.AllegraTransactionBody{},
 			TransactionWitnessSets: []shelley.ShelleyTransactionWitnessSet{},
-			TransactionMetadataSet: common.TransactionMetadataSet{},
+			TransactionMetadataSet: emptyAux,
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
@@ -286,7 +290,11 @@ func GenerateMaryChain(
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Mary witnesses: %w", err)
 	}
-	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	emptyAux, err := emptyAuxiliaryDataSet()
+	if err != nil {
+		return nil, err
+	}
+	emptyAuxCbor, err := cbor.Encode(emptyAux)
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Mary metadata set: %w", err)
 	}
@@ -319,12 +327,12 @@ func GenerateMaryChain(
 						ProtoMajorVersion: mary.MinProtocolVersionMary,
 						ProtoMinorVersion: 0,
 					},
-					Signature: make([]byte, 64),
+					Signature: make([]byte, 448),
 				},
 			},
 			TransactionBodies:      []mary.MaryTransactionBody{},
 			TransactionWitnessSets: []shelley.ShelleyTransactionWitnessSet{},
-			TransactionMetadataSet: common.TransactionMetadataSet{},
+			TransactionMetadataSet: emptyAux,
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
@@ -365,7 +373,11 @@ func GenerateAlonzoChain(
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Alonzo witnesses: %w", err)
 	}
-	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	emptyAux, err := emptyAuxiliaryDataSet()
+	if err != nil {
+		return nil, err
+	}
+	emptyAuxCbor, err := cbor.Encode(emptyAux)
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Alonzo metadata set: %w", err)
 	}
@@ -412,9 +424,10 @@ func GenerateAlonzoChain(
 						ProtoMajorVersion: alonzo.MinProtocolVersionAlonzo,
 						ProtoMinorVersion: 0,
 					},
-					Signature: make([]byte, 64),
+					Signature: make([]byte, 448),
 				},
 			},
+			TransactionMetadataSet: emptyAux,
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
@@ -481,7 +494,11 @@ func GenerateBabbageChainWithProtocolVersion(
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Babbage witnesses: %w", err)
 	}
-	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	emptyAux, err := emptyAuxiliaryDataSet()
+	if err != nil {
+		return nil, err
+	}
+	emptyAuxCbor, err := cbor.Encode(emptyAux)
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Babbage metadata set: %w", err)
 	}
@@ -527,8 +544,9 @@ func GenerateBabbageChainWithProtocolVersion(
 						Minor: protocolMinor,
 					},
 				},
-				Signature: make([]byte, 64),
+				Signature: make([]byte, 448),
 			},
+			TransactionMetadataSet: emptyAux,
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
@@ -573,7 +591,11 @@ func GenerateShelleyChain(
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Shelley witnesses: %w", err)
 	}
-	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	emptyAux, err := emptyAuxiliaryDataSet()
+	if err != nil {
+		return nil, err
+	}
+	emptyAuxCbor, err := cbor.Encode(emptyAux)
 	if err != nil {
 		return nil, fmt.Errorf("encode empty Shelley metadata set: %w", err)
 	}
@@ -613,8 +635,9 @@ func GenerateShelleyChain(
 					ProtoMajorVersion: shelley.MinProtocolVersionShelley,
 					ProtoMinorVersion: 0,
 				},
-				Signature: make([]byte, 64),
+				Signature: make([]byte, 448),
 			},
+			TransactionMetadataSet: emptyAux,
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
