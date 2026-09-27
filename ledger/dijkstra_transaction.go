@@ -15,17 +15,28 @@
 package ledger
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 )
 
+const (
+	dijkstraTxBodyOutputsKey = 1
+	dijkstraTxBodyFeeKey     = 2
+)
+
 // DijkstraTransactionBuilder constructs Dijkstra block transactions with
-// guards, Plutus V4 witnesses, redeemers, and subtransactions.
+// guards, redeemers, metadata, subtransactions, and the validity flag. The
+// Dijkstra witness set has no Plutus V4 script field (the reference decoder
+// accepts keys 0-7), so a Plutus V4 script can only be supplied as a reference
+// script.
 type DijkstraTransactionBuilder struct {
-	tx dijkstra.DijkstraTransaction
+	tx       dijkstra.DijkstraTransaction
+	metadata common.TransactionMetadatum
 }
 
 // NewDijkstraTransactionBuilder creates an empty Dijkstra transaction builder.
@@ -35,7 +46,8 @@ func NewDijkstraTransactionBuilder() *DijkstraTransactionBuilder {
 	}
 }
 
-// WithBody replaces the transaction body.
+// WithBody replaces the transaction body. A decoded body keeps its original
+// CBOR until a later builder call changes one of its fields.
 func (b *DijkstraTransactionBuilder) WithBody(
 	body dijkstra.DijkstraTransactionBody,
 ) *DijkstraTransactionBuilder {
@@ -48,6 +60,7 @@ func (b *DijkstraTransactionBuilder) WithTxGuards(
 	guards *dijkstra.DijkstraGuards,
 ) *DijkstraTransactionBuilder {
 	b.tx.Body.TxGuards = guards
+	b.tx.Body.SetCbor(nil)
 	return b
 }
 
@@ -61,6 +74,7 @@ func (b *DijkstraTransactionBuilder) WithSubTransactions(
 	)
 	items = append(items, subtransactions...)
 	b.tx.Body.TxSubTransactions = cbor.NewSetType(items, true)
+	b.tx.Body.SetCbor(nil)
 	return b
 }
 
@@ -72,32 +86,23 @@ func (b *DijkstraTransactionBuilder) WithWitnessSet(
 	return b
 }
 
-// WithPlutusV4Scripts appends Plutus V4 scripts to the witness set.
-func (b *DijkstraTransactionBuilder) WithPlutusV4Scripts(
-	scripts ...common.PlutusV4Script,
-) *DijkstraTransactionBuilder {
-	items := append(
-		[]common.PlutusV4Script(nil),
-		b.tx.WitnessSet.WsPlutusV4Scripts.Items()...,
-	)
-	items = append(items, scripts...)
-	b.tx.WitnessSet.WsPlutusV4Scripts = cbor.NewSetType(items, true)
-	return b
-}
-
 // WithRedeemers sets the Dijkstra redeemer map.
 func (b *DijkstraTransactionBuilder) WithRedeemers(
 	redeemers dijkstra.DijkstraRedeemers,
 ) *DijkstraTransactionBuilder {
 	b.tx.WitnessSet.WsRedeemers = redeemers
+	b.tx.WitnessSet.SetCbor(nil)
 	return b
 }
 
-// WithMetadata sets transaction metadata.
+// WithMetadata sets the transaction metadata, encoded as metadata-only
+// auxiliary data. The metadata must be a map keyed by unsigned integer labels.
+// Build sets the body's auxiliary_data_hash from the encoded metadata unless
+// the body already carries one.
 func (b *DijkstraTransactionBuilder) WithMetadata(
 	metadata common.TransactionMetadatum,
 ) *DijkstraTransactionBuilder {
-	b.tx.TxMetadata = metadata
+	b.metadata = metadata
 	return b
 }
 
@@ -109,22 +114,65 @@ func (b *DijkstraTransactionBuilder) WithTxIsValid(
 	return b
 }
 
-// Build encodes and decodes the transaction through the Dijkstra block body
-// decoder so the block-only validity flag is preserved and validated.
+// Build encodes the transaction in the Dijkstra block_transaction form and
+// decodes it through the Dijkstra block body decoder, so the block-only
+// validity flag is preserved and validated.
 func (b *DijkstraTransactionBuilder) Build() (
 	*dijkstra.DijkstraTransaction,
 	error,
 ) {
-	body := dijkstra.DijkstraBlockBody{
-		Transactions: []dijkstra.DijkstraTransaction{b.tx},
+	body := b.tx.Body
+	var auxCBOR []byte
+	if b.metadata != nil {
+		encoded, err := encodeDijkstraMetadata(b.metadata)
+		if err != nil {
+			return nil, err
+		}
+		auxCBOR = encoded
+		if body.TxAuxDataHash == nil {
+			hash := common.Blake2b256Hash(encoded)
+			body.TxAuxDataHash = &hash
+			body.SetCbor(nil)
+		}
 	}
-	encoded, err := cbor.Encode(body)
+	bodyCBOR, err := encodeDijkstraTransactionBody(body)
 	if err != nil {
-		return nil, fmt.Errorf("encode Dijkstra block transaction fixture: %w", err)
+		return nil, err
+	}
+	witnessCBOR, err := cbor.Encode(b.tx.WitnessSet)
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra witness set fixture: %w", err)
+	}
+	var aux any
+	if auxCBOR != nil {
+		aux = cbor.RawMessage(auxCBOR)
+	}
+	txCBOR, err := cbor.Encode([]any{
+		cbor.RawMessage(bodyCBOR),
+		cbor.RawMessage(witnessCBOR),
+		aux,
+		b.tx.TxIsValid,
+	})
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encode Dijkstra block transaction fixture: %w",
+			err,
+		)
+	}
+	blockBodyCBOR, err := cbor.Encode([]any{
+		[]cbor.RawMessage{txCBOR},
+		nil,
+		nil,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra block body fixture: %w", err)
 	}
 	var decoded dijkstra.DijkstraBlockBody
-	if _, err := cbor.Decode(encoded, &decoded); err != nil {
-		return nil, fmt.Errorf("decode Dijkstra block transaction fixture: %w", err)
+	if _, err := cbor.Decode(blockBodyCBOR, &decoded); err != nil {
+		return nil, fmt.Errorf(
+			"decode Dijkstra block transaction fixture: %w",
+			err,
+		)
 	}
 	if len(decoded.Transactions) != 1 {
 		return nil, fmt.Errorf(
@@ -134,9 +182,137 @@ func (b *DijkstraTransactionBuilder) Build() (
 	}
 	tx := decoded.Transactions[0]
 	if tx.TxIsValid != b.tx.TxIsValid {
-		return nil, fmt.Errorf(
-			"Dijkstra transaction validity changed during round-trip",
+		return nil, errors.New(
+			"dijkstra transaction validity changed during round-trip",
+		)
+	}
+	if auxCBOR != nil && tx.Metadata() == nil {
+		return nil, errors.New(
+			"dijkstra transaction metadata was lost during round-trip",
 		)
 	}
 	return &tx, nil
+}
+
+func encodeDijkstraMetadata(
+	metadata common.TransactionMetadatum,
+) ([]byte, error) {
+	var metaMap common.MetaMap
+	switch value := metadata.(type) {
+	case common.MetaMap:
+		metaMap = value
+	case *common.MetaMap:
+		if value == nil {
+			return nil, errors.New("dijkstra transaction metadata map is nil")
+		}
+		metaMap = *value
+	default:
+		return nil, fmt.Errorf(
+			"dijkstra transaction metadata must be a map, got %s",
+			metadata.TypeName(),
+		)
+	}
+	for _, pair := range metaMap.Pairs {
+		label, ok := pair.Key.(common.MetaInt)
+		if !ok || label.Value == nil || !label.Value.IsUint64() {
+			return nil, errors.New(
+				"dijkstra transaction metadata labels must be unsigned 64-bit integers",
+			)
+		}
+	}
+	encoded, err := cbor.Encode(metaMap)
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra transaction metadata: %w", err)
+	}
+	return encoded, nil
+}
+
+// encodeDijkstraTransactionBody encodes a body with the keys the Dijkstra CDDL
+// requires. gouroboros encodes outputs (1) and the fee (2) with omitempty, so
+// an in-process body with no outputs or a zero fee drops required keys;
+// subtransaction bodies drop outputs the same way. A decoded, unmodified body
+// keeps its original bytes.
+func encodeDijkstraTransactionBody(
+	body dijkstra.DijkstraTransactionBody,
+) ([]byte, error) {
+	if raw := body.Cbor(); raw != nil {
+		return raw, nil
+	}
+	if subtransactions := body.TxSubTransactions.Items(); len(subtransactions) > 0 {
+		normalized := make(
+			[]dijkstra.DijkstraSubTransaction,
+			len(subtransactions),
+		)
+		for i, sub := range subtransactions {
+			fixed, err := normalizeDijkstraSubTransaction(sub)
+			if err != nil {
+				return nil, fmt.Errorf("subtransaction %d: %w", i, err)
+			}
+			normalized[i] = fixed
+		}
+		body.TxSubTransactions = cbor.NewSetType(normalized, true)
+	}
+	encoded, err := cbor.Encode(body)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encode Dijkstra transaction body fixture: %w",
+			err,
+		)
+	}
+	return withRequiredMapKeys(encoded, map[uint64][]byte{
+		dijkstraTxBodyOutputsKey: {0x80},
+		dijkstraTxBodyFeeKey:     {0x00},
+	})
+}
+
+func normalizeDijkstraSubTransaction(
+	sub dijkstra.DijkstraSubTransaction,
+) (dijkstra.DijkstraSubTransaction, error) {
+	if sub.Cbor() != nil || sub.Body.Cbor() != nil {
+		return sub, nil
+	}
+	encoded, err := cbor.Encode(sub.Body)
+	if err != nil {
+		return sub, fmt.Errorf("encode body: %w", err)
+	}
+	fixed, err := withRequiredMapKeys(encoded, map[uint64][]byte{
+		dijkstraTxBodyOutputsKey: {0x80},
+	})
+	if err != nil {
+		return sub, err
+	}
+	var body dijkstra.DijkstraSubTransactionBody
+	if _, err := cbor.Decode(fixed, &body); err != nil {
+		return sub, fmt.Errorf("decode body: %w", err)
+	}
+	sub.Body = body
+	return sub, nil
+}
+
+// withRequiredMapKeys adds each missing key with its default encoded value.
+// gouroboros encodes maps in core deterministic order, which for these small
+// unsigned keys is the ascending order cardano-ledger writes.
+func withRequiredMapKeys(
+	encoded []byte,
+	required map[uint64][]byte,
+) ([]byte, error) {
+	var fields map[uint64]cbor.RawMessage
+	if _, err := cbor.Decode(encoded, &fields); err != nil {
+		return nil, fmt.Errorf("decode transaction body map: %w", err)
+	}
+	missing := false
+	for key, value := range required {
+		if _, ok := fields[key]; !ok {
+			fields[key] = slices.Clone(value)
+			missing = true
+		}
+	}
+	if !missing {
+		return encoded, nil
+	}
+	ret, err := cbor.Encode(fields)
+	if err != nil {
+		return nil, fmt.Errorf("encode transaction body map: %w", err)
+	}
+	return ret, nil
 }

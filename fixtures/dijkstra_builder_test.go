@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
@@ -124,5 +125,88 @@ func TestGenerateConwayToDijkstraChainRejectsOverflow(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected Dijkstra slot overflow error")
+	}
+}
+
+// dijkstraHeaderBodyFields decodes the header_body array of a Dijkstra block.
+func dijkstraHeaderBodyFields(
+	t *testing.T,
+	block *dijkstra.DijkstraBlock,
+) ([]cbor.RawMessage, []byte) {
+	t.Helper()
+	var blockFields []cbor.RawMessage
+	if _, err := cbor.Decode(block.Cbor(), &blockFields); err != nil {
+		t.Fatalf("decode block: %s", err)
+	}
+	var header []cbor.RawMessage
+	if _, err := cbor.Decode(blockFields[0], &header); err != nil {
+		t.Fatalf("decode header: %s", err)
+	}
+	if len(header) != 2 {
+		t.Fatalf("header has %d elements, want 2", len(header))
+	}
+	var headerBody []cbor.RawMessage
+	if _, err := cbor.Decode(header[0], &headerBody); err != nil {
+		t.Fatalf("decode header body: %s", err)
+	}
+	var signature []byte
+	if _, err := cbor.Decode(header[1], &signature); err != nil {
+		t.Fatalf("decode header signature: %s", err)
+	}
+	return headerBody, signature
+}
+
+// The pinned Dijkstra CDDL header_body ends with
+// block_body_contains_leios_cert : bool and eb_announcement / nil, and the
+// header signature is a 448-byte kes_signature.
+func TestDijkstraBlockBuilderEncodesPinnedHeaderShape(t *testing.T) {
+	plain, err := fixtures.NewDijkstraBlockBuilder().Build()
+	if err != nil {
+		t.Fatalf("build Dijkstra block: %s", err)
+	}
+	headerBody, signature := dijkstraHeaderBodyFields(t, plain)
+	if len(headerBody) != 12 {
+		t.Fatalf("header body has %d fields, want 12", len(headerBody))
+	}
+	if !bytes.Equal(headerBody[10], []byte{0xf4}) {
+		t.Fatalf("block_body_contains_leios_cert = %x, want false", headerBody[10])
+	}
+	if !bytes.Equal(headerBody[11], []byte{0xf6}) {
+		t.Fatalf("eb_announcement = %x, want nil", headerBody[11])
+	}
+	if len(signature) != 448 {
+		t.Fatalf("KES signature width = %d, want 448", len(signature))
+	}
+	if certified, present := plain.BlockHeader.LeiosCertified(); certified || !present {
+		t.Fatalf("LeiosCertified() = %t, %t, want false, true", certified, present)
+	}
+
+	ebHash := common.Blake2b256Hash([]byte("endorser block"))
+	certified, err := fixtures.NewDijkstraBlockBuilder().
+		WithLeiosCertificate(&dijkstra.DijkstraLeiosCertificate{
+			Signers:             []byte{0x80},
+			AggregatedSignature: make([]byte, common.LeiosBlsSignatureSize),
+		}).
+		WithEbAnnouncement(ebHash, 4096).
+		Build()
+	if err != nil {
+		t.Fatalf("build certified Dijkstra block: %s", err)
+	}
+	headerBody, _ = dijkstraHeaderBodyFields(t, certified)
+	if !bytes.Equal(headerBody[10], []byte{0xf5}) {
+		t.Fatalf("block_body_contains_leios_cert = %x, want true", headerBody[10])
+	}
+	if flag, present := certified.BlockHeader.LeiosCertified(); !flag || !present {
+		t.Fatalf("LeiosCertified() = %t, %t, want true, true", flag, present)
+	}
+	gotHash, gotSize, ok := certified.BlockHeader.LeiosAnnouncement()
+	if !ok || gotHash != ebHash || gotSize != 4096 {
+		t.Fatalf(
+			"LeiosAnnouncement() = %s, %d, %t, want %s, 4096, true",
+			gotHash,
+			gotSize,
+			ok,
+			ebHash,
+		)
 	}
 }

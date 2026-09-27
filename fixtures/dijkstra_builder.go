@@ -16,6 +16,7 @@ package fixtures
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -24,23 +25,33 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 )
 
-// DijkstraBlockBuilder constructs a Dijkstra block and derives its body hash
-// and size from the encoded body.
+// DijkstraBlockBuilder constructs a Dijkstra block in the pinned Dijkstra CDDL
+// shape. It derives the header's body hash, body size, and
+// block_body_contains_leios_cert flag from the encoded body.
 type DijkstraBlockBuilder struct {
-	blockNumber     uint64
-	slot            uint64
-	prevHash        common.Blake2b256
-	transactions    []dijkstra.DijkstraTransaction
-	leiosCert       *dijkstra.DijkstraLeiosCertificate
-	perasCert       []byte
-	issuerVkey      common.IssuerVkey
-	vrfKey          []byte
-	vrfResult       common.VrfResult
-	opCert          babbage.BabbageOpCert
-	protoVersion    babbage.BabbageProtoVersion
-	signature       []byte
-	headerExtension []cbor.RawMessage
+	blockNumber    uint64
+	slot           uint64
+	prevHash       common.Blake2b256
+	transactions   []dijkstra.DijkstraTransaction
+	leiosCert      *dijkstra.DijkstraLeiosCertificate
+	perasCert      []byte
+	issuerVkey     common.IssuerVkey
+	vrfKey         []byte
+	vrfResult      common.VrfResult
+	opCert         babbage.BabbageOpCert
+	protoVersion   babbage.BabbageProtoVersion
+	signature      []byte
+	ebAnnouncement *dijkstraEbAnnouncement
 }
+
+type dijkstraEbAnnouncement struct {
+	cbor.StructAsArray
+	Hash common.Blake2b256
+	Size uint32
+}
+
+// dijkstraKesSignatureSize is the kes_signature width in the Dijkstra CDDL.
+const dijkstraKesSignatureSize = 448
 
 // NewDijkstraBlockBuilder creates a block builder with decodeable headers.
 func NewDijkstraBlockBuilder() *DijkstraBlockBuilder {
@@ -57,7 +68,7 @@ func NewDijkstraBlockBuilder() *DijkstraBlockBuilder {
 		protoVersion: babbage.BabbageProtoVersion{
 			Major: dijkstra.MinProtocolVersionDijkstra,
 		},
-		signature: make([]byte, 64),
+		signature: make([]byte, dijkstraKesSignatureSize),
 	}
 }
 
@@ -157,18 +168,18 @@ func (b *DijkstraBlockBuilder) WithSignature(
 	return b
 }
 
-// WithLeiosHeaderExtension appends raw trailing header fields used by Leios.
-func (b *DijkstraBlockBuilder) WithLeiosHeaderExtension(
-	fields ...cbor.RawMessage,
+// WithEbAnnouncement sets the header's eb_announcement, the endorser block
+// this ranking block announces. Without it the field is encoded as nil.
+func (b *DijkstraBlockBuilder) WithEbAnnouncement(
+	hash common.Blake2b256,
+	size uint32,
 ) *DijkstraBlockBuilder {
-	b.headerExtension = make([]cbor.RawMessage, len(fields))
-	for i, field := range fields {
-		b.headerExtension[i] = bytes.Clone(field)
-	}
+	b.ebAnnouncement = &dijkstraEbAnnouncement{Hash: hash, Size: size}
 	return b
 }
 
-// Build encodes and decodes a block so its hash and CBOR match consumers.
+// Build encodes the block and decodes it with gouroboros, so the returned
+// block's CBOR, hash, and header fields are what a consumer decodes.
 func (b *DijkstraBlockBuilder) Build() (*dijkstra.DijkstraBlock, error) {
 	body := dijkstra.DijkstraBlockBody{
 		Transactions: append(
@@ -181,26 +192,33 @@ func (b *DijkstraBlockBuilder) Build() (*dijkstra.DijkstraBlock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode Dijkstra block body fixture: %w", err)
 	}
-	header := &dijkstra.DijkstraBlockHeader{
-		BabbageBlockHeader: babbage.BabbageBlockHeader{
-			Body: babbage.BabbageBlockHeaderBody{
-				BlockNumber:   b.blockNumber,
-				Slot:          b.slot,
-				PrevHash:      b.prevHash,
-				IssuerVkey:    b.issuerVkey,
-				VrfKey:        bytes.Clone(b.vrfKey),
-				VrfResult:     b.vrfResult,
-				BlockBodySize: uint64(len(bodyCBOR)),
-				BlockBodyHash: common.Blake2b256Hash(bodyCBOR),
-				OpCert:        b.opCert,
-				ProtoVersion:  b.protoVersion,
-			},
-			Signature: bytes.Clone(b.signature),
-		},
-		LeiosHeaderExtension: append([]cbor.RawMessage(nil), b.headerExtension...),
+	headerBody := babbage.BabbageBlockHeaderBody{
+		BlockNumber:   b.blockNumber,
+		Slot:          b.slot,
+		PrevHash:      b.prevHash,
+		IssuerVkey:    b.issuerVkey,
+		VrfKey:        bytes.Clone(b.vrfKey),
+		VrfResult:     b.vrfResult,
+		BlockBodySize: uint64(len(bodyCBOR)),
+		BlockBodyHash: common.Blake2b256Hash(bodyCBOR),
+		OpCert:        b.opCert,
+		ProtoVersion:  b.protoVersion,
 	}
-	block := &dijkstra.DijkstraBlock{BlockHeader: header, BlockBody: body}
-	blockCBOR, err := cbor.Encode(block)
+	headerBodyCBOR, err := b.encodeHeaderBody(
+		headerBody,
+		b.leiosCert != nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	headerCBOR, err := cbor.Encode([]any{
+		cbor.RawMessage(headerBodyCBOR),
+		bytes.Clone(b.signature),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra block header fixture: %w", err)
+	}
+	blockCBOR, err := cbor.Encode([]cbor.RawMessage{headerCBOR, bodyCBOR})
 	if err != nil {
 		return nil, fmt.Errorf("encode Dijkstra block fixture: %w", err)
 	}
@@ -209,7 +227,44 @@ func (b *DijkstraBlockBuilder) Build() (*dijkstra.DijkstraBlock, error) {
 		return nil, fmt.Errorf("decode Dijkstra block fixture: %w", err)
 	}
 	if !bytes.Equal(decoded.Cbor(), blockCBOR) {
-		return nil, fmt.Errorf("Dijkstra block fixture changed during round-trip")
+		return nil, errors.New("Dijkstra block fixture changed during round-trip")
 	}
 	return decoded, nil
+}
+
+// encodeHeaderBody appends the Dijkstra header_body fields that follow
+// protocol_version. gouroboros encodes an in-process DijkstraBlockHeader as a
+// 10-field Babbage header and drops LeiosHeaderExtension, so the builder
+// encodes the header body itself.
+func (b *DijkstraBlockBuilder) encodeHeaderBody(
+	headerBody babbage.BabbageBlockHeaderBody,
+	containsLeiosCert bool,
+) ([]byte, error) {
+	babbageCBOR, err := cbor.Encode(&headerBody)
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra header body fixture: %w", err)
+	}
+	var babbageFields []cbor.RawMessage
+	if _, err := cbor.Decode(babbageCBOR, &babbageFields); err != nil {
+		return nil, fmt.Errorf("split Dijkstra header body fixture: %w", err)
+	}
+	flag, err := cbor.Encode(containsLeiosCert)
+	if err != nil {
+		return nil, fmt.Errorf("encode Leios certificate flag: %w", err)
+	}
+	var announcement any
+	if b.ebAnnouncement != nil {
+		announcement = b.ebAnnouncement
+	}
+	announcementCBOR, err := cbor.Encode(announcement)
+	if err != nil {
+		return nil, fmt.Errorf("encode EB announcement: %w", err)
+	}
+	encoded, err := cbor.Encode(
+		append(babbageFields, flag, announcementCBOR),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra header body fixture: %w", err)
+	}
+	return encoded, nil
 }

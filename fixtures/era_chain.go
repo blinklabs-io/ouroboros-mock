@@ -16,6 +16,7 @@ package fixtures
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 
@@ -25,11 +26,18 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/alonzo"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/gouroboros/ledger/mary"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 )
 
 // GenerateDijkstraChain builds a connected chain of empty Dijkstra blocks.
+//
+// Its headers carry the 10-field Babbage header body, which
+// ledger.DetermineBlockType classifies. NewDijkstraBlockBuilder and
+// GenerateConwayToDijkstraChain emit the 12-field header body of the pinned
+// Dijkstra CDDL instead, which DetermineBlockType rejects as an unknown header
+// body length.
 func GenerateDijkstraChain(
 	startBlockNumber uint64,
 	prevHash common.Blake2b256,
@@ -39,37 +47,79 @@ func GenerateDijkstraChain(
 	if count <= 0 {
 		return []ledger.Block{}, nil
 	}
-	lastOffset := uint64(count - 1)
-	if lastOffset > math.MaxUint64-startBlockNumber {
-		return nil, fmt.Errorf("Dijkstra block number range overflows uint64")
+	if err := checkChainRange(
+		startBlockNumber, startSlot, slotIncrement, uint64(count),
+	); err != nil {
+		return nil, err
 	}
-	if slotIncrement != 0 &&
-		lastOffset > (math.MaxUint64-startSlot)/slotIncrement {
-		return nil, fmt.Errorf("Dijkstra slot range overflows uint64")
+	body := dijkstra.DijkstraBlockBody{
+		InvalidTransactions: []uint{},
+		Transactions:        []dijkstra.DijkstraTransaction{},
 	}
+	bodyCbor, err := cbor.Encode(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode empty Dijkstra block body: %w", err)
+	}
+	bodySize := uint64(len(bodyCbor))
+	bodyHash := body.Hash()
 	blocks := make([]ledger.Block, 0, count)
 	currentPrev := prevHash
 	for i := range count {
-		block, err := NewDijkstraBlockBuilder().
-			WithBlockNumber(startBlockNumber + uint64(i)).
-			WithSlot(startSlot + uint64(i)*slotIncrement).
-			WithPreviousHash(currentPrev).
-			Build()
+		block := &dijkstra.DijkstraBlock{
+			BlockHeader: &dijkstra.DijkstraBlockHeader{
+				BabbageBlockHeader: babbage.BabbageBlockHeader{
+					Body: babbage.BabbageBlockHeaderBody{
+						BlockNumber: startBlockNumber + uint64(i),
+						Slot:        startSlot + uint64(i)*slotIncrement,
+						PrevHash:    currentPrev,
+						IssuerVkey:  common.IssuerVkey{},
+						VrfKey:      make([]byte, 32),
+						VrfResult: common.VrfResult{
+							Output: make([]byte, 64),
+							Proof:  make([]byte, 80),
+						},
+						BlockBodySize: bodySize,
+						BlockBodyHash: bodyHash,
+						OpCert: babbage.BabbageOpCert{
+							HotVkey:   make([]byte, 32),
+							Signature: make([]byte, 64),
+						},
+						ProtoVersion: babbage.BabbageProtoVersion{
+							Major: dijkstra.MinProtocolVersionDijkstra,
+						},
+					},
+					Signature: make([]byte, 64),
+				},
+			},
+			BlockBody: body,
+		}
+		blockCbor, err := cbor.Encode(block)
+		if err != nil {
+			return nil, fmt.Errorf("encode Dijkstra block %d: %w", i, err)
+		}
+		decoded, err := dijkstra.NewDijkstraBlockFromCbor(blockCbor)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"build Dijkstra block %d: %w",
+				"decode generated Dijkstra block %d: %w",
 				i,
 				err,
 			)
 		}
-		blocks = append(blocks, block)
-		currentPrev = block.Hash()
+		if !bytes.Equal(decoded.Cbor(), blockCbor) {
+			return nil, fmt.Errorf(
+				"dijkstra block %d Cbor mismatch after round-trip",
+				i,
+			)
+		}
+		blocks = append(blocks, decoded)
+		currentPrev = decoded.Hash()
 	}
 	return blocks, nil
 }
 
 // GenerateConwayToDijkstraChain builds connected Conway and Dijkstra blocks
-// for tests that exercise the PV12 era boundary.
+// for tests that exercise the PV12 era boundary. The Dijkstra blocks come from
+// NewDijkstraBlockBuilder.
 func GenerateConwayToDijkstraChain(
 	startBlockNumber uint64,
 	prevHash common.Blake2b256,
@@ -77,24 +127,20 @@ func GenerateConwayToDijkstraChain(
 	conwayCount, dijkstraCount int,
 ) ([]ledger.Block, error) {
 	if conwayCount < 0 || dijkstraCount < 0 {
-		return nil, fmt.Errorf("block counts must not be negative")
+		return nil, errors.New("block counts must not be negative")
 	}
-	if conwayCount == 0 {
-		return GenerateDijkstraChain(
-			startBlockNumber, prevHash, startSlot, slotIncrement, dijkstraCount,
-		)
+	if conwayCount+dijkstraCount == 0 {
+		return []ledger.Block{}, nil
 	}
-	count := uint64(conwayCount)
-	total := count + uint64(dijkstraCount)
-	if total-1 > math.MaxUint64-startBlockNumber {
-		return nil, fmt.Errorf("transition block number range overflows uint64")
+	if err := checkChainRange(
+		startBlockNumber,
+		startSlot,
+		slotIncrement,
+		uint64(conwayCount)+uint64(dijkstraCount),
+	); err != nil {
+		return nil, err
 	}
-	lastOffset := total - 1
-	if slotIncrement != 0 &&
-		lastOffset > (math.MaxUint64-startSlot)/slotIncrement {
-		return nil, fmt.Errorf("transition slot range overflows uint64")
-	}
-	conwayBlocks, err := GenerateConwayChain(
+	blocks, err := GenerateConwayChain(
 		startBlockNumber,
 		prevHash,
 		startSlot,
@@ -104,21 +150,40 @@ func GenerateConwayToDijkstraChain(
 	if err != nil {
 		return nil, fmt.Errorf("generate Conway transition blocks: %w", err)
 	}
-	if dijkstraCount == 0 {
-		return conwayBlocks, nil
+	currentPrev := prevHash
+	if len(blocks) > 0 {
+		currentPrev = blocks[len(blocks)-1].Hash()
 	}
-	last := conwayBlocks[len(conwayBlocks)-1]
-	dijkstraBlocks, err := GenerateDijkstraChain(
-		startBlockNumber+count,
-		last.Hash(),
-		startSlot+count*slotIncrement,
-		slotIncrement,
-		dijkstraCount,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("generate Dijkstra transition blocks: %w", err)
+	for i := range dijkstraCount {
+		offset := uint64(conwayCount) + uint64(i)
+		block, err := NewDijkstraBlockBuilder().
+			WithBlockNumber(startBlockNumber + offset).
+			WithSlot(startSlot + offset*slotIncrement).
+			WithPreviousHash(currentPrev).
+			Build()
+		if err != nil {
+			return nil, fmt.Errorf("build Dijkstra transition block %d: %w", i, err)
+		}
+		blocks = append(blocks, block)
+		currentPrev = block.Hash()
 	}
-	return append(conwayBlocks, dijkstraBlocks...), nil
+	return blocks, nil
+}
+
+// checkChainRange rejects a chain whose last block number or slot would
+// overflow uint64.
+func checkChainRange(
+	startBlockNumber, startSlot, slotIncrement, count uint64,
+) error {
+	lastOffset := count - 1
+	if lastOffset > math.MaxUint64-startBlockNumber {
+		return errors.New("block number range overflows uint64")
+	}
+	if slotIncrement != 0 &&
+		lastOffset > (math.MaxUint64-startSlot)/slotIncrement {
+		return errors.New("slot range overflows uint64")
+	}
+	return nil
 }
 
 // GenerateAllegraChain builds a connected chain of empty Allegra blocks.

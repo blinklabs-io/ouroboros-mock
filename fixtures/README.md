@@ -122,21 +122,27 @@ Use `GenerateBabbageChainWithProtocolVersion` when a test needs valid Babbage
 bytes with a specific header protocol version, including an unknown version for
 fail-closed classification coverage.
 
-`NewDijkstraBlockBuilder` builds one Dijkstra block with transactions in the
-non-segregated body format. It derives the body size and hash, supports the
-optional Leios and Peras certificate slots, and decodes its output before
-returning it. `GenerateConwayToDijkstraChain` builds a connected chain spanning
-the PV12 era boundary.
+`NewDijkstraBlockBuilder` builds one Dijkstra block in the pinned Dijkstra CDDL
+shape: a non-segregated body with the optional Leios and Peras certificate
+slots, and a 12-field header body whose `block_body_contains_leios_cert` flag
+follows the body's Leios certificate and whose `eb_announcement` is set with
+`WithEbAnnouncement`. It derives the body size and hash and decodes its output
+before returning it. `GenerateConwayToDijkstraChain` builds a connected chain
+spanning the PV12 era boundary from the same builder. `GenerateDijkstraChain`
+keeps the 10-field Babbage header body, which `ledger.DetermineBlockType`
+classifies; that function rejects the 12-field Dijkstra header body.
 
 Use `ledger.NewDijkstraTransactionBuilder` to construct Dijkstra block
-transactions with guards, subtransactions, Plutus V4 witnesses, redeemers, and
-the `TxIsValid` flag. The builder round-trips through the Dijkstra block-body
-decoder, where that validity flag is encoded.
+transactions with guards, subtransactions, redeemers, metadata, and the
+`TxIsValid` flag. The builder encodes the `block_transaction` form, including
+the required transaction-body keys gouroboros omits when empty, and decodes it
+through the Dijkstra block-body decoder, where that validity flag is encoded.
+The Dijkstra witness set has no Plutus V4 script field, so a Plutus V4 script
+can only be supplied as a reference script.
 
 ```go
 tx, err := ledger.NewDijkstraTransactionBuilder().
 	WithTxGuards(guards).
-	WithPlutusV4Scripts(script).
 	WithRedeemers(redeemers).
 	WithTxIsValid(false).
 	Build()
