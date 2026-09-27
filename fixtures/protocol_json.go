@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -155,19 +155,13 @@ func (f Fixture) DecodeProtocolParameterUpdate() (DecodedProtocolParameterUpdate
 			value: value,
 		}, nil
 	case "babbage":
-		value, err := payload.toBabbageProtocolParameterUpdate()
-		if err != nil {
-			return DecodedProtocolParameterUpdate{}, err
-		}
+		value := payload.toBabbageProtocolParameterUpdate()
 		return DecodedProtocolParameterUpdate{
 			Era:   f.Era,
 			value: value,
 		}, nil
 	case "conway":
-		value, err := payload.toConwayProtocolParameterUpdate()
-		if err != nil {
-			return DecodedProtocolParameterUpdate{}, err
-		}
+		value := payload.toConwayProtocolParameterUpdate()
 		return DecodedProtocolParameterUpdate{
 			Era:   f.Era,
 			value: value,
@@ -252,13 +246,13 @@ func decodeFixtureJSON(f Fixture, v any) error {
 type protocolParametersJSON struct {
 	TxFeePerByte               *jsonUint                 `json:"txFeePerByte"`
 	TxFeeFixed                 *jsonUint                 `json:"txFeeFixed"`
-	MaxBlockBodySize           *jsonUint                 `json:"maxBlockBodySize"`
-	MaxTxSize                  *jsonUint                 `json:"maxTxSize"`
-	MaxBlockHeaderSize         *jsonUint                 `json:"maxBlockHeaderSize"`
+	MaxBlockBodySize           *jsonWord32               `json:"maxBlockBodySize"`
+	MaxTxSize                  *jsonWord32               `json:"maxTxSize"`
+	MaxBlockHeaderSize         *jsonWord16               `json:"maxBlockHeaderSize"`
 	StakeAddressDeposit        *jsonUint                 `json:"stakeAddressDeposit"`
 	StakePoolDeposit           *jsonUint                 `json:"stakePoolDeposit"`
-	PoolRetireMaxEpoch         *jsonUint64               `json:"poolRetireMaxEpoch"`
-	StakePoolTargetNum         *jsonUint                 `json:"stakePoolTargetNum"`
+	PoolRetireMaxEpoch         *jsonWord32               `json:"poolRetireMaxEpoch"`
+	StakePoolTargetNum         *jsonWord16               `json:"stakePoolTargetNum"`
 	PoolPledgeInfluence        *jsonRational             `json:"poolPledgeInfluence"`
 	MonetaryExpansion          *jsonRational             `json:"monetaryExpansion"`
 	TreasuryCut                *jsonRational             `json:"treasuryCut"`
@@ -272,17 +266,17 @@ type protocolParametersJSON struct {
 	ExecutionUnitPrices        *executionUnitPricesJSON  `json:"executionUnitPrices"`
 	MaxTxExecutionUnits        *exUnitsJSON              `json:"maxTxExecutionUnits"`
 	MaxBlockExecutionUnits     *exUnitsJSON              `json:"maxBlockExecutionUnits"`
-	MaxValueSize               *jsonUint                 `json:"maxValueSize"`
-	CollateralPercentage       *jsonUint                 `json:"collateralPercentage"`
-	MaxCollateralInputs        *jsonUint                 `json:"maxCollateralInputs"`
+	MaxValueSize               *jsonWord32               `json:"maxValueSize"`
+	CollateralPercentage       *jsonWord16               `json:"collateralPercentage"`
+	MaxCollateralInputs        *jsonWord16               `json:"maxCollateralInputs"`
 	PoolVotingThresholds       *poolVotingThresholdsJSON `json:"poolVotingThresholds"`
 	DRepVotingThresholds       *dRepVotingThresholdsJSON `json:"dRepVotingThresholds"`
-	CommitteeMinSize           *jsonUint                 `json:"committeeMinSize"`
-	CommitteeMaxTermLength     *jsonUint64               `json:"committeeMaxTermLength"`
-	GovActionLifetime          *jsonUint64               `json:"govActionLifetime"`
+	CommitteeMinSize           *jsonWord16               `json:"committeeMinSize"`
+	CommitteeMaxTermLength     *jsonWord32               `json:"committeeMaxTermLength"`
+	GovActionLifetime          *jsonWord32               `json:"govActionLifetime"`
 	GovActionDeposit           *jsonUint64               `json:"govActionDeposit"`
 	DRepDeposit                *jsonUint64               `json:"dRepDeposit"`
-	DRepActivity               *jsonUint64               `json:"dRepActivity"`
+	DRepActivity               *jsonWord32               `json:"dRepActivity"`
 	MinFeeRefScriptCostPerByte *jsonRational             `json:"minFeeRefScriptCostPerByte"`
 
 	// Dijkstra-era reference-script parameters.
@@ -328,10 +322,7 @@ func (p protocolParametersJSON) toDijkstraProtocolParameters() (*dijkstra.Dijkst
 }
 
 func (p protocolParametersJSON) toDijkstraProtocolParameterUpdate() (*dijkstra.DijkstraProtocolParameterUpdate, error) {
-	u, err := p.toConwayProtocolParameterUpdate()
-	if err != nil {
-		return nil, err
-	}
+	u := p.toConwayProtocolParameterUpdate()
 	maxBlock, err := optionalUint32Pointer(
 		"maxRefScriptSizePerBlock",
 		p.MaxRefScriptSizePerBlock,
@@ -411,18 +402,18 @@ func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyP
 	}
 	maxBlockBodySize, err := requireUintField(
 		"maxBlockBodySize",
-		p.MaxBlockBodySize,
+		p.MaxBlockBodySize.asUint(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize)
+	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize.asUint())
 	if err != nil {
 		return nil, err
 	}
 	maxBlockHeaderSize, err := requireUintField(
 		"maxBlockHeaderSize",
-		p.MaxBlockHeaderSize,
+		p.MaxBlockHeaderSize.asUint(),
 	)
 	if err != nil {
 		return nil, err
@@ -438,11 +429,14 @@ func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyP
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
+	maxEpoch, err := requireUintField(
+		"poolRetireMaxEpoch",
+		p.PoolRetireMaxEpoch.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum)
+	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +460,7 @@ func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyP
 		MaxBlockHeaderSize: maxBlockHeaderSize,
 		KeyDeposit:         keyDeposit,
 		PoolDeposit:        poolDeposit,
+		MaxEpoch:           maxEpoch,
 		NOpt:               nOpt,
 		A0:                 a0,
 		Rho:                rho,
@@ -475,9 +470,6 @@ func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyP
 		ProtocolMajor:      version.Major,
 		ProtocolMinor:      version.Minor,
 		MinUtxoValue:       optionalUintValue(p.MinUTxOValue),
-	}
-	if err := setMaxEpochValue(pp, maxEpoch); err != nil {
-		return nil, err
 	}
 	return pp, nil
 }
@@ -501,18 +493,18 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 	}
 	maxBlockBodySize, err := requireUintField(
 		"maxBlockBodySize",
-		p.MaxBlockBodySize,
+		p.MaxBlockBodySize.asUint(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize)
+	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize.asUint())
 	if err != nil {
 		return nil, err
 	}
 	maxBlockHeaderSize, err := requireUintField(
 		"maxBlockHeaderSize",
-		p.MaxBlockHeaderSize,
+		p.MaxBlockHeaderSize.asUint(),
 	)
 	if err != nil {
 		return nil, err
@@ -528,11 +520,14 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
+	maxEpoch, err := requireUintField(
+		"poolRetireMaxEpoch",
+		p.PoolRetireMaxEpoch.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum)
+	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
 	if err != nil {
 		return nil, err
 	}
@@ -577,6 +572,7 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 		MaxBlockHeaderSize:   maxBlockHeaderSize,
 		KeyDeposit:           keyDeposit,
 		PoolDeposit:          poolDeposit,
+		MaxEpoch:             maxEpoch,
 		NOpt:                 nOpt,
 		A0:                   a0,
 		Rho:                  rho,
@@ -592,12 +588,9 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 		ExecutionCosts:       executionCosts,
 		MaxTxExUnits:         maxTxExUnits,
 		MaxBlockExUnits:      maxBlockExUnits,
-		MaxValueSize:         optionalUintValue(p.MaxValueSize),
-		CollateralPercentage: optionalUintValue(p.CollateralPercentage),
-		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs),
-	}
-	if err := setMaxEpochValue(pp, maxEpoch); err != nil {
-		return nil, err
+		MaxValueSize:         optionalUintValue(p.MaxValueSize.asUint()),
+		CollateralPercentage: optionalUintValue(p.CollateralPercentage.asUint()),
+		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs.asUint()),
 	}
 	return pp, nil
 }
@@ -617,18 +610,18 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 	}
 	maxBlockBodySize, err := requireUintField(
 		"maxBlockBodySize",
-		p.MaxBlockBodySize,
+		p.MaxBlockBodySize.asUint(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize)
+	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize.asUint())
 	if err != nil {
 		return nil, err
 	}
 	maxBlockHeaderSize, err := requireUintField(
 		"maxBlockHeaderSize",
-		p.MaxBlockHeaderSize,
+		p.MaxBlockHeaderSize.asUint(),
 	)
 	if err != nil {
 		return nil, err
@@ -644,11 +637,14 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
+	maxEpoch, err := requireUintField(
+		"poolRetireMaxEpoch",
+		p.PoolRetireMaxEpoch.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum)
+	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
 	if err != nil {
 		return nil, err
 	}
@@ -693,6 +689,7 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 		MaxBlockHeaderSize:   maxBlockHeaderSize,
 		KeyDeposit:           keyDeposit,
 		PoolDeposit:          poolDeposit,
+		MaxEpoch:             maxEpoch,
 		NOpt:                 nOpt,
 		A0:                   a0,
 		Rho:                  rho,
@@ -705,12 +702,9 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 		ExecutionCosts:       executionCosts,
 		MaxTxExUnits:         maxTxExUnits,
 		MaxBlockExUnits:      maxBlockExUnits,
-		MaxValueSize:         optionalUintValue(p.MaxValueSize),
-		CollateralPercentage: optionalUintValue(p.CollateralPercentage),
-		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs),
-	}
-	if err := setMaxEpochValue(pp, maxEpoch); err != nil {
-		return nil, err
+		MaxValueSize:         optionalUintValue(p.MaxValueSize.asUint()),
+		CollateralPercentage: optionalUintValue(p.CollateralPercentage.asUint()),
+		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs.asUint()),
 	}
 	return pp, nil
 }
@@ -730,18 +724,18 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 	}
 	maxBlockBodySize, err := requireUintField(
 		"maxBlockBodySize",
-		p.MaxBlockBodySize,
+		p.MaxBlockBodySize.asUint(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize)
+	maxTxSize, err := requireUintField("maxTxSize", p.MaxTxSize.asUint())
 	if err != nil {
 		return nil, err
 	}
 	maxBlockHeaderSize, err := requireUintField(
 		"maxBlockHeaderSize",
-		p.MaxBlockHeaderSize,
+		p.MaxBlockHeaderSize.asUint(),
 	)
 	if err != nil {
 		return nil, err
@@ -757,11 +751,14 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 	if err != nil {
 		return nil, err
 	}
-	maxEpoch, err := requireUint64Field(p.PoolRetireMaxEpoch)
+	maxEpoch, err := requireUintField(
+		"poolRetireMaxEpoch",
+		p.PoolRetireMaxEpoch.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum)
+	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
 	if err != nil {
 		return nil, err
 	}
@@ -806,6 +803,7 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 		MaxBlockHeaderSize:   maxBlockHeaderSize,
 		KeyDeposit:           keyDeposit,
 		PoolDeposit:          poolDeposit,
+		MaxEpoch:             maxEpoch,
 		NOpt:                 nOpt,
 		A0:                   a0,
 		Rho:                  rho,
@@ -817,27 +815,24 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 		ExecutionCosts:       executionCosts,
 		MaxTxExUnits:         maxTxExUnits,
 		MaxBlockExUnits:      maxBlockExUnits,
-		MaxValueSize:         optionalUintValue(p.MaxValueSize),
-		CollateralPercentage: optionalUintValue(p.CollateralPercentage),
-		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs),
+		MaxValueSize:         optionalUintValue(p.MaxValueSize.asUint()),
+		CollateralPercentage: optionalUintValue(p.CollateralPercentage.asUint()),
+		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs.asUint()),
 		PoolVotingThresholds: clonePoolVotingThresholdsValue(
 			p.PoolVotingThresholds,
 		),
 		DRepVotingThresholds: cloneDRepVotingThresholdsValue(
 			p.DRepVotingThresholds,
 		),
-		MinCommitteeSize: optionalUintValue(p.CommitteeMinSize),
+		MinCommitteeSize: optionalUintValue(p.CommitteeMinSize.asUint()),
 		CommitteeTermLimit: optionalUint64Value(
-			p.CommitteeMaxTermLength,
+			p.CommitteeMaxTermLength.asUint64(),
 		),
-		GovActionValidityPeriod:    optionalUint64Value(p.GovActionLifetime),
+		GovActionValidityPeriod:    optionalUint64Value(p.GovActionLifetime.asUint64()),
 		GovActionDeposit:           optionalUint64Value(p.GovActionDeposit),
 		DRepDeposit:                optionalUint64Value(p.DRepDeposit),
-		DRepInactivityPeriod:       optionalUint64Value(p.DRepActivity),
+		DRepInactivityPeriod:       optionalUint64Value(p.DRepActivity.asUint64()),
 		MinFeeRefScriptCostPerByte: cloneRat(p.MinFeeRefScriptCostPerByte),
-	}
-	if err := setMaxEpochValue(pp, maxEpoch); err != nil {
-		return nil, err
 	}
 	return pp, nil
 }
@@ -846,12 +841,13 @@ func (p protocolParametersJSON) toShelleyProtocolParameterUpdate() (*shelley.She
 	update := &shelley.ShelleyProtocolParameterUpdate{
 		MinFeeA:            cloneUintPtr(p.TxFeePerByte),
 		MinFeeB:            cloneUintPtr(p.TxFeeFixed),
-		MaxBlockBodySize:   cloneUintPtr(p.MaxBlockBodySize),
-		MaxTxSize:          cloneUintPtr(p.MaxTxSize),
-		MaxBlockHeaderSize: cloneUintPtr(p.MaxBlockHeaderSize),
+		MaxBlockBodySize:   cloneUintPtr(p.MaxBlockBodySize.asUint()),
+		MaxTxSize:          cloneUintPtr(p.MaxTxSize.asUint()),
+		MaxBlockHeaderSize: cloneUintPtr(p.MaxBlockHeaderSize.asUint()),
 		KeyDeposit:         cloneUintPtr(p.StakeAddressDeposit),
 		PoolDeposit:        cloneUintPtr(p.StakePoolDeposit),
-		NOpt:               cloneUintPtr(p.StakePoolTargetNum),
+		MaxEpoch:           cloneUintPtr(p.PoolRetireMaxEpoch.asUint()),
+		NOpt:               cloneUintPtr(p.StakePoolTargetNum.asUint()),
 		A0:                 cloneRat(p.PoolPledgeInfluence),
 		Rho:                cloneRat(p.MonetaryExpansion),
 		Tau:                cloneRat(p.TreasuryCut),
@@ -869,9 +865,6 @@ func (p protocolParametersJSON) toShelleyProtocolParameterUpdate() (*shelley.She
 		version := p.ProtocolVersion.toCommon()
 		update.ProtocolVersion = &version
 	}
-	if err := setOptionalMaxEpoch(update, p.PoolRetireMaxEpoch); err != nil {
-		return nil, err
-	}
 	return update, nil
 }
 
@@ -879,12 +872,13 @@ func (p protocolParametersJSON) toAlonzoProtocolParameterUpdate() (*alonzo.Alonz
 	update := &alonzo.AlonzoProtocolParameterUpdate{
 		MinFeeA:              cloneUintPtr(p.TxFeePerByte),
 		MinFeeB:              cloneUintPtr(p.TxFeeFixed),
-		MaxBlockBodySize:     cloneUintPtr(p.MaxBlockBodySize),
-		MaxTxSize:            cloneUintPtr(p.MaxTxSize),
-		MaxBlockHeaderSize:   cloneUintPtr(p.MaxBlockHeaderSize),
+		MaxBlockBodySize:     cloneUintPtr(p.MaxBlockBodySize.asUint()),
+		MaxTxSize:            cloneUintPtr(p.MaxTxSize.asUint()),
+		MaxBlockHeaderSize:   cloneUintPtr(p.MaxBlockHeaderSize.asUint()),
 		KeyDeposit:           cloneUintPtr(p.StakeAddressDeposit),
 		PoolDeposit:          cloneUintPtr(p.StakePoolDeposit),
-		NOpt:                 cloneUintPtr(p.StakePoolTargetNum),
+		MaxEpoch:             cloneUintPtr(p.PoolRetireMaxEpoch.asUint()),
+		NOpt:                 cloneUintPtr(p.StakePoolTargetNum.asUint()),
 		A0:                   cloneRat(p.PoolPledgeInfluence),
 		Rho:                  cloneRat(p.MonetaryExpansion),
 		Tau:                  cloneRat(p.TreasuryCut),
@@ -896,9 +890,9 @@ func (p protocolParametersJSON) toAlonzoProtocolParameterUpdate() (*alonzo.Alonz
 		ExecutionCosts:       cloneExUnitPrice(p.ExecutionUnitPrices),
 		MaxTxExUnits:         cloneExUnitsPtr(p.MaxTxExecutionUnits),
 		MaxBlockExUnits:      cloneExUnitsPtr(p.MaxBlockExecutionUnits),
-		MaxValueSize:         cloneUintPtr(p.MaxValueSize),
-		CollateralPercentage: cloneUintPtr(p.CollateralPercentage),
-		MaxCollateralInputs:  cloneUintPtr(p.MaxCollateralInputs),
+		MaxValueSize:         cloneUintPtr(p.MaxValueSize.asUint()),
+		CollateralPercentage: cloneUintPtr(p.CollateralPercentage.asUint()),
+		MaxCollateralInputs:  cloneUintPtr(p.MaxCollateralInputs.asUint()),
 	}
 	if rawMessagePresent(p.ExtraPraosEntropy) {
 		nonce, err := decodeNonce(p.ExtraPraosEntropy)
@@ -911,22 +905,20 @@ func (p protocolParametersJSON) toAlonzoProtocolParameterUpdate() (*alonzo.Alonz
 		version := p.ProtocolVersion.toCommon()
 		update.ProtocolVersion = &version
 	}
-	if err := setOptionalMaxEpoch(update, p.PoolRetireMaxEpoch); err != nil {
-		return nil, err
-	}
 	return update, nil
 }
 
-func (p protocolParametersJSON) toBabbageProtocolParameterUpdate() (*babbage.BabbageProtocolParameterUpdate, error) {
+func (p protocolParametersJSON) toBabbageProtocolParameterUpdate() *babbage.BabbageProtocolParameterUpdate {
 	update := &babbage.BabbageProtocolParameterUpdate{
 		MinFeeA:              cloneUintPtr(p.TxFeePerByte),
 		MinFeeB:              cloneUintPtr(p.TxFeeFixed),
-		MaxBlockBodySize:     cloneUintPtr(p.MaxBlockBodySize),
-		MaxTxSize:            cloneUintPtr(p.MaxTxSize),
-		MaxBlockHeaderSize:   cloneUintPtr(p.MaxBlockHeaderSize),
+		MaxBlockBodySize:     cloneUintPtr(p.MaxBlockBodySize.asUint()),
+		MaxTxSize:            cloneUintPtr(p.MaxTxSize.asUint()),
+		MaxBlockHeaderSize:   cloneUintPtr(p.MaxBlockHeaderSize.asUint()),
 		KeyDeposit:           cloneUintPtr(p.StakeAddressDeposit),
 		PoolDeposit:          cloneUintPtr(p.StakePoolDeposit),
-		NOpt:                 cloneUintPtr(p.StakePoolTargetNum),
+		MaxEpoch:             cloneUintPtr(p.PoolRetireMaxEpoch.asUint()),
+		NOpt:                 cloneUintPtr(p.StakePoolTargetNum.asUint()),
 		A0:                   cloneRat(p.PoolPledgeInfluence),
 		Rho:                  cloneRat(p.MonetaryExpansion),
 		Tau:                  cloneRat(p.TreasuryCut),
@@ -936,30 +928,28 @@ func (p protocolParametersJSON) toBabbageProtocolParameterUpdate() (*babbage.Bab
 		ExecutionCosts:       cloneExUnitPrice(p.ExecutionUnitPrices),
 		MaxTxExUnits:         cloneExUnitsPtr(p.MaxTxExecutionUnits),
 		MaxBlockExUnits:      cloneExUnitsPtr(p.MaxBlockExecutionUnits),
-		MaxValueSize:         cloneUintPtr(p.MaxValueSize),
-		CollateralPercentage: cloneUintPtr(p.CollateralPercentage),
-		MaxCollateralInputs:  cloneUintPtr(p.MaxCollateralInputs),
+		MaxValueSize:         cloneUintPtr(p.MaxValueSize.asUint()),
+		CollateralPercentage: cloneUintPtr(p.CollateralPercentage.asUint()),
+		MaxCollateralInputs:  cloneUintPtr(p.MaxCollateralInputs.asUint()),
 	}
 	if p.ProtocolVersion != nil {
 		version := p.ProtocolVersion.toCommon()
 		update.ProtocolVersion = &version
 	}
-	if err := setOptionalMaxEpoch(update, p.PoolRetireMaxEpoch); err != nil {
-		return nil, err
-	}
-	return update, nil
+	return update
 }
 
-func (p protocolParametersJSON) toConwayProtocolParameterUpdate() (*conway.ConwayProtocolParameterUpdate, error) {
+func (p protocolParametersJSON) toConwayProtocolParameterUpdate() *conway.ConwayProtocolParameterUpdate {
 	update := &conway.ConwayProtocolParameterUpdate{
 		MinFeeA:              cloneUintPtr(p.TxFeePerByte),
 		MinFeeB:              cloneUintPtr(p.TxFeeFixed),
-		MaxBlockBodySize:     cloneUintPtr(p.MaxBlockBodySize),
-		MaxTxSize:            cloneUintPtr(p.MaxTxSize),
-		MaxBlockHeaderSize:   cloneUintPtr(p.MaxBlockHeaderSize),
+		MaxBlockBodySize:     cloneUintPtr(p.MaxBlockBodySize.asUint()),
+		MaxTxSize:            cloneUintPtr(p.MaxTxSize.asUint()),
+		MaxBlockHeaderSize:   cloneUintPtr(p.MaxBlockHeaderSize.asUint()),
 		KeyDeposit:           cloneUintPtr(p.StakeAddressDeposit),
 		PoolDeposit:          cloneUintPtr(p.StakePoolDeposit),
-		NOpt:                 cloneUintPtr(p.StakePoolTargetNum),
+		MaxEpoch:             cloneUintPtr(p.PoolRetireMaxEpoch.asUint()),
+		NOpt:                 cloneUintPtr(p.StakePoolTargetNum.asUint()),
 		A0:                   cloneRat(p.PoolPledgeInfluence),
 		Rho:                  cloneRat(p.MonetaryExpansion),
 		Tau:                  cloneRat(p.TreasuryCut),
@@ -969,31 +959,28 @@ func (p protocolParametersJSON) toConwayProtocolParameterUpdate() (*conway.Conwa
 		ExecutionCosts:       cloneExUnitPrice(p.ExecutionUnitPrices),
 		MaxTxExUnits:         cloneExUnitsPtr(p.MaxTxExecutionUnits),
 		MaxBlockExUnits:      cloneExUnitsPtr(p.MaxBlockExecutionUnits),
-		MaxValueSize:         cloneUintPtr(p.MaxValueSize),
-		CollateralPercentage: cloneUintPtr(p.CollateralPercentage),
-		MaxCollateralInputs:  cloneUintPtr(p.MaxCollateralInputs),
+		MaxValueSize:         cloneUintPtr(p.MaxValueSize.asUint()),
+		CollateralPercentage: cloneUintPtr(p.CollateralPercentage.asUint()),
+		MaxCollateralInputs:  cloneUintPtr(p.MaxCollateralInputs.asUint()),
 		PoolVotingThresholds: clonePoolVotingThresholdsPtr(
 			p.PoolVotingThresholds,
 		),
 		DRepVotingThresholds: cloneDRepVotingThresholdsPtr(
 			p.DRepVotingThresholds,
 		),
-		MinCommitteeSize:           cloneUintPtr(p.CommitteeMinSize),
-		CommitteeTermLimit:         cloneUint64Ptr(p.CommitteeMaxTermLength),
-		GovActionValidityPeriod:    cloneUint64Ptr(p.GovActionLifetime),
+		MinCommitteeSize:           cloneUintPtr(p.CommitteeMinSize.asUint()),
+		CommitteeTermLimit:         cloneUint64Ptr(p.CommitteeMaxTermLength.asUint64()),
+		GovActionValidityPeriod:    cloneUint64Ptr(p.GovActionLifetime.asUint64()),
 		GovActionDeposit:           cloneUint64Ptr(p.GovActionDeposit),
 		DRepDeposit:                cloneUint64Ptr(p.DRepDeposit),
-		DRepInactivityPeriod:       cloneUint64Ptr(p.DRepActivity),
+		DRepInactivityPeriod:       cloneUint64Ptr(p.DRepActivity.asUint64()),
 		MinFeeRefScriptCostPerByte: cloneRat(p.MinFeeRefScriptCostPerByte),
 	}
 	if p.ProtocolVersion != nil {
 		version := p.ProtocolVersion.toCommon()
 		update.ProtocolVersion = &version
 	}
-	if err := setOptionalMaxEpoch(update, p.PoolRetireMaxEpoch); err != nil {
-		return nil, err
-	}
-	return update, nil
+	return update
 }
 
 func (p protocolParametersJSON) requireProtocolVersion() (*gcommon.ProtocolParametersProtocolVersion, error) {
@@ -1040,6 +1027,65 @@ func (u *jsonUint64) UnmarshalJSON(data []byte) error {
 	}
 	u.value = value
 	return nil
+}
+
+// jsonWord32 and jsonWord16 decode the protocol parameters the reference types
+// as Word32 (including EpochInterval, epoch_interval = uint .size 4 in CDDL)
+// and Word16. Wider values are rejected rather than carried into the wider
+// gouroboros field types.
+type jsonWord32 struct {
+	value uint32
+}
+
+func (u *jsonWord32) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	value, err := parseJSONUint64(raw)
+	if err != nil {
+		return err
+	}
+	if value > math.MaxUint32 {
+		return fmt.Errorf("integer value %q exceeds Word32 range", raw)
+	}
+	u.value = uint32(value)
+	return nil
+}
+
+func (u *jsonWord32) asUint() *jsonUint {
+	if u == nil {
+		return nil
+	}
+	return &jsonUint{value: uint(u.value)}
+}
+
+func (u *jsonWord32) asUint64() *jsonUint64 {
+	if u == nil {
+		return nil
+	}
+	return &jsonUint64{value: uint64(u.value)}
+}
+
+type jsonWord16 struct {
+	value uint16
+}
+
+func (u *jsonWord16) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	value, err := parseJSONUint64(raw)
+	if err != nil {
+		return err
+	}
+	if value > math.MaxUint16 {
+		return fmt.Errorf("integer value %q exceeds Word16 range", raw)
+	}
+	u.value = uint16(value)
+	return nil
+}
+
+func (u *jsonWord16) asUint() *jsonUint {
+	if u == nil {
+		return nil
+	}
+	return &jsonUint{value: uint(u.value)}
 }
 
 type exUnitsJSON struct {
@@ -1348,55 +1394,6 @@ func requireUintField(name string, value *jsonUint) (uint, error) {
 		return 0, fmt.Errorf("missing required uint field %s", name)
 	}
 	return value.value, nil
-}
-
-func requireUint64Field(value *jsonUint64) (uint64, error) {
-	if value == nil {
-		return 0, errors.New("missing required uint64 field poolRetireMaxEpoch")
-	}
-	return value.value, nil
-}
-
-func setOptionalMaxEpoch(target any, value *jsonUint64) error {
-	if value == nil {
-		return nil
-	}
-	return setMaxEpochValue(target, value.value)
-}
-
-// setMaxEpochValue supports both released and Word64 Gouroboros MaxEpoch fields.
-func setMaxEpochValue(target any, value uint64) error {
-	destination := reflect.ValueOf(target)
-	if destination.Kind() != reflect.Pointer || destination.IsNil() {
-		return errors.New("MaxEpoch destination must be a non-nil pointer")
-	}
-	if destination.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("%T MaxEpoch destination must point to a struct", target)
-	}
-	field := destination.Elem().FieldByName("MaxEpoch")
-	if !field.IsValid() || !field.CanSet() {
-		return fmt.Errorf("%T has no writable MaxEpoch field", target)
-	}
-	if field.Kind() == reflect.Pointer {
-		element := reflect.New(field.Type().Elem()).Elem()
-		if element.Kind() != reflect.Uint && element.Kind() != reflect.Uint64 {
-			return fmt.Errorf("%T MaxEpoch has unsupported type %s", target, field.Type())
-		}
-		if element.OverflowUint(value) {
-			return fmt.Errorf("MaxEpoch value %d exceeds %s", value, element.Type())
-		}
-		element.SetUint(value)
-		field.Set(element.Addr())
-		return nil
-	}
-	if field.Kind() != reflect.Uint && field.Kind() != reflect.Uint64 {
-		return fmt.Errorf("%T MaxEpoch has unsupported type %s", target, field.Type())
-	}
-	if field.OverflowUint(value) {
-		return fmt.Errorf("MaxEpoch value %d exceeds %s", value, field.Type())
-	}
-	field.SetUint(value)
-	return nil
 }
 
 func requireRatField(name string, value *jsonRational) (*cbor.Rat, error) {
