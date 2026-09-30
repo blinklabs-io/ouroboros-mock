@@ -17,6 +17,7 @@ package peer_test
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -34,6 +35,10 @@ import (
 )
 
 const waitTimeout = 10 * time.Second
+
+// closeTimeout is well below the 10s handshake propose timeout, so a Close
+// that only returns once a stalled handshake times out is caught.
+const closeTimeout = 3 * time.Second
 
 // update is one chain-sync message received by a test client.
 type update struct {
@@ -344,4 +349,55 @@ func TestChainSwitchFork(t *testing.T) {
 		skip := buildChain(t, 1, blocks[1].Hash(), 3, 500)
 		require.ErrorIs(t, c.Append(skip...), peer.ErrNotLinked)
 	})
+}
+
+func TestUpstreamAcceptServesListenerUntilClose(t *testing.T) {
+	t.Parallel()
+	chain := buildChain(t, 2, common.Blake2b256{}, 1, 100)
+	up, err := peer.NewUpstream(peer.UpstreamConfig{Blocks: chain})
+	require.NoError(t, err)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	require.NoError(t, up.Accept(l))
+
+	conn, err := net.Dial("tcp", l.Addr().String())
+	require.NoError(t, err)
+	f, err := peer.NewFollower(peer.FollowerConfig{Conn: conn})
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	waitEventOn(t, f.Events(), peer.EventAwaitedReply)
+	require.Len(t, f.Followed(), 2)
+
+	closed := make(chan error, 1)
+	go func() { closed <- up.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(closeTimeout):
+		require.FailNow(t, "Close did not return")
+	}
+	_, err = net.Dial("tcp", l.Addr().String())
+	require.Error(t, err, "listener still accepting after Close")
+	waitEventOn(t, f.Events(), peer.EventSessionClosed)
+}
+
+func TestUpstreamCloseUnblocksPendingHandshake(t *testing.T) {
+	t.Parallel()
+	up, err := peer.NewUpstream(peer.UpstreamConfig{})
+	require.NoError(t, err)
+	client := up.Pipe()
+	defer func() { _ = client.Close() }()
+	// A pipe write returns once the server has read it, so the server is
+	// inside its handshake, waiting for the rest of the message.
+	_, err = client.Write([]byte{0})
+	require.NoError(t, err)
+
+	closed := make(chan error, 1)
+	go func() { closed <- up.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(closeTimeout):
+		require.FailNow(t, "Close did not return")
+	}
 }
