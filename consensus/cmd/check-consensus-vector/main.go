@@ -84,6 +84,14 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 					cut, found = i+1, true
 				}
 			}
+			if !found && len(out) == 0 {
+				// A roll_backward before any roll_forward is the intersect
+				// the peer agreed on: a FindIntersect against a non-origin
+				// point answers with that point, which is not part of the
+				// served trace because the trace starts above it. It anchors
+				// the chain; it does not truncate anything.
+				continue
+			}
 			if !found {
 				// A non-empty point that names no reconstructed block is a
 				// malformed trace, not an origin rollback — surface it rather
@@ -125,7 +133,7 @@ func absDiff(a, b uint64) uint64 {
 func main() {
 	vectorPath := flag.String("vector", "", "path to the composed vector JSON")
 	shape := flag.String("shape", "",
-		"expected shape: single | switch | noswitch | tie")
+		"expected shape: single | single-non-origin | switch | noswitch | tie")
 	k := flag.Uint64("security-param", 6, "k the vector was forged for")
 	minLead := flag.Uint64("min-lead", 0,
 		"minimum winner-over-incumbent block lead (0 = unset)")
@@ -135,7 +143,7 @@ func main() {
 
 	if *vectorPath == "" || *shape == "" {
 		fail("usage: check-consensus-vector -vector <path> -shape " +
-			"<single|switch|noswitch|tie> [-security-param k] " +
+			"<single|single-non-origin|switch|noswitch|tie> [-security-param k] " +
 			"[-min-lead n] [-max-lead n]")
 	}
 	raw, err := os.ReadFile(*vectorPath)
@@ -155,6 +163,24 @@ func main() {
 	fmt.Printf("OK: %q is a valid %s vector (k=%d)\n", v.Title, *shape, *k)
 }
 
+// checkNonOriginIntersect requires the trace to open with the roll_backward
+// that answers a FindIntersect against a block other than origin.
+func checkNonOriginIntersect(served []format.ServedMessage) error {
+	if len(served) == 0 ||
+		served[0].MsgType != format.ChainSyncMsgRollBackward ||
+		served[0].Point == nil {
+		return errors.New(
+			"trace must open with the intersect roll_backward",
+		)
+	}
+	if served[0].Point.Slot == 0 && len(served[0].Point.Hash) == 0 {
+		return errors.New(
+			"intersect point is origin; a non-origin intersect is required",
+		)
+	}
+	return nil
+}
+
 func fail(f string, args ...any) {
 	fmt.Fprintf(os.Stderr, "check-consensus-vector: "+f+"\n", args...)
 	os.Exit(1)
@@ -163,7 +189,7 @@ func fail(f string, args ...any) {
 func checkShape(
 	c *format.ConsensusCapture, shape string, k, minLead, maxLead uint64,
 ) error {
-	if shape == "single" {
+	if shape == "single" || shape == "single-non-origin" {
 		if len(c.Peers) != 1 {
 			return fmt.Errorf("expected 1 peer, got %d", len(c.Peers))
 		}
@@ -173,6 +199,9 @@ func checkShape(
 		}
 		if len(ch) == 0 {
 			return errors.New("peer has no roll_forwards")
+		}
+		if shape == "single-non-origin" {
+			return checkNonOriginIntersect(c.Peers[0].Served)
 		}
 		return nil
 	}

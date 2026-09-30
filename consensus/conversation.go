@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/ledger"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
@@ -114,6 +115,11 @@ func decodeStep(raw json.RawMessage) (Step, error) {
 				"find_intersect: points must not be empty",
 			)
 		}
+		for _, p := range s.Points {
+			if _, _, err := chainPointIndex(p); err != nil {
+				return nil, fmt.Errorf("find_intersect: %w", err)
+			}
+		}
 		return &s, nil
 	case stepTypeRequestNext:
 		var s RequestNextStep
@@ -129,6 +135,99 @@ func decodeStep(raw json.RawMessage) (Step, error) {
 		return &s, nil
 	}
 	return nil, fmt.Errorf("unknown step type %q", probe.Type)
+}
+
+// chainPointPrefix marks a find_intersect point that names the n-th block
+// (1-based) of the peer's own chain instead of a literal slot and hash.
+// A forged chain's hashes are not known before the capture, so a scenario
+// cannot pin a non-origin intersect as "<slot>:<hex>".
+const chainPointPrefix = "chain:"
+
+// chainPointIndex parses a "chain:<n>" point spec. ok is false when spec is
+// not a chain-relative point; err is set when it is one but n is invalid.
+func chainPointIndex(spec string) (n int, ok bool, err error) {
+	rest, found := strings.CutPrefix(spec, chainPointPrefix)
+	if !found {
+		return 0, false, nil
+	}
+	n, err = strconv.Atoi(rest)
+	if err != nil || n < 1 {
+		return 0, true, fmt.Errorf(
+			"point %q: want %s<n> with n >= 1", spec, chainPointPrefix,
+		)
+	}
+	return n, true, nil
+}
+
+// chainPointFromServed returns the point of the n-th roll_forward (1-based)
+// in served, decoding its header for the slot and hash.
+func chainPointFromServed(
+	served []format.ServedMessage, n int,
+) (pcommon.Point, error) {
+	seen := 0
+	for _, m := range served {
+		if m.Protocol != format.ProtocolChainSync ||
+			m.MsgType != format.ChainSyncMsgRollForward {
+			continue
+		}
+		seen++
+		if seen < n {
+			continue
+		}
+		if m.Era == nil {
+			return pcommon.Point{}, fmt.Errorf(
+				"roll_forward %d has no era", n,
+			)
+		}
+		h, err := ledger.NewBlockHeaderFromCbor(*m.Era, m.HeaderCbor)
+		if err != nil {
+			return pcommon.Point{}, fmt.Errorf(
+				"decode roll_forward %d header: %w", n, err,
+			)
+		}
+		return pcommon.NewPoint(h.SlotNumber(), h.Hash().Bytes()), nil
+	}
+	return pcommon.Point{}, fmt.Errorf(
+		"chain served %d roll_forward(s), need %d", seen, n,
+	)
+}
+
+// discoverChainPoint resolves a chain-relative point by syncing a separate
+// connection from origin until the n-th block has been served. The main
+// connection cannot do this itself: its chainsync client only accepts a
+// single FindIntersect.
+func discoverChainPoint(
+	ctx context.Context, cfg Config, n int,
+) (pcommon.Point, error) {
+	probe := NewSidecar(cfg, Conversation{})
+	if err := probe.connect(ctx); err != nil {
+		return pcommon.Point{}, fmt.Errorf("probe connect: %w", err)
+	}
+	defer func() { _ = probe.Close() }()
+	if err := probe.conn.ChainSync().Client.Sync(
+		[]pcommon.Point{pcommon.NewPointOrigin()},
+	); err != nil {
+		return pcommon.Point{}, fmt.Errorf("probe sync: %w", err)
+	}
+	deadline := time.Now().Add(requestNextWaitDeadline)
+	for {
+		if err := ctx.Err(); err != nil {
+			return pcommon.Point{}, err
+		}
+		served := probe.recorder.Snapshot()
+		if p, err := chainPointFromServed(served, n); err == nil {
+			return p, nil
+		}
+		if time.Now().After(deadline) {
+			return pcommon.Point{}, fmt.Errorf(
+				"probe: chain did not reach block %d within %s",
+				n, requestNextWaitDeadline,
+			)
+		}
+		probe.recorder.WaitForNextOrDeadline(
+			len(served), 250*time.Millisecond,
+		)
+	}
 }
 
 const (
@@ -172,10 +271,26 @@ type FindIntersectStep struct {
 
 func (s *FindIntersectStep) Type() string { return stepTypeFindIntersect }
 
-func (s *FindIntersectStep) Run(_ context.Context, sc *Sidecar) error {
-	points, err := parsePoints(s.Points)
-	if err != nil {
-		return fmt.Errorf("find_intersect: %w", err)
+func (s *FindIntersectStep) Run(ctx context.Context, sc *Sidecar) error {
+	points := make([]pcommon.Point, 0, len(s.Points))
+	for _, spec := range s.Points {
+		n, isChain, err := chainPointIndex(spec)
+		if err != nil {
+			return fmt.Errorf("find_intersect: %w", err)
+		}
+		if isChain {
+			p, err := discoverChainPoint(ctx, sc.cfg, n)
+			if err != nil {
+				return fmt.Errorf("find_intersect: %w", err)
+			}
+			points = append(points, p)
+			continue
+		}
+		lit, err := parsePoints([]string{spec})
+		if err != nil {
+			return fmt.Errorf("find_intersect: %w", err)
+		}
+		points = append(points, lit...)
 	}
 	// Sync sends MsgFindIntersect, awaits the response, and on
 	// success kicks off the pipelined request loop. The chainsync
@@ -300,6 +415,8 @@ func servedHasRollForward(served []format.ServedMessage) bool {
 //
 //   - "origin"        → pcommon.NewPointOrigin()
 //   - "<slot>:<hex>"  → pcommon.NewPoint(slot, hexDecoded)
+//
+// A "chain:<n>" point is resolved by FindIntersectStep.Run, not here.
 //
 // The smoke-test scenario uses only "origin"; the slot:hex form is
 // available for any scenario that needs to pin an intersect to a

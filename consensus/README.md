@@ -47,6 +47,8 @@ consensus/
                              each to testdata/captured/<n>.json
   scenarios/
     intersect_origin_one_rollforward/   Single-peer smoke test
+    intersect_non_origin_v1/            Single-peer FindIntersect at a
+                                        non-origin block
     fork_and_select_v1/                 Two-peer fork-and-select scenario
   testdata/
     fixtures/                Hand-crafted vectors for format/ tests
@@ -77,6 +79,7 @@ directly. Existing scenarios:
 | Scenario | Peers | Shape | What it tests |
 |---|---|---|---|
 | `intersect_origin_one_rollforward` | 1 | single | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
+| `intersect_non_origin_v1` | 1 | single | `find_intersect` against the peer's second block: the trace opens with a roll_backward to that non-origin point, then rolls forward over the blocks after it |
 | `within_k_fork_v1` | 2 | switch | Switch to a longer peer whose fork is shallow (rollback ≤ k) and lead ≤ k — the no-`local_tip` switch path |
 | `fork_and_select_v1` | 2 | switch | Switch to a much-longer peer (lead in (k, 2k]) requiring the `local_tip` catch-up; rollback to the non-genesis intersect still ≤ k |
 | `slot_battle_v1` | 2 | tie | Equal-length VRF tiebreak — two same-height blocks within 5 slots; the SUT must resolve the tie the same way the oracle did |
