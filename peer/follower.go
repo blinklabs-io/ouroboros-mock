@@ -52,6 +52,9 @@ type Follower struct {
 	cfg    FollowerConfig
 
 	mu sync.Mutex
+	// base is the intersection the node chose. It is not in chain, since the
+	// node never announces it, but it is a valid rollback target.
+	base pcommon.Point
 	// chain is the followed chain after applying rollbacks.
 	chain     []pcommon.Point
 	headers   []ledger.BlockHeader
@@ -83,7 +86,7 @@ func NewFollower(cfg FollowerConfig) (*Follower, error) {
 		ouroboros.WithNetworkMagic(cfg.NetworkMagic),
 		ouroboros.WithNodeToNode(true),
 		ouroboros.WithChainSyncConfig(chainsync.NewConfig(
-			chainsync.WithPipelineLimit(0),
+			chainsync.WithIntersectFoundFunc(f.intersectFound),
 			chainsync.WithRollForwardFunc(f.rollForward),
 			chainsync.WithRollBackwardFunc(f.rollBackward),
 			chainsync.WithAwaitReplyFunc(f.awaitReply),
@@ -203,7 +206,7 @@ func (f *Follower) rollBackward(
 ) error {
 	f.mu.Lock()
 	keep := 0
-	if point.Slot != 0 || len(point.Hash) != 0 {
+	if point.Slot != f.base.Slot || !bytes.Equal(point.Hash, f.base.Hash) {
 		keep = -1
 		for i, p := range f.chain {
 			if p.Slot == point.Slot && bytes.Equal(p.Hash, point.Hash) {
@@ -220,6 +223,18 @@ func (f *Follower) rollBackward(
 	f.rollbacks = append(f.rollbacks, point)
 	f.mu.Unlock()
 	f.events.publish(Event{Kind: EventRollBackward, Points: []pcommon.Point{point}})
+	return nil
+}
+
+func (f *Follower) intersectFound(
+	_ chainsync.CallbackContext,
+	point pcommon.Point,
+	_ chainsync.Tip,
+) error {
+	f.mu.Lock()
+	f.base = point
+	f.chain = nil
+	f.mu.Unlock()
 	return nil
 }
 

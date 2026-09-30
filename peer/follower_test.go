@@ -105,3 +105,39 @@ func TestFollowerSeesForkSwitch(t *testing.T) {
 	// Headers keeps the abandoned branch.
 	require.Len(t, f.Headers(), len(chain)+len(fork))
 }
+
+func TestFollowerRollsBackToItsIntersection(t *testing.T) {
+	t.Parallel()
+	chain := buildChain(t, 4, common.Blake2b256{}, 1, 100)
+	fork := forkOf(t, chain, 1, 2)
+	up := newUpstream(t, chain)
+	f, err := peer.NewFollower(peer.FollowerConfig{
+		Conn:      up.Pipe(),
+		Intersect: []pcommon.Point{csmock.PointOf(chain[1])},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	waitEventOn(t, f.Events(), peer.EventAwaitedReply)
+	require.Equal(
+		t,
+		[]pcommon.Point{csmock.PointOf(chain[2]), csmock.PointOf(chain[3])},
+		f.Followed(),
+	)
+
+	// The fork attaches at the intersection, which the follower never
+	// received as a header.
+	intersection, err := up.SwitchFork(fork)
+	require.NoError(t, err)
+	require.Equal(t, csmock.PointOf(chain[1]), intersection)
+	waitEventOn(t, f.Events(), peer.EventRollBackward)
+	for range fork {
+		waitEventOn(t, f.Events(), peer.EventRollForward)
+	}
+	require.NoError(t, f.Err())
+	require.Equal(
+		t,
+		[]pcommon.Point{csmock.PointOf(fork[0]), csmock.PointOf(fork[1])},
+		f.Followed(),
+	)
+}
