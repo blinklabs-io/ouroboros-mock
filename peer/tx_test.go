@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
+	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 	"github.com/blinklabs-io/ouroboros-mock/peer"
@@ -111,4 +112,20 @@ func TestTxPeerOfferWakesBlockingRequest(t *testing.T) {
 	e = waitEvent(t, up, peer.EventTxsReceived)
 	require.Equal(t, txs[1:], e.Txs)
 	require.Equal(t, txs, up.RelayedTxs())
+}
+
+func TestTxsFromBlocksReportsTheTransactionEra(t *testing.T) {
+	t.Parallel()
+	blocks, err := fixtures.GenerateConwayChainWithTransactions(
+		1, common.Blake2b256{}, 100, 10, 1,
+	)
+	require.NoError(t, err)
+	// The Babbage decoder accepts these bodies, giving Babbage-era
+	// transactions with the same bytes.
+	asBabbage, err := babbage.NewBabbageBlockFromCbor(blocks[0].Cbor())
+	require.NoError(t, err)
+	txs, err := peer.TxsFromBlocks([]ledger.Block{asBabbage})
+	require.NoError(t, err)
+	require.Len(t, txs, 1)
+	require.Equal(t, uint16(ledger.TxTypeBabbage), txs[0].EraId)
 }

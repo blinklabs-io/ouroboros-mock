@@ -19,7 +19,6 @@ import (
 	"sync"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
-	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 )
 
@@ -33,7 +32,8 @@ type Tx struct {
 	Raw []byte
 }
 
-// TxsFromBlocks returns the transactions carried by blocks, in block order.
+// TxsFromBlocks returns the transactions carried by blocks, in block order,
+// each tagged with its own era.
 // Use it with [github.com/blinklabs-io/ouroboros-mock/fixtures.GenerateConwayChainWithTransactions]
 // to obtain wire-valid transactions.
 func TxsFromBlocks(blocks []ledger.Block) ([]Tx, error) {
@@ -48,7 +48,8 @@ func TxsFromBlocks(blocks []ledger.Block) ([]Tx, error) {
 				)
 			}
 			txs = append(txs, Tx{
-				EraId: conway.TxTypeConway,
+				//nolint:gosec // era ids are small non-negative constants
+				EraId: uint16(tx.Type()),
 				ID:    tx.Hash(),
 				Raw:   raw,
 			})
