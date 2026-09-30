@@ -184,7 +184,9 @@ func (f *Follower) rollForward(
 	f.headers = append(f.headers, header)
 	f.chain = append(f.chain, point)
 	f.mu.Unlock()
-	f.events.publish(Event{Kind: EventRollForward, Points: []pcommon.Point{point}})
+	f.events.publish(
+		Event{Kind: EventRollForward, Points: []pcommon.Point{point}},
+	)
 	if !f.cfg.FetchBlocks {
 		return nil
 	}
@@ -195,7 +197,9 @@ func (f *Follower) rollForward(
 	f.mu.Lock()
 	f.blocks[string(point.Hash)] = block
 	f.mu.Unlock()
-	f.events.publish(Event{Kind: EventBlockFetched, Points: []pcommon.Point{point}})
+	f.events.publish(
+		Event{Kind: EventBlockFetched, Points: []pcommon.Point{point}},
+	)
 	return nil
 }
 
@@ -222,7 +226,9 @@ func (f *Follower) rollBackward(
 	f.chain = f.chain[:keep]
 	f.rollbacks = append(f.rollbacks, point)
 	f.mu.Unlock()
-	f.events.publish(Event{Kind: EventRollBackward, Points: []pcommon.Point{point}})
+	f.events.publish(
+		Event{Kind: EventRollBackward, Points: []pcommon.Point{point}},
+	)
 	return nil
 }
 

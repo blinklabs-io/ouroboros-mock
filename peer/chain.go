@@ -208,7 +208,9 @@ func (c *Chain) follow(path []pcommon.Point) (next, []pcommon.Point) {
 }
 
 // find resolves the first of points on the selected chain.
-func (c *Chain) find(points []pcommon.Point) (pcommon.Point, gchainsync.Tip, bool) {
+func (c *Chain) find(
+	points []pcommon.Point,
+) (pcommon.Point, gchainsync.Tip, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, p := range points {
