@@ -50,8 +50,6 @@ type TxPeer struct {
 	// more is closed and replaced whenever a transaction is offered, waking a
 	// blocking id request.
 	more chan struct{}
-	done chan struct{}
-	once sync.Once
 }
 
 // NewTxPeer completes the handshake on cfg.Conn and starts the tx-submission
@@ -64,7 +62,6 @@ func NewTxPeer(cfg TxPeerConfig) (*TxPeer, error) {
 		events: newEventStream(),
 		txs:    append([]Tx(nil), cfg.Txs...),
 		more:   make(chan struct{}),
-		done:   make(chan struct{}),
 	}
 	txCfg := txsubmission.Config{
 		RequestTxIdsFunc: p.requestTxIds,
@@ -112,7 +109,6 @@ func (p *TxPeer) Served() []Tx {
 
 // Close ends the connection and closes the event channel.
 func (p *TxPeer) Close() error {
-	p.once.Do(func() { close(p.done) })
 	var err error
 	if p.conn != nil {
 		err = p.conn.Close()
@@ -131,7 +127,7 @@ func (p *TxPeer) watch() {
 
 // requestTxIds answers a node's request for ids. A non-blocking request with
 // nothing to announce is answered empty; a blocking one waits for [TxPeer.Offer]
-// and ends the exchange when the connection or peer closes.
+// and ends the exchange when the connection closes.
 func (p *TxPeer) requestTxIds(
 	ctx txsubmission.CallbackContext,
 	blocking bool,
@@ -160,11 +156,11 @@ func (p *TxPeer) requestTxIds(
 		more := p.more
 		p.mu.Unlock()
 		p.events.publish(Event{Kind: EventTxIdsBlocked})
+		// Close does not wake this request to send MsgDone: the gouroboros
+		// tx-submission server this module pins races on receiving it.
 		select {
 		case <-more:
 		case <-ctx.DoneChan:
-			return nil, txsubmission.ErrStopServerProcess
-		case <-p.done:
 			return nil, txsubmission.ErrStopServerProcess
 		}
 	}
