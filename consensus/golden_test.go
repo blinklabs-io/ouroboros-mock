@@ -16,11 +16,11 @@ package consensus_test
 
 import (
 	"bytes"
-	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"os"
 	"path/filepath"
 	"testing"
 
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
 )
 

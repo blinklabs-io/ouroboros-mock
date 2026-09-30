@@ -15,12 +15,12 @@
 package consensus
 
 import (
-	gledger "github.com/blinklabs-io/gouroboros/ledger"
-	"github.com/stretchr/testify/require"
 	"path/filepath"
 	"testing"
 
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAssertObservationPickedLongestPeerTie covers the VRF-tie relaxation:
