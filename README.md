@@ -63,3 +63,20 @@ mockConn := ouroboros_mock.NewConnection(
 ```
 
 If the entry produces an error matching the `ExpectedError`, the conversation continues without failure. If the error does not match or no error occurs when expected, the mock will report an error.
+
+### Reactive Peers
+
+The `peer` package provides peers that answer a node over real Ouroboros
+mini-protocols instead of a scripted conversation:
+
+- `peer.Upstream` serves chain-sync and block-fetch from a fixture chain and
+  collects transactions the node relays to it. `SwitchFork` moves it to a
+  competing branch: clients are rolled back to the intersection and then sent
+  the new branch.
+- `peer.Follower` follows a node with chain-sync and block-fetch and records
+  the headers, blocks and rollbacks it was served.
+- `peer.TxPeer` offers fixture transactions through tx-submission and records
+  what the node requests.
+
+Each peer publishes events on a channel, so tests wait on the event they expect
+rather than sleeping.

@@ -117,17 +117,27 @@ func (tc *testClient) expectForward(t *testing.T, blocks ...ledger.Block) {
 	}
 }
 
-// waitEvent returns the next event of kind, skipping others.
+// waitEvent returns the next event of kind from up, skipping others.
 func waitEvent(
 	t *testing.T,
 	up *peer.Upstream,
 	kind peer.EventKind,
 ) peer.Event {
 	t.Helper()
+	return waitEventOn(t, up.Events(), kind)
+}
+
+// waitEventOn returns the next event of kind from events, skipping others.
+func waitEventOn(
+	t *testing.T,
+	events <-chan peer.Event,
+	kind peer.EventKind,
+) peer.Event {
+	t.Helper()
 	timeout := time.After(waitTimeout)
 	for {
 		select {
-		case e, ok := <-up.Events():
+		case e, ok := <-events:
 			require.True(t, ok, "event stream closed before %d", kind)
 			if e.Kind == kind {
 				return e

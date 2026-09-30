@@ -29,6 +29,8 @@ type session struct {
 	up   *Upstream
 	id   uint64
 	conn *ouroboros.Connection
+	// relay collects transactions the client announces.
+	relay *relay
 
 	mu     sync.Mutex
 	server *gchainsync.Server

@@ -57,7 +57,10 @@ type Upstream struct {
 	// a handshake whose client never arrives.
 	handshaking map[net.Conn]struct{}
 	listeners   []net.Listener
-	wg          sync.WaitGroup
+	// relays keeps every connection's relay so received transactions remain
+	// readable after the connection ends.
+	relays []*relay
+	wg     sync.WaitGroup
 }
 
 // NewUpstream returns an Upstream serving cfg.Blocks. Release it with
@@ -125,6 +128,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	}
 	u.nextID++
 	s := &session{up: u, id: u.nextID}
+	s.relay = &relay{events: u.events, session: s.id}
 	u.wg.Add(1)
 	u.handshaking[conn] = struct{}{}
 	u.mu.Unlock()
@@ -146,6 +150,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 		ouroboros.WithBlockFetchConfig(blockfetch.Config{
 			RequestRangeFunc: s.requestRange,
 		}),
+		ouroboros.WithTxSubmissionConfig(s.relay.config()),
 	)
 	u.mu.Lock()
 	delete(u.handshaking, conn)
@@ -163,6 +168,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	}
 	s.conn = oConn
 	u.sessions[s.id] = s
+	u.relays = append(u.relays, s.relay)
 	u.mu.Unlock()
 
 	u.events.publish(Event{Kind: EventSessionStarted, Session: s.id})
@@ -231,6 +237,20 @@ func (u *Upstream) Accept(l net.Listener) error {
 		}
 	}()
 	return nil
+}
+
+// RelayedTxs returns the transactions connected nodes have delivered through
+// tx-submission, in delivery order per connection.
+func (u *Upstream) RelayedTxs() []Tx {
+	u.mu.Lock()
+	relays := make([]*relay, 0, len(u.relays))
+	relays = append(relays, u.relays...)
+	u.mu.Unlock()
+	var out []Tx
+	for _, r := range relays {
+		out = append(out, r.Received()...)
+	}
+	return out
 }
 
 // Close ends every connection, closes accepted listeners and waits for the

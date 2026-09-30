@@ -22,6 +22,11 @@
 // an await-reply is answered immediately. Blocks on an abandoned branch stay
 // fetchable by point.
 //
+// [Follower] is the downstream counterpart: it follows a node with chain-sync
+// and block-fetch and records what it was served. [TxPeer] offers fixture
+// transactions through tx-submission and records what the node requests;
+// [Upstream] collects what a node relays to it.
+//
 // Every peer publishes [Event] values on a channel that never drops and never
 // blocks the protocol, so tests wait on the event they expect instead of
 // sleeping.
@@ -67,6 +72,27 @@ const (
 	EventNoBlocks
 	// EventBatchDone is published after the blocks of a range were sent.
 	EventBatchDone
+	// EventAwaitedReply is published by a [Follower] when the upstream told
+	// it to wait at the tip.
+	EventAwaitedReply
+	// EventBlockFetched is published by a [Follower] for each block it
+	// fetched; Points holds the block's point.
+	EventBlockFetched
+	// EventTxIdsOffered is published when the remote node announced
+	// transactions; TxIds holds the announced ids.
+	EventTxIdsOffered
+	// EventTxsReceived is published when the remote node delivered
+	// transactions; Txs holds them.
+	EventTxsReceived
+	// EventTxIdsRequested is published by a [TxPeer] when the node asked for
+	// transaction ids; TxIds holds the ids it was offered.
+	EventTxIdsRequested
+	// EventTxIdsBlocked is published by a [TxPeer] when it parks a blocking
+	// request for transaction ids because it has nothing to announce.
+	EventTxIdsBlocked
+	// EventTxsRequested is published by a [TxPeer] when the node asked for
+	// transaction bodies; TxIds holds the requested ids.
+	EventTxsRequested
 )
 
 // Event describes one observable step of a peer.
@@ -75,6 +101,8 @@ type Event struct {
 	// Session identifies the connection the event belongs to.
 	Session uint64
 	Points  []pcommon.Point
+	TxIds   [][32]byte
+	Txs     []Tx
 	// Err is set on EventSessionClosed when the connection ended with an
 	// error.
 	Err error
