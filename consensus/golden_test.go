@@ -22,6 +22,7 @@ import (
 
 	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCapturedGoldensDecode validates each committed vector under
@@ -222,4 +223,40 @@ func TestIntersectNonOriginV1Anchor(t *testing.T) {
 		t.Fatalf("first roll_forward slot %d not after intersect slot %d",
 			h.SlotNumber(), point.Slot)
 	}
+}
+
+// TestWithinKForkWinnerFirstV1IsReorderedParent pins how
+// within_k_fork_winner_first_v1 is derived: the within_k_fork_v1 capture with
+// its peers fed in the opposite order, so the winner arrives before the
+// shorter fork. Praos selection over the same chains does not depend on
+// arrival order within k, so the parent's final_tip and downstream trace stay
+// the oracle's. No switch onto the winner happens, so expected_rollback is
+// dropped.
+func TestWithinKForkWinnerFirstV1IsReorderedParent(t *testing.T) {
+	t.Parallel()
+	load := func(name string) format.TestVector {
+		raw, err := os.ReadFile(
+			filepath.Join("testdata", "captured", name+".json"),
+		)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		v, err := format.DecodeTestVector(raw)
+		if err != nil {
+			t.Fatalf("decode %s: %v", name, err)
+		}
+		return v
+	}
+	parent := load("within_k_fork_v1")
+	got := load("within_k_fork_winner_first_v1")
+
+	want := parent
+	wantCapture := *parent.Capture
+	want.Capture = &wantCapture
+	want.Title = "within_k_fork_winner_first_v1"
+	wantCapture.Peers = []format.PeerInput{
+		parent.Capture.Peers[1], parent.Capture.Peers[0],
+	}
+	wantCapture.ExpectedOutput.ExpectedRollback = nil
+	require.Equal(t, want, got)
 }

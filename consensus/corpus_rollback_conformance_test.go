@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	gledger "github.com/blinklabs-io/gouroboros/ledger"
@@ -11,6 +12,7 @@ import (
 // blkInfo is one decoded block in a peer's served chain.
 type blkInfo struct {
 	num  uint64
+	slot uint64
 	hash string
 }
 
@@ -31,6 +33,7 @@ func decodeServedChain(t *testing.T, served []format.ServedMessage) []blkInfo {
 		}
 		out = append(out, blkInfo{
 			num:  h.BlockNumber(),
+			slot: h.SlotNumber(),
 			hash: fmt.Sprintf("%x", h.Hash().Bytes()),
 		})
 	}
@@ -145,5 +148,62 @@ func TestCorpusFinalTipIsRollbackConformant(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestForkAndSelectV1DenserForkLoses pins the density case in
+// fork_and_select_v1: over the slots from the fork point to the shorter
+// fork's tip, the shorter fork holds more blocks than the winner, and the
+// observation node still selected the longer chain. Praos compares chain
+// length, not density near the intersection, so a selector that prefers the
+// chain that grew faster after the fork lands on the loser. A recapture that
+// loses this shape no longer tests that rule.
+func TestForkAndSelectV1DenserForkLoses(t *testing.T) {
+	t.Parallel()
+	v, err := LoadVector(filepath.Join(
+		"testdata", "captured", "fork_and_select_v1.json",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Capture.Peers) != 2 {
+		t.Fatalf("want 2 peers, got %d", len(v.Capture.Peers))
+	}
+	final := v.Capture.ExpectedOutput.FinalTip
+	var winner, loser []blkInfo
+	for _, p := range v.Capture.Peers {
+		ch := decodeServedChain(t, p.Served)
+		if ch[len(ch)-1].hash == fmt.Sprintf("%x", []byte(final.Hash)) {
+			winner = ch
+		} else {
+			loser = ch
+		}
+	}
+	if winner == nil || loser == nil {
+		t.Fatal("final_tip does not single out one of the two peers")
+	}
+	if winner[len(winner)-1].num <= loser[len(loser)-1].num {
+		t.Fatal("final_tip is not the strictly longer chain")
+	}
+	anc, ok := commonAncestorBlock(winner, loser)
+	if !ok {
+		t.Fatal("peers share no block")
+	}
+	end := loser[len(loser)-1].slot
+	blocksAfterFork := func(ch []blkInfo) int {
+		n := 0
+		for _, b := range ch {
+			if b.num > anc && b.slot <= end {
+				n++
+			}
+		}
+		return n
+	}
+	if w, l := blocksAfterFork(winner), blocksAfterFork(loser); l <= w {
+		t.Fatalf(
+			"shorter fork has %d blocks up to slot %d after the fork, "+
+				"winner has %d: no denser-but-shorter fork",
+			l, end, w,
+		)
 	}
 }

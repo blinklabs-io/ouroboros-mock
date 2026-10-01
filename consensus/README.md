@@ -79,11 +79,30 @@ directly. Existing scenarios:
 | Scenario | Peers | Shape | What it tests |
 |---|---|---|---|
 | `intersect_origin_one_rollforward` | 1 | single | Smoke-test: chainsync from origin captures the standard roll_backward (to origin) followed by one roll_forward (the first forged block) |
-| `intersect_non_origin_v1` | 1 | single | `find_intersect` against the peer's second block: the trace opens with a roll_backward to that non-origin point, then rolls forward over the blocks after it |
+| `intersect_non_origin_v1` | 1 | single-non-origin | `find_intersect` against the peer's second block: the trace opens with a roll_backward to that non-origin point, then rolls forward over the blocks after it |
 | `within_k_fork_v1` | 2 | switch | Switch to a longer peer whose fork is shallow (rollback ≤ k) and lead ≤ k — the no-`local_tip` switch path |
-| `fork_and_select_v1` | 2 | switch | Switch to a much-longer peer (lead in (k, 2k]) requiring the `local_tip` catch-up; rollback to the non-genesis intersect still ≤ k |
+| `fork_and_select_v1` | 2 | switch | Switch to a much-longer peer (lead in (k, 2k]) requiring the `local_tip` catch-up; rollback to the non-genesis intersect still ≤ k. Also the density case: the shorter fork holds more blocks between the fork and its own tip, and the longer chain still wins |
 | `slot_battle_v1` | 2 | tie | Equal-length VRF tiebreak — two same-height blocks within 5 slots; the SUT must resolve the tie the same way the oracle did |
 | `exceeds_k_no_switch_v1` | 2 | no-switch | k-bound refusal: the incumbent is forged > k blocks past the fork, so adopting the longer peer is a > k rollback a conformant node declines |
+
+One committed vector is derived from a capture rather than captured
+itself, so it has no `scenarios/` directory:
+
+| Vector | Peers | Derived from | What it tests |
+|---|---|---|---|
+| `within_k_fork_winner_first_v1` | 2 | `within_k_fork_v1` | Peer scheduling: the winner is fed before the shorter fork, so a SUT that adopts the most recently fed peer lands on the loser. No switch onto the winner happens, so the vector has no `expected_rollback` |
+
+Praos selection within k does not depend on the order in which peers
+deliver the same chains, so the parent's `final_tip` and
+`downstream_chainsync` remain the oracle's. After recapturing
+`within_k_fork_v1`, regenerate the derived vector:
+
+```bash
+jq '.title = "within_k_fork_winner_first_v1" | .capture.peers |= reverse |
+    del(.capture.expected_output.expected_rollback)' \
+  testdata/captured/within_k_fork_v1.json \
+  > testdata/captured/within_k_fork_winner_first_v1.json
+```
 
 Multi-peer scenarios use the `cmd/compose-consensus-vector` binary to
 merge per-peer captures into the multi-peer vector and diff against

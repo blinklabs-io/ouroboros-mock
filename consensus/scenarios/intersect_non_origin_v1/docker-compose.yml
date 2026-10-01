@@ -23,7 +23,7 @@
 # 172.21, and erastest's 172.22).
 #
 # Environment variables (override or set via .env):
-#   CONSENSUS_CAPTURE_CARDANO_PORT  cardano-node host port (default: 3030)
+#   CONSENSUS_CAPTURE_CARDANO_PORT  cardano-node host port (default: 3031)
 #   CONSENSUS_CAPTURE_OUTPUT_DIR    host dir that receives vector.json
 #                                   (default: ./output)
 #
