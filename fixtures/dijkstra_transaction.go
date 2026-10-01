@@ -208,7 +208,7 @@ func validateDijkstraWitnessSet(
 ) error {
 	if len(witnesses.WsPlutusV4Scripts.Items()) > 0 {
 		return errors.New(
-			"Plutus V4 witness scripts are not part of the Dijkstra CDDL",
+			"plutus V4 witness scripts are not part of the Dijkstra CDDL",
 		)
 	}
 	return nil
