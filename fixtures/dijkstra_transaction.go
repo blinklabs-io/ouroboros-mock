@@ -122,6 +122,11 @@ func (b *DijkstraTransactionBuilder) Build() (
 	*dijkstra.DijkstraTransaction,
 	error,
 ) {
+	if len(b.tx.WitnessSet.WsPlutusV4Scripts.Items()) > 0 {
+		return nil, errors.New(
+			"Plutus V4 witness scripts are not part of the Dijkstra CDDL",
+		)
+	}
 	body := b.tx.Body
 	var auxCBOR []byte
 	if b.metadata != nil {

@@ -116,6 +116,18 @@ func TestDijkstraTransactionBuilderRejectsEmptySubTransactions(t *testing.T) {
 	require.ErrorContains(t, err, "sub-transactions must not be empty")
 }
 
+func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
+	_, err := fixtures.NewDijkstraTransactionBuilder().
+		WithWitnessSet(dijkstra.DijkstraTransactionWitnessSet{
+			WsPlutusV4Scripts: cbor.NewSetType(
+				[]common.PlutusV4Script{{0x01}},
+				true,
+			),
+		}).
+		Build()
+	require.ErrorContains(t, err, "Plutus V4 witness scripts are not part of the Dijkstra CDDL")
+}
+
 // The Dijkstra CDDL requires transaction_body keys 0 (inputs), 1 (outputs),
 // and 2 (fee), and sub_transaction_body keys 0 and 1, whatever their values.
 func TestDijkstraTransactionBuilderEncodesRequiredBodyKeys(t *testing.T) {
