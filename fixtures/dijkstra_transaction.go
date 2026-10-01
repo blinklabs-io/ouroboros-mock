@@ -122,10 +122,13 @@ func (b *DijkstraTransactionBuilder) Build() (
 	*dijkstra.DijkstraTransaction,
 	error,
 ) {
-	if len(b.tx.WitnessSet.WsPlutusV4Scripts.Items()) > 0 {
-		return nil, errors.New(
-			"Plutus V4 witness scripts are not part of the Dijkstra CDDL",
-		)
+	if err := validateDijkstraWitnessSet(b.tx.WitnessSet); err != nil {
+		return nil, err
+	}
+	for i, sub := range b.tx.Body.TxSubTransactions.Items() {
+		if err := validateDijkstraWitnessSet(sub.WitnessSet); err != nil {
+			return nil, fmt.Errorf("subtransaction %d: %w", i, err)
+		}
 	}
 	body := b.tx.Body
 	var auxCBOR []byte
@@ -198,6 +201,17 @@ func (b *DijkstraTransactionBuilder) Build() (
 		)
 	}
 	return &tx, nil
+}
+
+func validateDijkstraWitnessSet(
+	witnesses dijkstra.DijkstraTransactionWitnessSet,
+) error {
+	if len(witnesses.WsPlutusV4Scripts.Items()) > 0 {
+		return errors.New(
+			"Plutus V4 witness scripts are not part of the Dijkstra CDDL",
+		)
+	}
+	return nil
 }
 
 func encodeDijkstraMetadata(
