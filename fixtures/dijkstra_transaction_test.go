@@ -125,7 +125,7 @@ func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 			),
 		}).
 		Build()
-	require.ErrorContains(t, err, "Plutus V4 witness scripts are not part of the Dijkstra CDDL")
+	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
 }
 
 func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
@@ -141,7 +141,7 @@ func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
 			},
 		}).
 		Build()
-	require.ErrorContains(t, err, "Plutus V4 witness scripts are not part of the Dijkstra CDDL")
+	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
 }
 
 // The Dijkstra CDDL requires transaction_body keys 0 (inputs), 1 (outputs),
