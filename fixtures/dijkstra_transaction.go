@@ -33,8 +33,10 @@ const (
 // DijkstraTransactionBuilder constructs Dijkstra block transactions with
 // guards, redeemers, metadata, subtransactions, and the validity flag. The
 // Dijkstra witness set has no Plutus V4 script field (the reference decoder
-// accepts keys 0-7), so a Plutus V4 script can only be supplied as a reference
-// script.
+// accepts keys 0-7). Dijkstra transactions can carry V4 scripts as output
+// reference scripts or in auxiliary_data_map key 5, but this builder only
+// exposes transaction metadata and does not construct script-bearing auxiliary
+// data.
 type DijkstraTransactionBuilder struct {
 	tx       dijkstra.DijkstraTransaction
 	metadata common.TransactionMetadatum

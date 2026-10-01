@@ -137,8 +137,10 @@ transactions with guards, subtransactions, redeemers, metadata, and the
 `TxIsValid` flag. The builder encodes the `block_transaction` form, including
 the required transaction-body keys gouroboros omits when empty, and decodes it
 through the Dijkstra block-body decoder, where that validity flag is encoded.
-The Dijkstra witness set has no Plutus V4 script field, so a Plutus V4 script
-can only be supplied as a reference script. The builder lives in `fixtures`
+The Dijkstra witness set has no Plutus V4 script field. The CDDL permits V4
+scripts as output reference scripts or in `auxiliary_data_map` key 5; this
+builder exposes metadata but does not construct script-bearing auxiliary data.
+The builder lives in `fixtures`
 rather than `ledger` because gouroboros's in-package `ledger/dijkstra` tests
 import this module's `ledger` package, which therefore cannot import
 `gouroboros/ledger/dijkstra`; gouroboros uses the builder from external
