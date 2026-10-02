@@ -209,7 +209,7 @@ func discoverChainPoint(
 	); err != nil {
 		return pcommon.Point{}, fmt.Errorf("probe sync: %w", err)
 	}
-	deadline := time.Now().Add(requestNextWaitDeadline)
+	deadline := time.Now().Add(chainProbeDeadline)
 	for {
 		if err := ctx.Err(); err != nil {
 			return pcommon.Point{}, err
@@ -221,7 +221,7 @@ func discoverChainPoint(
 		if time.Now().After(deadline) {
 			return pcommon.Point{}, fmt.Errorf(
 				"probe: chain did not reach block %d within %s",
-				n, requestNextWaitDeadline,
+				n, chainProbeDeadline,
 			)
 		}
 		probe.recorder.WaitForNextOrDeadline(
@@ -244,6 +244,12 @@ const (
 // slots) reliably arrives in time, while still failing fast against a
 // stuck cardano-node.
 const requestNextWaitDeadline = 30 * time.Second
+
+// chainProbeDeadline bounds how long discoverChainPoint waits for the chain to
+// reach the requested block. It exceeds requestNextWaitDeadline because the
+// sidecar can connect before the testnet's systemStart, which scenarios place
+// up to a minute after genesis generation, so no block exists until then.
+const chainProbeDeadline = 3 * time.Minute
 
 // drainInterBlockDeadline is the per-iteration wait inside
 // drain_to_tip. Smaller than requestNextWaitDeadline because once the

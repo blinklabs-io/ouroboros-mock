@@ -49,7 +49,7 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 	// Non-nil so the roll_backward `out[:cut]` truncation below is provably
 	// safe (nilaway rejects slicing a possibly-nil slice).
 	out := make([]blk, 0, len(served))
-	for _, m := range served {
+	for idx, m := range served {
 		switch m.MsgType {
 		case format.ChainSyncMsgRollForward:
 			if m.Era == nil {
@@ -84,12 +84,14 @@ func chainOf(served []format.ServedMessage) ([]blk, error) {
 					cut, found = i+1, true
 				}
 			}
-			if !found && len(out) == 0 {
-				// A roll_backward before any roll_forward is the intersect
-				// the peer agreed on: a FindIntersect against a non-origin
-				// point answers with that point, which is not part of the
-				// served trace because the trace starts above it. It anchors
-				// the chain; it does not truncate anything.
+			if !found && idx == 0 {
+				// The leading roll_backward is the intersect the peer agreed
+				// on: a FindIntersect against a non-origin point answers with
+				// that point, which is not part of the served trace because
+				// the trace starts above it. It anchors the chain; it does
+				// not truncate anything. Position, not chain length, decides:
+				// a chain emptied by a later origin rollback must not make an
+				// unknown point look like an anchor.
 				continue
 			}
 			if !found {

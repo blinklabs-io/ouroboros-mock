@@ -173,6 +173,9 @@ func TestForkAndSelectV1DenserForkLoses(t *testing.T) {
 	var winner, loser []blkInfo
 	for _, p := range v.Capture.Peers {
 		ch := decodeServedChain(t, p.Served)
+		if len(ch) == 0 {
+			t.Fatalf("peer %d: no decoded blocks", p.PeerID)
+		}
 		if ch[len(ch)-1].hash == fmt.Sprintf("%x", []byte(final.Hash)) {
 			winner = ch
 		} else {
