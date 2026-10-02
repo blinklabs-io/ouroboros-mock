@@ -105,7 +105,7 @@ func TestConnectionErrorDeliverySurvivesConcurrentClose(t *testing.T) {
 
 func TestCloseInterruptsConversationSleep(t *testing.T) {
 	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{
-		ConversationEntryOutput{ProtocolId: 8, Messages: []protocol.Message{keepalive.NewMsgKeepAliveResponse(7)}},
+		ConversationEntryOutput{ProtocolId: keepalive.ProtocolId, IsResponse: true, Messages: []protocol.Message{keepalive.NewMsgKeepAliveResponse(7)}},
 		ConversationEntrySleep{Duration: time.Hour},
 	}).(*Connection)
 	// Reading the output lets the conversation proceed to its sleep.

@@ -53,6 +53,9 @@ func loadConfiguration(reader io.Reader) (configuration, []mock.ConversationEntr
 	decoder := yaml.NewDecoder(reader)
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return cfg, nil, errors.New("configuration is empty")
+		}
 		return cfg, nil, fmt.Errorf("decode configuration: %w", err)
 	}
 	var extra any

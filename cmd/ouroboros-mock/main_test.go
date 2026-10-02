@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,69 @@ entries:
       cookie: 123
   - close: true
 `
+
+func TestRunRejectsEmptyConfigurationBeforeListening(t *testing.T) {
+	for _, text := range []string{"", "# comment only\n", "  \n"} {
+		t.Run(text, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "empty.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
+			var output strings.Builder
+			err := run(context.Background(), []string{path}, &output)
+			require.EqualError(t, err, "configuration is empty")
+			require.Empty(t, output.String())
+		})
+	}
+}
+
+type closeReleasedReaderConn struct {
+	net.Conn
+	closed chan struct{}
+	once   sync.Once
+	err    error
+}
+
+func (c *closeReleasedReaderConn) Read([]byte) (int, error) {
+	<-c.closed
+	return 0, c.err
+}
+
+func (c *closeReleasedReaderConn) Close() error {
+	c.once.Do(func() {
+		_ = c.Conn.Close()
+		close(c.closed)
+	})
+	return nil
+}
+
+func TestBridgePreservesReadFailureAfterConversationCompletion(t *testing.T) {
+	failure := errors.New("client read failed after close")
+	for _, readErr := range []error{failure, io.EOF, io.ErrClosedPipe, net.ErrClosed} {
+		t.Run(readErr.Error(), func(t *testing.T) {
+			server, client := net.Pipe()
+			conn := &closeReleasedReaderConn{Conn: server, closed: make(chan struct{}), err: readErr}
+			mocked := &closeReleasedReaderConn{Conn: client, closed: make(chan struct{}), err: net.ErrClosed}
+			defer conn.Close()
+			defer mocked.Close()
+			conversation := make(chan error)
+			close(conversation)
+			result := make(chan error, 1)
+			go func() { result <- bridge(context.Background(), conn, mocked, conversation) }()
+			select {
+			case err := <-result:
+				if errors.Is(readErr, failure) {
+					require.ErrorIs(t, err, failure)
+				} else {
+					require.NoError(t, err)
+				}
+			case <-time.After(time.Second):
+				_ = conn.Close()
+				_ = mocked.Close()
+				<-result
+				t.Fatal("bridge did not join completed copies")
+			}
+		})
+	}
+}
 
 func TestConfigurationRejectsUnsupportedAndAmbiguousEntries(t *testing.T) {
 	cases := []string{

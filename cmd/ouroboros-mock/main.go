@@ -168,13 +168,18 @@ func bridge(ctx context.Context, conn, mocked net.Conn, conversation <-chan erro
 	}
 	_ = conn.Close()
 	if !inDone {
-		<-incoming
+		inResult = <-incoming
 	}
 	for conversationErr := range conversation {
 		result = errors.Join(result, conversationErr)
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if inResult.sourceErr != nil && !errors.Is(inResult.sourceErr, io.EOF) &&
+		!errors.Is(inResult.sourceErr, io.ErrClosedPipe) && !errors.Is(inResult.sourceErr, net.ErrClosed) &&
+		!errors.Is(result, inResult.sourceErr) {
+		result = errors.Join(result, fmt.Errorf("read request: %w", inResult.sourceErr))
 	}
 	if result != nil {
 		return result
