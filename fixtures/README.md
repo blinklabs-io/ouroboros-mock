@@ -204,3 +204,14 @@ hash-length error. The execution harness continues to execute every such
 fixture: it accepts either a complete decode or that exact documented rejection.
 Any other failure remains a harness failure, and newly added fixtures are not
 included without an explicit review of their decoding contract.
+
+Fixture reads derive their confinement root from the public `Path` and
+`RelPath` metadata; a directly constructed fixture with only `Path` uses its
+parent directory. Read and execution errors retain their underlying causes,
+including resource cleanup failures, and execution errors include metadata for
+every fixture kind.
+
+Script execution is limited to the classified captures with pinned upstream
+hashes. `PlutusScriptBytes` checks the byte-string container independently;
+structural validity alone does not supply an expected upstream hash. Empty SSC
+containers validate successfully and report zero executable cases.

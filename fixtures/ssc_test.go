@@ -362,3 +362,23 @@ func fixtureHarness(t *testing.T, files map[string][]byte) *fixtures.Harness {
 	)
 	return fixtures.NewHarness(fixtures.HarnessConfig{FixturesRoot: root})
 }
+
+func TestEmptySSCFixturesReportZeroCases(t *testing.T) {
+	for _, name := range []string{"CommitmentsMap", "VssCertificatesMap", "OpeningsMap", "SharesMap"} {
+		t.Run(name, func(t *testing.T) {
+			value := any(map[cbor.ByteString]any{})
+			if name == "CommitmentsMap" || name == "VssCertificatesMap" {
+				value = cbor.Tag{Number: cbor.CborTagSet, Content: []any{}}
+			}
+			data, err := cbor.Encode(value)
+			require.NoError(t, err)
+			text := fmt.Sprintf("00: %x", data)
+			harness := fixtureHarness(t, map[string][]byte{sscRoot + name: []byte(text)})
+			result, err := harness.ExecuteFixture(sscRoot + name)
+			require.NoError(t, err)
+			require.NoError(t, result.Error)
+			require.True(t, result.Success)
+			require.Zero(t, result.CaseCount)
+		})
+	}
+}

@@ -155,12 +155,6 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 			), eraFromPath(
 				normalizedPath,
 			)
-	default:
-		return KindUnknown, formatFromFilename(
-				baseName,
-			), eraFromPath(
-				normalizedPath,
-			)
 	}
 	return KindUnknown, formatFromFilename(
 			baseName,

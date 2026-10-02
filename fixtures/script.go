@@ -50,8 +50,8 @@ func (f Fixture) PlutusScriptBytes() ([]byte, error) {
 	if err := validateArbitraryCbor(data, "Plutus script"); err != nil {
 		return nil, err
 	}
-	if len(data) == 0 || data[0]>>5 != 2 {
-		return nil, errors.New("plutus script must be a CBOR byte string")
+	if err := sscBytes(data); err != nil {
+		return nil, fmt.Errorf("plutus script must be a CBOR byte string: %w", err)
 	}
 	var program []byte
 	if _, err := cbor.Decode(data, &program); err != nil {

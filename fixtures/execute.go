@@ -160,7 +160,7 @@ func executeFixtureWithIndex(
 	}
 
 	caseCount, err := executeFixture(fixture, fixtureMap)
-	if caseCount > 0 {
+	if caseCount > 0 || (fixture.Kind == KindSSC && err == nil) {
 		result.CaseCount = caseCount
 	}
 	if err != nil {
