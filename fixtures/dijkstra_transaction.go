@@ -258,6 +258,9 @@ func encodeDijkstraTransactionBody(
 	body dijkstra.DijkstraTransactionBody,
 ) ([]byte, error) {
 	if raw := body.Cbor(); raw != nil {
+		if err := rejectEmptySubTransactions(raw); err != nil {
+			return nil, err
+		}
 		return raw, nil
 	}
 	if subtransactions := body.TxSubTransactions.Items(); len(subtransactions) > 0 {

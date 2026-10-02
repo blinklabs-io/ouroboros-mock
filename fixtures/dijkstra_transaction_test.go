@@ -116,6 +116,23 @@ func TestDijkstraTransactionBuilderRejectsEmptySubTransactions(t *testing.T) {
 	require.ErrorContains(t, err, "sub-transactions must not be empty")
 }
 
+func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
+	bodyCBOR, err := cbor.Encode(map[uint64]any{
+		0:  []any{},
+		1:  []any{},
+		2:  uint64(0),
+		23: cbor.NewSetType([]cbor.RawMessage{}, true),
+	})
+	require.NoError(t, err)
+	var body dijkstra.DijkstraTransactionBody
+	_, err = cbor.Decode(bodyCBOR, &body)
+	require.NoError(t, err)
+	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
+	require.ErrorContains(t, err, "sub-transactions must not be empty")
+}
+
 func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(dijkstra.DijkstraTransactionWitnessSet{

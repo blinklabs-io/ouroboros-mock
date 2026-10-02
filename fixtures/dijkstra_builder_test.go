@@ -16,6 +16,7 @@ package fixtures_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -95,6 +96,25 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 	}
 	if len(certified.BlockBody.Transactions) != 0 {
 		t.Fatal("certified Dijkstra block carries transactions")
+	}
+}
+
+func TestDijkstraBlockBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
+	_, err := fixtures.NewDijkstraBlockBuilder().
+		WithTransactions(dijkstra.DijkstraTransaction{
+			WitnessSet: dijkstra.DijkstraTransactionWitnessSet{
+				WsPlutusV4Scripts: cbor.NewSetType(
+					[]common.PlutusV4Script{{0x01}},
+					true,
+				),
+			},
+		}).
+		Build()
+	if err == nil {
+		t.Fatal("expected Dijkstra block builder to reject Plutus V4 witness scripts")
+	}
+	if !strings.Contains(err.Error(), "plutus V4 witness scripts are not part of the Dijkstra CDDL") {
+		t.Fatalf("unexpected error: %s", err)
 	}
 }
 

@@ -181,6 +181,16 @@ func (b *DijkstraBlockBuilder) WithEbAnnouncement(
 // Build encodes the block and decodes it with gouroboros, so the returned
 // block's CBOR, hash, and header fields are what a consumer decodes.
 func (b *DijkstraBlockBuilder) Build() (*dijkstra.DijkstraBlock, error) {
+	for i, tx := range b.transactions {
+		if err := validateDijkstraWitnessSet(tx.WitnessSet); err != nil {
+			return nil, fmt.Errorf("transaction %d: %w", i, err)
+		}
+		for j, sub := range tx.Body.TxSubTransactions.Items() {
+			if err := validateDijkstraWitnessSet(sub.WitnessSet); err != nil {
+				return nil, fmt.Errorf("transaction %d subtransaction %d: %w", i, j, err)
+			}
+		}
+	}
 	body := dijkstra.DijkstraBlockBody{
 		Transactions: append(
 			[]dijkstra.DijkstraTransaction(nil), b.transactions...,
