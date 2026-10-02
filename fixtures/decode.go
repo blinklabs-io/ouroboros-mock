@@ -44,15 +44,19 @@ func (f Fixture) Read() ([]byte, error) {
 	return os.ReadFile(f.Path)
 }
 
-// DecodeHex decodes a hex-encoded fixture payload.
+// DecodeHex decodes a hex-encoded fixture payload, including upstream annotated
+// dumps whose hexadecimal offsets must match the decoded byte positions.
 func (f Fixture) DecodeHex() ([]byte, error) {
-	if f.Format != FormatHex {
+	if f.Format != FormatHex && f.Format != FormatHexDump {
 		return nil, fmt.Errorf("fixture %s is not hex-encoded", f.RelPath)
 	}
 
 	data, err := f.Read()
 	if err != nil {
 		return nil, err
+	}
+	if f.Format == FormatHexDump {
+		return decodeHexDump(data)
 	}
 
 	decoded, err := hex.DecodeString(strings.TrimSpace(string(data)))

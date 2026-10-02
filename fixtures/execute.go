@@ -170,7 +170,16 @@ func executeFixtureWithIndex(
 			result.Success = true
 			return result
 		}
-		result.Error = err
+		result.Error = fmt.Errorf(
+			"fixture %s (repo=%s kind=%s format=%s era=%q source=%s): %w",
+			fixture.RelPath,
+			fixture.Repo,
+			fixture.Kind,
+			fixture.Format,
+			fixture.Era,
+			fixture.SourcePath,
+			err,
+		)
 		return result
 	}
 
@@ -245,6 +254,10 @@ func executeFixture(
 		return 1, validateGovernanceMetadataFixture(fixture)
 	case KindTranslation:
 		return executeTranslationFixture(fixture)
+	case KindSSC:
+		return executeSSCFixture(fixture)
+	case KindScript:
+		return 1, executeScriptFixture(fixture, fixtureMap)
 	case KindUnknown:
 		return 0, fmt.Errorf("unknown fixture kind for %s", fixture.RelPath)
 	default:

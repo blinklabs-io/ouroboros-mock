@@ -149,7 +149,7 @@ func (h *Harness) runMatching(
 
 // CollectFixtureFiles reads the committed manifest under root and returns the
 // filesystem paths of every listed fixture in sorted order. It returns an
-// error if any manifest entry is missing on disk.
+// error if any manifest entry is missing or does not identify a regular file.
 func CollectFixtureFiles(root string) ([]string, error) {
 	manifest, err := LoadManifest(root)
 	if err != nil {
@@ -159,11 +159,18 @@ func CollectFixtureFiles(root string) ([]string, error) {
 	paths := make([]string, 0, len(manifest))
 	for _, relPath := range manifest {
 		path := filepath.Join(root, filepath.FromSlash(relPath))
-		if _, err := os.Stat(path); err != nil {
+		info, err := os.Stat(path)
+		if err != nil {
 			return nil, fmt.Errorf(
 				"manifest entry %q missing: %w",
 				relPath,
 				err,
+			)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf(
+				"manifest entry %q is not a regular file",
+				relPath,
 			)
 		}
 		paths = append(paths, path)
@@ -193,7 +200,8 @@ func CollectFixtures(root string) ([]Fixture, error) {
 }
 
 // LoadManifest reads the committed manifest and returns normalized relative
-// fixture paths without the leading "./" prefix.
+// fixture paths without the leading "./" prefix. Paths must stay inside the
+// fixture root and cannot repeat after normalization.
 func LoadManifest(root string) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(root, "manifest.txt"))
 	if err != nil {
@@ -202,7 +210,8 @@ func LoadManifest(root string) ([]string, error) {
 
 	lines := strings.Split(string(data), "\n")
 	manifest := make([]string, 0, len(lines))
-	for _, line := range lines {
+	seen := make(map[string]int, len(lines))
+	for lineIdx, line := range lines {
 		line = normalizeRelativePath(line)
 		if line == "" {
 			continue
@@ -213,6 +222,14 @@ func LoadManifest(root string) ([]string, error) {
 				line,
 			)
 		}
+		line = filepath.ToSlash(filepath.Clean(filepath.FromSlash(line)))
+		if firstLine, ok := seen[line]; ok {
+			return nil, fmt.Errorf(
+				"duplicate manifest entry %q at line %d (first at line %d)",
+				line, lineIdx+1, firstLine,
+			)
+		}
+		seen[line] = lineIdx + 1
 		manifest = append(manifest, line)
 	}
 	return manifest, nil
