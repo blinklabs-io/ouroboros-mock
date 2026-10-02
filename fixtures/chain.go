@@ -61,7 +61,11 @@ func GenerateConwayChain(
 	if err != nil {
 		return nil, fmt.Errorf("encode empty witnesses: %w", err)
 	}
-	emptyAuxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+	emptyAux, err := emptyAuxiliaryDataSet()
+	if err != nil {
+		return nil, err
+	}
+	emptyAuxCbor, err := cbor.Encode(emptyAux)
 	if err != nil {
 		return nil, fmt.Errorf("encode empty metadata set: %w", err)
 	}
@@ -103,9 +107,10 @@ func GenerateConwayChain(
 			BlockHeader: &ledger.ConwayBlockHeader{
 				BabbageBlockHeader: ledger.BabbageBlockHeader{
 					Body:      body,
-					Signature: make([]byte, 64),
+					Signature: make([]byte, 448),
 				},
 			},
+			TransactionMetadataSet: emptyAux,
 		}
 		blockCbor, err := cbor.Encode(block)
 		if err != nil {
@@ -164,7 +169,11 @@ func GenerateConwayChainWithTransactions(
 		if err != nil {
 			return nil, fmt.Errorf("encode witnesses %d: %w", i, err)
 		}
-		auxCbor, err := cbor.Encode(common.TransactionMetadataSet{})
+		emptyAux, err := emptyAuxiliaryDataSet()
+		if err != nil {
+			return nil, err
+		}
+		auxCbor, err := cbor.Encode(emptyAux)
 		if err != nil {
 			return nil, fmt.Errorf("encode metadata set %d: %w", i, err)
 		}
@@ -205,7 +214,7 @@ func GenerateConwayChainWithTransactions(
 			},
 			TransactionBodies:      transactionBodies,
 			TransactionWitnessSets: transactionWitnessSets,
-			TransactionMetadataSet: common.TransactionMetadataSet{},
+			TransactionMetadataSet: emptyAux,
 			InvalidTransactions:    []uint{},
 		}
 		blockCbor, err := cbor.Encode(block)
@@ -263,6 +272,17 @@ func newConwayFixtureTransactionBody(
 		}},
 		TxFee: 1,
 	}, nil
+}
+
+// emptyAuxiliaryDataSet returns an empty auxiliary_data_set that encodes as
+// the empty map the era CDDL requires; gouroboros encodes a zero
+// TransactionMetadataSet as CBOR null.
+func emptyAuxiliaryDataSet() (common.TransactionMetadataSet, error) {
+	var set common.TransactionMetadataSet
+	if _, err := cbor.Decode([]byte{0xa0}, &set); err != nil {
+		return set, fmt.Errorf("decode empty auxiliary data set: %w", err)
+	}
+	return set, nil
 }
 
 // ComputeBlockBodyHash returns
