@@ -94,7 +94,14 @@ func (b *DijkstraBlockBuilder) WithPreviousHash(
 	return b
 }
 
-// WithTransactions sets the block's non-segregated transactions.
+// WithTransactions sets the block's non-segregated transactions. A
+// transaction that carries block_transaction CBOR, such as one returned by
+// DijkstraTransactionBuilder.Build or decoded from a Dijkstra block body, is
+// encoded from those bytes. Any other transaction is encoded as
+// DijkstraTransactionBuilder encodes it, from its body, witness set,
+// auxiliary data or metadata, and validity flag. Build rejects a transaction
+// whose encoding lacks a required body key, carries an empty sub-transaction
+// set, or uses a witness set key outside the Dijkstra CDDL.
 func (b *DijkstraBlockBuilder) WithTransactions(
 	transactions ...dijkstra.DijkstraTransaction,
 ) *DijkstraBlockBuilder {
@@ -181,24 +188,23 @@ func (b *DijkstraBlockBuilder) WithEbAnnouncement(
 // Build encodes the block and decodes it with gouroboros, so the returned
 // block's CBOR, hash, and header fields are what a consumer decodes.
 func (b *DijkstraBlockBuilder) Build() (*dijkstra.DijkstraBlock, error) {
-	for i, tx := range b.transactions {
-		if err := validateDijkstraWitnessSet(tx.WitnessSet); err != nil {
+	transactions := make([]cbor.RawMessage, len(b.transactions))
+	for i := range b.transactions {
+		encoded, err := dijkstraBlockTransactionCBOR(&b.transactions[i])
+		if err != nil {
 			return nil, fmt.Errorf("transaction %d: %w", i, err)
 		}
-		for j, sub := range tx.Body.TxSubTransactions.Items() {
-			if err := validateDijkstraWitnessSet(sub.WitnessSet); err != nil {
-				return nil, fmt.Errorf("transaction %d subtransaction %d: %w", i, j, err)
-			}
-		}
+		transactions[i] = encoded
 	}
-	body := dijkstra.DijkstraBlockBody{
-		Transactions: append(
-			[]dijkstra.DijkstraTransaction(nil), b.transactions...,
-		),
-		LeiosCertificate: b.leiosCert,
-		PerasCertificate: bytes.Clone(b.perasCert),
+	var leiosCert any
+	if b.leiosCert != nil {
+		leiosCert = b.leiosCert
 	}
-	bodyCBOR, err := cbor.Encode(body)
+	var perasCert any
+	if b.perasCert != nil {
+		perasCert = bytes.Clone(b.perasCert)
+	}
+	bodyCBOR, err := cbor.Encode([]any{transactions, leiosCert, perasCert})
 	if err != nil {
 		return nil, fmt.Errorf("encode Dijkstra block body fixture: %w", err)
 	}

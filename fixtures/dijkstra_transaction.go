@@ -17,6 +17,7 @@ package fixtures
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -25,9 +26,13 @@ import (
 )
 
 const (
+	dijkstraTxBodyInputsKey          = 0
 	dijkstraTxBodyOutputsKey         = 1
 	dijkstraTxBodyFeeKey             = 2
 	dijkstraTxBodySubTransactionsKey = 23
+
+	dijkstraWitnessMaxKey             = 7
+	dijkstraWitnessPlutusV4ScriptsKey = 8
 )
 
 // DijkstraTransactionBuilder constructs Dijkstra block transactions with
@@ -124,15 +129,6 @@ func (b *DijkstraTransactionBuilder) Build() (
 	*dijkstra.DijkstraTransaction,
 	error,
 ) {
-	if err := validateDijkstraWitnessSet(b.tx.WitnessSet); err != nil {
-		return nil, err
-	}
-	for i, sub := range b.tx.Body.TxSubTransactions.Items() {
-		if err := validateDijkstraWitnessSet(sub.WitnessSet); err != nil {
-			return nil, fmt.Errorf("subtransaction %d: %w", i, err)
-		}
-	}
-	body := b.tx.Body
 	var auxCBOR []byte
 	if b.metadata != nil {
 		encoded, err := encodeDijkstraMetadata(b.metadata)
@@ -140,35 +136,15 @@ func (b *DijkstraTransactionBuilder) Build() (
 			return nil, err
 		}
 		auxCBOR = encoded
-		if body.TxAuxDataHash == nil {
-			hash := common.Blake2b256Hash(encoded)
-			body.TxAuxDataHash = &hash
-			body.SetCbor(nil)
-		}
 	}
-	bodyCBOR, err := encodeDijkstraTransactionBody(body)
+	txCBOR, err := encodeDijkstraBlockTransaction(
+		b.tx.Body,
+		b.tx.WitnessSet,
+		auxCBOR,
+		b.tx.TxIsValid,
+	)
 	if err != nil {
 		return nil, err
-	}
-	witnessCBOR, err := cbor.Encode(b.tx.WitnessSet)
-	if err != nil {
-		return nil, fmt.Errorf("encode Dijkstra witness set fixture: %w", err)
-	}
-	var aux any
-	if auxCBOR != nil {
-		aux = cbor.RawMessage(auxCBOR)
-	}
-	txCBOR, err := cbor.Encode([]any{
-		cbor.RawMessage(bodyCBOR),
-		cbor.RawMessage(witnessCBOR),
-		aux,
-		b.tx.TxIsValid,
-	})
-	if err != nil {
-		return nil, fmt.Errorf(
-			"encode Dijkstra block transaction fixture: %w",
-			err,
-		)
 	}
 	blockBodyCBOR, err := cbor.Encode([]any{
 		[]cbor.RawMessage{txCBOR},
@@ -205,13 +181,197 @@ func (b *DijkstraTransactionBuilder) Build() (
 	return &tx, nil
 }
 
-func validateDijkstraWitnessSet(
+// dijkstraBlockTransactionCBOR returns the block_transaction encoding of tx.
+// A transaction that carries block_transaction CBOR keeps those bytes; any
+// other transaction is encoded as DijkstraTransactionBuilder encodes it. Both
+// are checked against the Dijkstra CDDL.
+func dijkstraBlockTransactionCBOR(
+	tx *dijkstra.DijkstraTransaction,
+) ([]byte, error) {
+	if raw := tx.DecodeStoreCbor.Cbor(); raw != nil {
+		var elements []cbor.RawMessage
+		if _, err := cbor.Decode(raw, &elements); err == nil &&
+			len(elements) == 4 {
+			if err := validateDijkstraBlockTransaction(raw); err != nil {
+				return nil, err
+			}
+			return raw, nil
+		}
+	}
+	var auxCBOR []byte
+	if aux := tx.AuxiliaryData(); aux != nil && len(aux.Cbor()) > 0 {
+		auxCBOR = aux.Cbor()
+	} else if tx.TxMetadata != nil {
+		encoded, err := encodeDijkstraMetadata(tx.TxMetadata)
+		if err != nil {
+			return nil, err
+		}
+		auxCBOR = encoded
+	}
+	return encodeDijkstraBlockTransaction(
+		tx.Body,
+		tx.WitnessSet,
+		auxCBOR,
+		tx.TxIsValid,
+	)
+}
+
+// encodeDijkstraBlockTransaction encodes a block_transaction. It sets the
+// body's auxiliary_data_hash from auxCBOR unless the body already carries one.
+func encodeDijkstraBlockTransaction(
+	body dijkstra.DijkstraTransactionBody,
 	witnesses dijkstra.DijkstraTransactionWitnessSet,
-) error {
-	if len(witnesses.WsPlutusV4Scripts.Items()) > 0 {
-		return errors.New(
-			"plutus V4 witness scripts are not part of the Dijkstra CDDL",
+	auxCBOR []byte,
+	valid bool,
+) ([]byte, error) {
+	if auxCBOR != nil && body.TxAuxDataHash == nil {
+		hash := common.Blake2b256Hash(auxCBOR)
+		body.TxAuxDataHash = &hash
+		body.SetCbor(nil)
+	}
+	bodyCBOR, err := encodeDijkstraTransactionBody(body)
+	if err != nil {
+		return nil, err
+	}
+	witnessCBOR, err := cbor.Encode(witnesses)
+	if err != nil {
+		return nil, fmt.Errorf("encode Dijkstra witness set fixture: %w", err)
+	}
+	var aux any
+	if auxCBOR != nil {
+		aux = cbor.RawMessage(auxCBOR)
+	}
+	txCBOR, err := cbor.Encode([]any{
+		cbor.RawMessage(bodyCBOR),
+		cbor.RawMessage(witnessCBOR),
+		aux,
+		valid,
+	})
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encode Dijkstra block transaction fixture: %w",
+			err,
 		)
+	}
+	if err := validateDijkstraBlockTransaction(txCBOR); err != nil {
+		return nil, err
+	}
+	return txCBOR, nil
+}
+
+// validateDijkstraBlockTransaction checks encoded block_transaction bytes
+// against the Dijkstra CDDL rules gouroboros does not enforce when it encodes
+// a value or reuses its preserved CBOR: the required transaction_body and
+// sub_transaction_body keys, a non-empty sub_transactions set, and
+// transaction_witness_set keys 0-7. Checking the emitted bytes holds decoded
+// values, whose original CBOR is reused, to the same rules as in-process ones.
+func validateDijkstraBlockTransaction(encoded []byte) error {
+	var elements []cbor.RawMessage
+	if _, err := cbor.Decode(encoded, &elements); err != nil {
+		return fmt.Errorf("decode block transaction: %w", err)
+	}
+	if len(elements) != 4 {
+		return fmt.Errorf(
+			"block transaction has %d elements, want 4",
+			len(elements),
+		)
+	}
+	body, err := decodeDijkstraBodyFields(
+		elements[0],
+		"transaction body",
+		dijkstraTxBodyOutputsKey,
+		dijkstraTxBodyFeeKey,
+	)
+	if err != nil {
+		return err
+	}
+	if err := validateDijkstraWitnessSetKeys(elements[1]); err != nil {
+		return err
+	}
+	raw, ok := body[dijkstraTxBodySubTransactionsKey]
+	if !ok {
+		return nil
+	}
+	var subtransactions cbor.SetType[cbor.RawMessage]
+	if _, err := cbor.Decode(raw, &subtransactions); err != nil {
+		return fmt.Errorf("decode sub-transactions: %w", err)
+	}
+	// sub_transactions is a nonempty_oset, and gouroboros encodes an empty
+	// set as an empty tagged set instead of omitting key 23.
+	if len(subtransactions.Items()) == 0 {
+		return errors.New("dijkstra sub-transactions must not be empty")
+	}
+	for i, sub := range subtransactions.Items() {
+		if err := validateDijkstraSubTransaction(sub); err != nil {
+			return fmt.Errorf("subtransaction %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validateDijkstraSubTransaction(encoded []byte) error {
+	var elements []cbor.RawMessage
+	if _, err := cbor.Decode(encoded, &elements); err != nil {
+		return fmt.Errorf("decode sub-transaction: %w", err)
+	}
+	if len(elements) != 3 {
+		return fmt.Errorf(
+			"sub-transaction has %d elements, want 3",
+			len(elements),
+		)
+	}
+	if _, err := decodeDijkstraBodyFields(
+		elements[0],
+		"body",
+		dijkstraTxBodyOutputsKey,
+	); err != nil {
+		return err
+	}
+	return validateDijkstraWitnessSetKeys(elements[1])
+}
+
+// decodeDijkstraBodyFields decodes a body map and requires key 0 (inputs) and
+// each of the given keys.
+func decodeDijkstraBodyFields(
+	encoded []byte,
+	name string,
+	required ...uint64,
+) (map[uint64]cbor.RawMessage, error) {
+	var fields map[uint64]cbor.RawMessage
+	if _, err := cbor.Decode(encoded, &fields); err != nil {
+		return nil, fmt.Errorf("decode %s map: %w", name, err)
+	}
+	if fields == nil {
+		return nil, fmt.Errorf("%s is not a map", name)
+	}
+	for _, key := range append([]uint64{dijkstraTxBodyInputsKey}, required...) {
+		if _, ok := fields[key]; !ok {
+			return nil, fmt.Errorf("%s is missing required key %d", name, key)
+		}
+	}
+	return fields, nil
+}
+
+// validateDijkstraWitnessSetKeys rejects witness set keys past 7. gouroboros
+// v0.205.4 encodes WsPlutusV4Scripts as key 8, which the Dijkstra CDDL and
+// the reference decoder do not accept.
+func validateDijkstraWitnessSetKeys(encoded []byte) error {
+	var fields map[uint64]cbor.RawMessage
+	if _, err := cbor.Decode(encoded, &fields); err != nil {
+		return fmt.Errorf("decode witness set map: %w", err)
+	}
+	for _, key := range slices.Sorted(maps.Keys(fields)) {
+		if key == dijkstraWitnessPlutusV4ScriptsKey {
+			return errors.New(
+				"plutus V4 witness scripts are not part of the Dijkstra CDDL",
+			)
+		}
+		if key > dijkstraWitnessMaxKey {
+			return fmt.Errorf(
+				"witness set key %d is not part of the Dijkstra CDDL",
+				key,
+			)
+		}
 	}
 	return nil
 }
@@ -253,14 +413,12 @@ func encodeDijkstraMetadata(
 // requires. gouroboros encodes outputs (1) and the fee (2) with omitempty, so
 // an in-process body with no outputs or a zero fee drops required keys;
 // subtransaction bodies drop outputs the same way. A decoded, unmodified body
-// keeps its original bytes.
+// keeps its original bytes, so validateDijkstraBlockTransaction rejects one
+// that lacks a required key.
 func encodeDijkstraTransactionBody(
 	body dijkstra.DijkstraTransactionBody,
 ) ([]byte, error) {
 	if raw := body.Cbor(); raw != nil {
-		if err := rejectEmptySubTransactions(raw); err != nil {
-			return nil, err
-		}
 		return raw, nil
 	}
 	if subtransactions := body.TxSubTransactions.Items(); len(subtransactions) > 0 {
@@ -284,35 +442,10 @@ func encodeDijkstraTransactionBody(
 			err,
 		)
 	}
-	if err := rejectEmptySubTransactions(encoded); err != nil {
-		return nil, err
-	}
 	return withRequiredMapKeys(encoded, map[uint64][]byte{
 		dijkstraTxBodyOutputsKey: {0x80},
 		dijkstraTxBodyFeeKey:     {0x00},
 	})
-}
-
-// rejectEmptySubTransactions refuses key 23 encoded as an empty set.
-// sub_transactions is a nonempty_oset, and gouroboros encodes an empty tagged
-// set instead of omitting the key.
-func rejectEmptySubTransactions(encoded []byte) error {
-	var fields map[uint64]cbor.RawMessage
-	if _, err := cbor.Decode(encoded, &fields); err != nil {
-		return fmt.Errorf("decode transaction body map: %w", err)
-	}
-	raw, ok := fields[dijkstraTxBodySubTransactionsKey]
-	if !ok {
-		return nil
-	}
-	var subtransactions cbor.SetType[cbor.RawMessage]
-	if _, err := cbor.Decode(raw, &subtransactions); err != nil {
-		return fmt.Errorf("decode sub-transactions: %w", err)
-	}
-	if len(subtransactions.Items()) == 0 {
-		return errors.New("dijkstra sub-transactions must not be empty")
-	}
-	return nil
 }
 
 func normalizeDijkstraSubTransaction(

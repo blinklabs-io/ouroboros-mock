@@ -127,7 +127,11 @@ shape: a non-segregated body with the optional Leios and Peras certificate
 slots, and a 12-field header body whose `block_body_contains_leios_cert` flag
 follows the body's Leios certificate and whose `eb_announcement` is set with
 `WithEbAnnouncement`. It derives the body size and hash and decodes its output
-before returning it. `GenerateConwayToDijkstraChain` builds a connected chain
+before returning it. A transaction that carries `block_transaction` CBOR, such
+as one from `NewDijkstraTransactionBuilder`, keeps those bytes; any other
+transaction is encoded as the transaction builder encodes it. Both builders
+reject a transaction whose encoding lacks a required body key, carries an
+empty sub-transaction set, or uses a witness set key outside 0-7. `GenerateConwayToDijkstraChain` builds a connected chain
 spanning the PV12 era boundary from the same builder. `GenerateDijkstraChain`
 keeps the 10-field Babbage header body, which `ledger.DetermineBlockType`
 classifies; that function rejects the 12-field Dijkstra header body.

@@ -16,6 +16,7 @@ package fixtures_test
 
 import (
 	"bytes"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
@@ -116,6 +118,114 @@ func TestDijkstraBlockBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 	if !strings.Contains(err.Error(), "plutus V4 witness scripts are not part of the Dijkstra CDDL") {
 		t.Fatalf("unexpected error: %s", err)
 	}
+}
+
+// blockTransactionBody returns the keyed body fields of a block transaction
+// as encoded in the block.
+func blockTransactionBody(
+	t *testing.T,
+	block *dijkstra.DijkstraBlock,
+	index int,
+) map[uint64]cbor.RawMessage {
+	t.Helper()
+	require.Greater(t, len(block.BlockBody.Transactions), index)
+	var elements []cbor.RawMessage
+	_, err := cbor.Decode(block.BlockBody.Transactions[index].Cbor(), &elements)
+	require.NoError(t, err)
+	require.Len(t, elements, 4)
+	var body map[uint64]cbor.RawMessage
+	_, err = cbor.Decode(elements[0], &body)
+	require.NoError(t, err)
+	return body
+}
+
+// gouroboros encodes outputs (1) and the fee (2) with omitempty, so an
+// in-process transaction must be encoded the way the transaction builder
+// encodes it to keep the keys the Dijkstra CDDL requires.
+func TestDijkstraBlockBuilderEncodesRequiredBodyKeysForInProcessTransactions(
+	t *testing.T,
+) {
+	block, err := fixtures.NewDijkstraBlockBuilder().
+		WithTransactions(dijkstra.DijkstraTransaction{TxIsValid: true}).
+		Build()
+	require.NoError(t, err)
+	body := blockTransactionBody(t, block, 0)
+	for _, key := range []uint64{0, 1, 2} {
+		require.Contains(t, body, key, "transaction body key %d", key)
+	}
+	require.Equal(t, cbor.RawMessage{0x80}, body[1], "empty outputs")
+	require.Equal(t, cbor.RawMessage{0x00}, body[2], "zero fee")
+	require.True(t, block.BlockBody.Transactions[0].TxIsValid)
+}
+
+func TestDijkstraBlockBuilderEncodesInProcessTransactionMetadata(t *testing.T) {
+	block, err := fixtures.NewDijkstraBlockBuilder().
+		WithTransactions(dijkstra.DijkstraTransaction{
+			TxIsValid: true,
+			TxMetadata: common.MetaMap{Pairs: []common.MetaPair{{
+				Key:   common.MetaInt{Value: big.NewInt(674)},
+				Value: common.MetaText{Value: "fixture"},
+			}}},
+		}).
+		Build()
+	require.NoError(t, err)
+	tx := block.BlockBody.Transactions[0]
+	require.NotNil(t, tx.Metadata())
+	var elements []cbor.RawMessage
+	_, err = cbor.Decode(tx.Cbor(), &elements)
+	require.NoError(t, err)
+	require.Len(t, elements, 4)
+	var labels map[uint64]string
+	_, err = cbor.Decode(elements[2], &labels)
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]string{674: "fixture"}, labels)
+	require.NotNil(t, tx.Body.TxAuxDataHash)
+	require.Equal(t, common.Blake2b256Hash(elements[2]), *tx.Body.TxAuxDataHash)
+}
+
+func TestDijkstraBlockBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
+	var body dijkstra.DijkstraTransactionBody
+	_, err := cbor.Decode(
+		[]byte{
+			0xa4, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00,
+			0x17, 0xd9, 0x01, 0x02, 0x80,
+		},
+		&body,
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+
+	_, err = fixtures.NewDijkstraBlockBuilder().
+		WithTransactions(dijkstra.DijkstraTransaction{Body: body, TxIsValid: true}).
+		Build()
+	require.ErrorContains(
+		t, err, "transaction 0: dijkstra sub-transactions must not be empty",
+	)
+}
+
+// A transaction decoded from a block keeps its block_transaction bytes, which
+// gouroboros reuses verbatim when the block body is encoded.
+func TestDijkstraBlockBuilderRejectsDecodedBlockTransactionMissingRequiredKeys(
+	t *testing.T,
+) {
+	var decoded dijkstra.DijkstraBlockBody
+	_, err := cbor.Decode(
+		[]byte{
+			0x83,
+			0x81, 0x84, 0xa1, 0x00, 0x80, 0xa0, 0xf6, 0xf5,
+			0xf6, 0xf6,
+		},
+		&decoded,
+	)
+	require.NoError(t, err)
+	require.Len(t, decoded.Transactions, 1)
+
+	_, err = fixtures.NewDijkstraBlockBuilder().
+		WithTransactions(decoded.Transactions[0]).
+		Build()
+	require.ErrorContains(
+		t, err, "transaction 0: transaction body is missing required key 1",
+	)
 }
 
 func TestGenerateConwayToDijkstraChain(t *testing.T) {
