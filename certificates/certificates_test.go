@@ -10,6 +10,7 @@ package certificates_test
 
 import (
 	"bytes"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/certificates"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -32,7 +34,14 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, registration)
+	assertCertificateRoundTrip(
+		t,
+		registration,
+		&lcommon.StakeRegistrationCertificate{
+			CertType:        0,
+			StakeCredential: keyCredential(stakeHash),
+		},
+	)
 
 	deregistration, err := certificates.NewStakeDeregistration().
 		WithScriptCredential(stakeHash).
@@ -40,7 +49,14 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, deregistration)
+	assertCertificateRoundTrip(
+		t,
+		deregistration,
+		&lcommon.StakeDeregistrationCertificate{
+			CertType:        1,
+			StakeCredential: scriptCredential(stakeHash),
+		},
+	)
 
 	delegation, err := certificates.NewStakeDelegation().
 		WithCredential(stakeHash).
@@ -49,7 +65,15 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, delegation)
+	assertCertificateRoundTrip(
+		t,
+		delegation,
+		&lcommon.StakeDelegationCertificate{
+			CertType:        2,
+			StakeCredential: new(keyCredential(stakeHash)),
+			PoolKeyHash:     lcommon.NewBlake2b224(poolHash),
+		},
+	)
 
 	registrationWithDeposit, err := certificates.NewRegistration().
 		WithScriptCredential(stakeHash).
@@ -58,7 +82,15 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, registrationWithDeposit)
+	assertCertificateRoundTrip(
+		t,
+		registrationWithDeposit,
+		&lcommon.RegistrationCertificate{
+			CertType:        7,
+			StakeCredential: scriptCredential(stakeHash),
+			Amount:          123,
+		},
+	)
 
 	deregistrationWithRefund, err := certificates.NewDeregistration().
 		WithCredential(stakeHash).
@@ -67,10 +99,25 @@ func TestStakeBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, deregistrationWithRefund)
+	assertCertificateRoundTrip(
+		t,
+		deregistrationWithRefund,
+		&lcommon.DeregistrationCertificate{
+			CertType:        8,
+			StakeCredential: keyCredential(stakeHash),
+			Amount:          123,
+		},
+	)
 }
 
 func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
+	hostname := "relay.example.test"
+	port := uint32(3001)
+	relay := lcommon.PoolRelay{
+		Type:     lcommon.PoolRelayTypeSingleHostName,
+		Hostname: &hostname,
+		Port:     &port,
+	}
 	registration, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).
 		WithOperator(poolHash).
 		WithVrfKeyHash(vrfHash).
@@ -79,11 +126,34 @@ func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
 		WithMargin(1, 100).
 		WithPledge(1000).
 		WithCost(500).
+		WithRelays(relay).
+		WithMetadata("https://example.test/pool", vrfHash).
 		Build()
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, registration)
+	expected := &lcommon.PoolRegistrationCertificate{
+		CertType:      3,
+		Operator:      lcommon.NewBlake2b224(poolHash),
+		VrfKeyHash:    lcommon.NewBlake2b256(vrfHash),
+		RewardAccount: lcommon.NewBlake2b224(stakeHash),
+		PoolOwners:    []lcommon.AddrKeyHash{lcommon.NewBlake2b224(stakeHash)},
+		Margin:        cbor.Rat{Rat: big.NewRat(1, 100)},
+		Pledge:        1000,
+		Cost:          500,
+		Relays:        []lcommon.PoolRelay{relay},
+		PoolMetadata: &lcommon.PoolMetadata{
+			Url:  "https://example.test/pool",
+			Hash: lcommon.PoolMetadataHash(vrfHash),
+		},
+	}
+	assertCertificateRoundTrip(t, registration, expected)
+	assertPoolRewardAccount(
+		t,
+		registration,
+		uint(lcommon.AddressNetworkTestnet),
+		keyCredential(stakeHash),
+	)
 
 	retirement, err := certificates.NewPoolRetirement().
 		WithPoolKeyHash(poolHash).
@@ -92,7 +162,15 @@ func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCertificateRoundTrip(t, retirement)
+	assertCertificateRoundTrip(
+		t,
+		retirement,
+		&lcommon.PoolRetirementCertificate{
+			CertType:    4,
+			PoolKeyHash: lcommon.NewBlake2b224(poolHash),
+			Epoch:       42,
+		},
+	)
 }
 
 func TestGovernanceBuildersReturnCertificatesUsableInTransactions(
@@ -155,7 +233,39 @@ func TestGovernanceBuildersReturnCertificatesUsableInTransactions(
 	if got := len(txRPC.Certificates); got != 3 {
 		t.Fatalf("converted transaction certificates = %d, want 3", got)
 	}
-	assertCertificateRoundTrip(t, drepRegistration)
+	assertCertificateRoundTrip(
+		t,
+		drepRegistration,
+		&lcommon.RegistrationDrepCertificate{
+			CertType:       16,
+			DrepCredential: keyCredential(stakeHash),
+			Amount:         100,
+			Anchor: &lcommon.GovAnchor{
+				Url:      "https://example.test/drep",
+				DataHash: [32]byte(vrfHash),
+			},
+		},
+	)
+	assertCertificateRoundTrip(
+		t,
+		voteDelegation,
+		&lcommon.VoteDelegationCertificate{
+			CertType:        9,
+			StakeCredential: keyCredential(stakeHash),
+			Drep:            lcommon.Drep{Type: 0, Credential: poolHash},
+		},
+	)
+	assertCertificateRoundTrip(
+		t,
+		combined,
+		&lcommon.StakeVoteRegistrationDelegationCertificate{
+			CertType:        13,
+			StakeCredential: keyCredential(stakeHash),
+			Drep:            lcommon.Drep{Type: 0, Credential: poolHash},
+			PoolKeyHash:     lcommon.NewBlake2b224(stakeHash),
+			Amount:          100,
+		},
+	)
 	if _, err := voteDelegation.Utxorpc(); err != nil {
 		t.Fatalf("vote delegation conversion: %v", err)
 	}
@@ -184,6 +294,12 @@ func TestPoolRegistrationUsesSelectedNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertPoolRewardAccount(
+		t,
+		registration,
+		uint(lcommon.AddressNetworkMainnet),
+		keyCredential(stakeHash),
+	)
 	if got, ok := registration.RewardAccountNetworkId(); !ok ||
 		got != uint(lcommon.AddressNetworkMainnet) {
 		t.Fatalf("reward account network = %d, known %t; want mainnet", got, ok)
@@ -199,6 +315,12 @@ func TestPoolRegistrationSupportsScriptRewardAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertPoolRewardAccount(
+		t,
+		registration,
+		uint(lcommon.AddressNetworkMainnet),
+		scriptCredential(stakeHash),
+	)
 	if got, ok := registration.RewardAccountNetworkId(); !ok ||
 		got != uint(lcommon.AddressNetworkMainnet) {
 		t.Fatalf("reward account network = %d, known %t; want mainnet", got, ok)
@@ -299,11 +421,17 @@ func TestBuildersRejectInvalidHashes(t *testing.T) {
 
 func TestConwayBuildersSupportScriptCredentials(t *testing.T) {
 	tests := []struct {
-		name  string
-		build func() (lcommon.Certificate, error)
+		name     string
+		expected lcommon.Certificate
+		build    func() (lcommon.Certificate, error)
 	}{
 		{
 			name: "vote registration delegation",
+			expected: &lcommon.VoteRegistrationDelegationCertificate{
+				CertType:        12,
+				StakeCredential: scriptCredential(stakeHash),
+				Drep:            lcommon.Drep{Type: 0, Credential: poolHash},
+			},
 			build: func() (lcommon.Certificate, error) {
 				return certificates.NewVoteRegistrationDelegation().
 					WithScriptCredential(stakeHash).
@@ -313,6 +441,12 @@ func TestConwayBuildersSupportScriptCredentials(t *testing.T) {
 		},
 		{
 			name: "stake vote registration delegation",
+			expected: &lcommon.StakeVoteRegistrationDelegationCertificate{
+				CertType:        13,
+				StakeCredential: scriptCredential(stakeHash),
+				PoolKeyHash:     lcommon.NewBlake2b224(poolHash),
+				Drep:            lcommon.Drep{Type: 0, Credential: poolHash},
+			},
 			build: func() (lcommon.Certificate, error) {
 				return certificates.NewStakeVoteRegistrationDelegation().
 					WithScriptCredential(stakeHash).
@@ -323,6 +457,11 @@ func TestConwayBuildersSupportScriptCredentials(t *testing.T) {
 		},
 		{
 			name: "committee authorization",
+			expected: &lcommon.AuthCommitteeHotCertificate{
+				CertType:       14,
+				ColdCredential: scriptCredential(stakeHash),
+				HotCredential:  scriptCredential(poolHash),
+			},
 			build: func() (lcommon.Certificate, error) {
 				return certificates.NewAuthCommitteeHot().
 					WithColdScriptCredential(stakeHash).
@@ -332,6 +471,10 @@ func TestConwayBuildersSupportScriptCredentials(t *testing.T) {
 		},
 		{
 			name: "committee resignation",
+			expected: &lcommon.ResignCommitteeColdCertificate{
+				CertType:       15,
+				ColdCredential: scriptCredential(stakeHash),
+			},
 			build: func() (lcommon.Certificate, error) {
 				return certificates.NewResignCommitteeCold().
 					WithColdScriptCredential(stakeHash).
@@ -345,13 +488,17 @@ func TestConwayBuildersSupportScriptCredentials(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertCertificateRoundTrip(t, cert)
+			assertCertificateRoundTrip(t, cert, tt.expected)
 		})
 	}
 }
 
-func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
+func assertCertificateRoundTrip(
+	t *testing.T,
+	cert, expected lcommon.Certificate,
+) {
 	t.Helper()
+	require.EqualExportedValues(t, expected, cert, "built certificate fields")
 	wire, err := cbor.Encode(cert)
 	if err != nil {
 		t.Fatalf("encode certificate: %v", err)
@@ -367,6 +514,24 @@ func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
 			cert.Type(),
 		)
 	}
+	// Pool registration can re-encode its retained CBOR without consulting
+	// decoded fields. Expectations come from the builder inputs.
+	require.EqualExportedValues(
+		t,
+		expected,
+		decoded.Certificate,
+		"decoded certificate fields",
+	)
+	if want, ok := expected.(*lcommon.PoolRegistrationCertificate); ok {
+		got := decoded.Certificate.(*lcommon.PoolRegistrationCertificate)
+		require.Equal(
+			t,
+			want.Margin.Rat,
+			cert.(*lcommon.PoolRegistrationCertificate).Margin.Rat,
+			"built pool margin",
+		)
+		require.Equal(t, want.Margin.Rat, got.Margin.Rat, "decoded pool margin")
+	}
 	decodedWire, err := cbor.Encode(decoded.Certificate)
 	if err != nil {
 		t.Fatalf("re-encode decoded certificate: %v", err)
@@ -377,5 +542,216 @@ func assertCertificateRoundTrip(t *testing.T, cert lcommon.Certificate) {
 			decodedWire,
 			wire,
 		)
+	}
+}
+
+func keyCredential(hash []byte) lcommon.Credential {
+	return lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: lcommon.NewBlake2b224(hash),
+	}
+}
+
+func scriptCredential(hash []byte) lcommon.Credential {
+	return lcommon.Credential{
+		CredType:   lcommon.CredentialTypeScriptHash,
+		Credential: lcommon.NewBlake2b224(hash),
+	}
+}
+
+func assertPoolRewardAccount(
+	t *testing.T,
+	cert *lcommon.PoolRegistrationCertificate,
+	network uint,
+	credential lcommon.Credential,
+) {
+	t.Helper()
+	wire, err := cbor.Encode(cert)
+	require.NoError(t, err)
+	var decoded lcommon.CertificateWrapper
+	_, err = cbor.Decode(wire, &decoded)
+	require.NoError(t, err)
+	for _, got := range []*lcommon.PoolRegistrationCertificate{cert, decoded.Certificate.(*lcommon.PoolRegistrationCertificate)} {
+		id, known := got.RewardAccountNetworkId()
+		require.True(t, known)
+		require.Equal(t, network, id, "reward account network")
+		require.EqualExportedValues(
+			t,
+			credential,
+			got.RewardAccountCredential(),
+			"reward account credential",
+		)
+	}
+}
+
+func TestGovernanceBuildersPreserveRequestedFields(t *testing.T) {
+	anchor := &lcommon.GovAnchor{
+		Url:      "https://example.test/governance",
+		DataHash: [32]byte(vrfHash),
+	}
+	tests := []struct {
+		name     string
+		build    func() (lcommon.Certificate, error)
+		expected lcommon.Certificate
+	}{
+		{
+			name: "DRep deregistration",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewDRepDeregistration().
+					WithScriptCredential(stakeHash).
+					WithDeposit(321).
+					Build()
+			},
+			expected: &lcommon.DeregistrationDrepCertificate{
+				CertType:       17,
+				DrepCredential: scriptCredential(stakeHash),
+				Amount:         321,
+			},
+		},
+		{
+			name: "DRep update",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewDRepUpdate().
+					WithScriptCredential(stakeHash).
+					WithAnchor(anchor.Url, vrfHash).
+					Build()
+			},
+			expected: &lcommon.UpdateDrepCertificate{
+				CertType:       18,
+				DrepCredential: scriptCredential(stakeHash),
+				Anchor:         anchor,
+			},
+		},
+		{
+			name: "stake and vote delegation",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewStakeVoteDelegation().
+					WithScriptCredential(stakeHash).
+					WithPoolKeyHash(poolHash).
+					WithDRepScriptHash(vrfHash[:28]).
+					Build()
+			},
+			expected: &lcommon.StakeVoteDelegationCertificate{
+				CertType:        10,
+				StakeCredential: scriptCredential(stakeHash),
+				PoolKeyHash:     lcommon.NewBlake2b224(poolHash),
+				Drep: lcommon.Drep{
+					Type:       1,
+					Credential: vrfHash[:28],
+				},
+			},
+		},
+		{
+			name: "stake registration and delegation",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewStakeRegistrationDelegation().
+					WithScriptCredential(stakeHash).
+					WithPoolKeyHash(poolHash).
+					WithDeposit(456).
+					Build()
+			},
+			expected: &lcommon.StakeRegistrationDelegationCertificate{
+				CertType:        11,
+				StakeCredential: scriptCredential(stakeHash),
+				PoolKeyHash:     lcommon.NewBlake2b224(poolHash),
+				Amount:          456,
+			},
+		},
+		{
+			name: "vote registration and delegation with deposit",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewVoteRegistrationDelegation().
+					WithCredential(stakeHash).
+					WithDRepScriptHash(poolHash).
+					WithDeposit(789).
+					Build()
+			},
+			expected: &lcommon.VoteRegistrationDelegationCertificate{
+				CertType:        12,
+				StakeCredential: keyCredential(stakeHash),
+				Drep:            lcommon.Drep{Type: 1, Credential: poolHash},
+				Amount:          789,
+			},
+		},
+		{
+			name: "committee resignation anchor",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewResignCommitteeCold().
+					WithColdCredential(stakeHash).
+					WithAnchor(anchor.Url, vrfHash).
+					Build()
+			},
+			expected: &lcommon.ResignCommitteeColdCertificate{
+				CertType:       15,
+				ColdCredential: keyCredential(stakeHash),
+				Anchor:         anchor,
+			},
+		},
+		{
+			name: "committee key authorization",
+			build: func() (lcommon.Certificate, error) {
+				return certificates.NewAuthCommitteeHot().
+					WithColdCredential(stakeHash).
+					WithHotCredential(poolHash).
+					Build()
+			},
+			expected: &lcommon.AuthCommitteeHotCertificate{
+				CertType:       14,
+				ColdCredential: keyCredential(stakeHash),
+				HotCredential:  keyCredential(poolHash),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cert, err := tt.build()
+			require.NoError(t, err)
+			assertCertificateRoundTrip(t, cert, tt.expected)
+		})
+	}
+}
+
+func TestVoteDelegationPreservesDRepVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		drep lcommon.Drep
+	}{
+		{
+			name: "key",
+			drep: lcommon.Drep{
+				Type:       lcommon.DrepTypeAddrKeyHash,
+				Credential: poolHash,
+			},
+		},
+		{
+			name: "script",
+			drep: lcommon.Drep{
+				Type:       lcommon.DrepTypeScriptHash,
+				Credential: poolHash,
+			},
+		},
+		{name: "abstain", drep: lcommon.Drep{Type: lcommon.DrepTypeAbstain}},
+		{
+			name: "no confidence",
+			drep: lcommon.Drep{Type: lcommon.DrepTypeNoConfidence},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cert, err := certificates.NewVoteDelegation().
+				WithScriptCredential(stakeHash).
+				WithDRep(tt.drep).
+				Build()
+			require.NoError(t, err)
+			assertCertificateRoundTrip(
+				t,
+				cert,
+				&lcommon.VoteDelegationCertificate{
+					CertType:        9,
+					StakeCredential: scriptCredential(stakeHash),
+					Drep:            tt.drep,
+				},
+			)
+		})
 	}
 }
