@@ -18,7 +18,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAssertObservationPickedLongestPeerTie covers the VRF-tie relaxation:
@@ -160,4 +162,65 @@ func TestAssertObservationKeptShorterPeerExceedsK(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChainPointIndex(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		spec   string
+		n      int
+		ok     bool
+		errMsg string
+	}{
+		{spec: "origin"},
+		{spec: "12:abcd"},
+		{spec: "chain:3", n: 3, ok: true},
+		{spec: "chain:0", ok: true, errMsg: "n >= 1"},
+		{spec: "chain:-2", ok: true, errMsg: "n >= 1"},
+		{spec: "chain:", ok: true, errMsg: "n >= 1"},
+		{spec: "chain:x", ok: true, errMsg: "n >= 1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.spec, func(t *testing.T) {
+			t.Parallel()
+			n, ok, err := chainPointIndex(tc.spec)
+			require.Equal(t, tc.ok, ok)
+			if tc.errMsg != "" {
+				require.ErrorContains(t, err, tc.errMsg)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.n, n)
+		})
+	}
+}
+
+func TestChainPointFromServed(t *testing.T) {
+	t.Parallel()
+	vec, err := LoadVector(filepath.Join(
+		"testdata", "captured", "within_k_fork_v1.json",
+	))
+	require.NoError(t, err)
+	served := vec.Capture.Peers[0].Served
+
+	var want []gledger.BlockHeader
+	for _, m := range served {
+		if m.MsgType != format.ChainSyncMsgRollForward {
+			continue
+		}
+		h, err := gledger.NewBlockHeaderFromCbor(*m.Era, m.HeaderCbor)
+		require.NoError(t, err)
+		want = append(want, h)
+	}
+	require.GreaterOrEqual(t, len(want), 3)
+
+	for _, n := range []int{1, 2, len(want)} {
+		got, err := chainPointFromServed(served, n)
+		require.NoError(t, err)
+		require.Equal(t, want[n-1].SlotNumber(), got.Slot, "n=%d", n)
+		require.Equal(t, want[n-1].Hash().Bytes(), got.Hash, "n=%d", n)
+	}
+
+	_, err = chainPointFromServed(served, len(want)+1)
+	require.ErrorContains(t, err, "roll_forward")
 }

@@ -15,11 +15,14 @@
 package consensus_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
+	gledger "github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCapturedGoldensDecode validates each committed vector under
@@ -169,4 +172,91 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// TestIntersectNonOriginV1Anchor asserts the load-bearing invariant of the
+// intersect_non_origin_v1 scenario: the leading roll_backward names a real
+// block other than origin, and the first roll_forward extends exactly that
+// block. A capture that intersected at origin, or whose rollback point is
+// unrelated to the blocks that follow, would pass the generic golden checks.
+func TestIntersectNonOriginV1Anchor(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join(
+		"testdata", "captured", "intersect_non_origin_v1.json",
+	))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	v, err := format.DecodeTestVector(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if v.Capture == nil || len(v.Capture.Peers) != 1 {
+		t.Fatalf("want exactly 1 peer, got %+v", v.Capture)
+	}
+	served := v.Capture.Peers[0].Served
+	if len(served) < 2 ||
+		served[0].MsgType != format.ChainSyncMsgRollBackward ||
+		served[0].Point == nil {
+		t.Fatalf("trace must open with roll_backward, got %+v", served)
+	}
+	point := served[0].Point
+	if point.Slot == 0 || len(point.Hash) == 0 {
+		t.Fatalf("intersect point is origin: %+v", point)
+	}
+	first := served[1]
+	if first.MsgType != format.ChainSyncMsgRollForward || first.Era == nil {
+		t.Fatalf("second message must be roll_forward, got %+v", first)
+	}
+	h, err := gledger.NewBlockHeaderFromCbor(*first.Era, first.HeaderCbor)
+	if err != nil {
+		t.Fatalf("decode first header: %v", err)
+	}
+	if !bytes.Equal(h.PrevHash().Bytes(), point.Hash) {
+		t.Fatalf(
+			"first roll_forward does not extend the intersect: "+
+				"prev_hash=%x point=%x",
+			h.PrevHash().Bytes(), []byte(point.Hash),
+		)
+	}
+	if h.SlotNumber() <= point.Slot {
+		t.Fatalf("first roll_forward slot %d not after intersect slot %d",
+			h.SlotNumber(), point.Slot)
+	}
+}
+
+// TestWithinKForkWinnerFirstV1IsReorderedParent pins how
+// within_k_fork_winner_first_v1 is derived: the within_k_fork_v1 capture with
+// its peers fed in the opposite order, so the winner arrives before the
+// shorter fork. Praos selection over the same chains does not depend on
+// arrival order within k, so the parent's final_tip and downstream trace stay
+// the oracle's. No switch onto the winner happens, so expected_rollback is
+// dropped.
+func TestWithinKForkWinnerFirstV1IsReorderedParent(t *testing.T) {
+	t.Parallel()
+	load := func(name string) format.TestVector {
+		raw, err := os.ReadFile(
+			filepath.Join("testdata", "captured", name+".json"),
+		)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		v, err := format.DecodeTestVector(raw)
+		if err != nil {
+			t.Fatalf("decode %s: %v", name, err)
+		}
+		return v
+	}
+	parent := load("within_k_fork_v1")
+	got := load("within_k_fork_winner_first_v1")
+
+	want := parent
+	wantCapture := *parent.Capture
+	want.Capture = &wantCapture
+	want.Title = "within_k_fork_winner_first_v1"
+	wantCapture.Peers = []format.PeerInput{
+		parent.Capture.Peers[1], parent.Capture.Peers[0],
+	}
+	wantCapture.ExpectedOutput.ExpectedRollback = nil
+	require.Equal(t, want, got)
 }

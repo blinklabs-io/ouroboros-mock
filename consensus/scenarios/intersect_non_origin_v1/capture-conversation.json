@@ -1,0 +1,9 @@
+{
+  "name": "intersect_non_origin_v1",
+  "steps": [
+    { "type": "find_intersect", "points": ["chain:2"] },
+    { "type": "request_next" },
+    { "type": "request_next" },
+    { "type": "request_next" }
+  ]
+}
