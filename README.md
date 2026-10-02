@@ -46,6 +46,62 @@ mockConn := ouroboros_mock.NewConnection(
 )
 ```
 
+### Protocol message and scenario builders
+
+Message builders describe a server's expected client inputs and server outputs.
+Pass `ProtocolRoleClient` to `NewConnection` when the attached gouroboros peer
+is the client. Add the handshake entries before a protocol scenario.
+
+```go
+start := ouroboros_mock.NewPoint(startSlot, startHash)
+end := ouroboros_mock.NewPoint(endSlot, endHash)
+entries := []ouroboros_mock.ConversationEntry{
+    ouroboros_mock.ConversationEntryHandshakeRequestGeneric,
+    ouroboros_mock.ConversationEntryHandshakeNtNResponse,
+}
+scenario, err := ouroboros_mock.BlockFetchScenario(start, end, blockTypes, blocks)
+if err != nil {
+    panic(err)
+}
+entries = append(entries, scenario...)
+mockConn := ouroboros_mock.NewConnection(ouroboros_mock.ProtocolRoleClient, entries)
+```
+
+`blocks` contains raw ledger block CBOR and `blockTypes` contains each block's
+wire block type, as returned by the block's `Type()` method rather than its
+ledger era ID. The builder encodes the wrapper required by BlockFetch. An
+empty block slice produces `NoBlocks`; otherwise the scenario emits
+`StartBatch`, each `Block`, and `BatchDone`. The client finishes with
+`ClientDone`. `BlockFetchBlock` retains its existing complete single-block batch
+behavior; `BlockFetchBlockResponse` wraps the supplied raw block and emits one response
+within an open batch. The existing `BlockFetchBlock` takes an already encoded
+block wrapper.
+
+| Flow | Scenario builder |
+| --- | --- |
+| Forward headers in NtN | `ChainSyncForwardScenarioNtN` |
+| Forward blocks in NtC | `ChainSyncForwardScenarioNtC` |
+| Rollback in either mode | `ChainSyncRollbackScenario` |
+| Intersection found or not found | `ChainSyncIntersectionScenario` |
+| Block range or no blocks | `BlockFetchScenario` |
+| Transaction IDs, bodies, and acknowledgement | `TxSubmissionScenario` |
+
+These finite scenarios end with the client's protocol termination message and
+do not close the connection. `ChainSyncScenario` retains its existing NtN
+behavior with a final `RequestNext` awaiting another response. Intersection
+success requires a point offered by the client. Transaction ID and body slices
+must describe matching transactions in the same order and have equal lengths;
+request counts cannot exceed the protocol's `uint16` limit. The final blocking
+transaction-ID request permits the client to send `Done`.
+
+Individual builders support ChainSync await/intersection responses, BlockFetch
+batch boundaries, LocalTxMonitor acquisition and replies, LocalStateQuery
+acquisition targets and results, PeerSharing, and parameterized KeepAlive
+cookies. `LocalStateQueryResult` accepts a CBOR-encodable result value;
+`LocalStateQueryQuery` preserves the typed query representation required by the
+mock's input comparison. Peers and captured transactions retain their protocol
+encoding, and callers supply valid ledger block and transaction content.
+
 ### Negative Test Cases
 
 To test scenarios where errors are expected, set the `ExpectedError` field on conversation entries:
