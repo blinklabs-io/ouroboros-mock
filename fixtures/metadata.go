@@ -43,6 +43,8 @@ const (
 	KindTransaction              Kind = "transaction"
 	KindTransactionID            Kind = "transaction-id"
 	KindTranslation              Kind = "translation"
+	KindSSC                      Kind = "ssc"
+	KindScript                   Kind = "script"
 )
 
 // Format identifies the fixture serialization format.
@@ -52,6 +54,7 @@ const (
 	FormatUnknown Format = "unknown"
 	FormatCBOR    Format = "cbor"
 	FormatHex     Format = "hex"
+	FormatHexDump Format = "hex-dump"
 	FormatJSON    Format = "json"
 	FormatJSONLD  Format = "jsonld"
 )
@@ -99,6 +102,15 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 	baseName := filepath.Base(normalizedPath)
 
 	switch {
+	case strings.HasPrefix(normalizedPath, byronSSCFixtureRoot):
+		switch baseName {
+		case "CommitmentsMap", "OpeningsMap", "SharesMap", "VssCertificatesMap":
+			return KindSSC, FormatHexDump, "byron"
+		}
+	case normalizedPath == plutusV1FixtureRoot+"alwayssucceeds.txt":
+		return KindScript, FormatHex, ""
+	case normalizedPath == plutusV1FixtureRoot+"alwayssucceeds.bin":
+		return KindScript, FormatCBOR, ""
 	case strings.HasPrefix(baseName, "Block_"):
 		return KindBlock, FormatCBOR, normalizeConsensusEra(
 			strings.TrimPrefix(baseName, "Block_"),
@@ -143,13 +155,12 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 			), eraFromPath(
 				normalizedPath,
 			)
-	default:
-		return KindUnknown, formatFromFilename(
-				baseName,
-			), eraFromPath(
-				normalizedPath,
-			)
 	}
+	return KindUnknown, formatFromFilename(
+			baseName,
+		), eraFromPath(
+			normalizedPath,
+		)
 }
 
 func formatFromFilename(name string) Format {
