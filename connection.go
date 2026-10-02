@@ -244,7 +244,7 @@ func (c *Connection) asyncLoop() {
 		case ConversationEntryClose:
 			c.Close()
 		case ConversationEntrySleep:
-			time.Sleep(entry.Duration)
+			c.processSleepEntry(entry)
 		default:
 			c.sendError(
 				fmt.Errorf(
@@ -377,4 +377,13 @@ func (m MockAddr) Network() string {
 
 func (m MockAddr) String() string {
 	return m.addr
+}
+
+func (c *Connection) processSleepEntry(entry ConversationEntrySleep) {
+	timer := time.NewTimer(entry.Duration)
+	select {
+	case <-timer.C:
+	case <-c.doneChan:
+		timer.Stop()
+	}
 }
