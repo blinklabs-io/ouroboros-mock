@@ -17,6 +17,7 @@ package ouroboros_mock
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
@@ -138,6 +139,11 @@ func TxSubmissionScenario(
 	count := len(ids)
 	if count > math.MaxUint16 {
 		return nil, errors.New("transaction count exceeds the protocol request limit")
+	}
+	for i, id := range ids {
+		if id.TxId.EraId != txs[i].EraId {
+			return nil, fmt.Errorf("transaction %d ID and body must have equal era IDs", i)
+		}
 	}
 	requestCount := uint16(count)
 	entries := []ConversationEntry{TxSubmissionInit()}

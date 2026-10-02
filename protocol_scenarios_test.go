@@ -17,6 +17,7 @@ package ouroboros_mock
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -430,4 +431,23 @@ func TestProtocolScenariosRejectInconsistentInputs(t *testing.T) {
 		make([]txsubmission.TxBody, 65536),
 	)
 	require.Error(t, err)
+}
+
+func TestTxSubmissionScenarioRejectsPairedEraMismatch(t *testing.T) {
+	ids := []txsubmission.TxIdAndSize{
+		{TxId: txsubmission.TxId{EraId: 3}},
+		{TxId: txsubmission.TxId{EraId: 6}},
+	}
+	for _, mismatch := range []int{0, 1} {
+		t.Run(fmt.Sprintf("transaction_%d", mismatch), func(t *testing.T) {
+			bodies := []txsubmission.TxBody{
+				{EraId: 3, TxBody: []byte{0x80}},
+				{EraId: 6, TxBody: []byte{0x80}},
+			}
+			bodies[mismatch].EraId++
+			entries, err := TxSubmissionScenario(ids, bodies)
+			require.ErrorContains(t, err, "equal era IDs")
+			require.Nil(t, entries)
+		})
+	}
 }
