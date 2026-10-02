@@ -58,6 +58,8 @@ Cardano API's `Script/PlutusScriptV1/alwayssucceeds.txt` and
 `58503a1d89a21fc9fc53d6a7cccef47341175a8f47636f57ccbdca2d`.
 The runner checks that identity and, when both captures are present, requires
 their decoded bytes to match. It does not evaluate the program.
+A single capture remains independently valid only when it has the pinned
+upstream hash; a missing counterpart does not bypass that check.
 
 The following inspected families stay with their source interfaces:
 
@@ -100,6 +102,10 @@ validates governance metadata, and walks every translation corpus case.
 The shared harness owns source classification, canonical manifest paths,
 file presence, and the following checks. Manifest entries must identify regular
 files and cannot repeat a path, including aliases containing `.` or `..`.
+Admission and reads resolve paths within the fixture root; symlinks that leave
+it are rejected. `NewFixture` preserves that root through `Path` and `RelPath`.
+A directly constructed fixture with only `Path` uses its parent directory as
+the root. Reads reject inconsistent path metadata and non-regular files.
 Execution failures retain the fixture repository, source path, payload kind,
 format, era, and underlying error for downstream diagnostics.
 

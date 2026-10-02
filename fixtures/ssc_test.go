@@ -143,6 +143,7 @@ func TestAnnotatedHexRejectsCorruptOffsetsAndChunks(t *testing.T) {
 			require.NoError(t, err)
 			_, err = fixture.DecodeHex()
 			require.ErrorContains(t, err, test.err)
+			require.ErrorContains(t, err, fixture.RelPath)
 		})
 	}
 }

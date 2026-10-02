@@ -166,3 +166,94 @@ func TestFixtureManifestRequiresRegularFiles(t *testing.T) {
 		)
 	}
 }
+func TestFixtureRootConfinesSymlinkAdmissionAndReads(t *testing.T) {
+	for _, parentLink := range []bool{false, true} {
+		name := "file"
+		if parentLink {
+			name = "parent"
+		}
+		t.Run(name, func(t *testing.T) {
+			root, outside := t.TempDir(), t.TempDir()
+			relPath := "cardano-api/capture.json"
+			path := filepath.Join(root, filepath.FromSlash(relPath))
+			outsideFile := filepath.Join(outside, "capture.json")
+			require.NoError(
+				t,
+				os.WriteFile(outsideFile, []byte("outside"), 0o600),
+			)
+			require.NoError(
+				t,
+				os.WriteFile(
+					filepath.Join(root, "manifest.txt"),
+					[]byte(relPath+"\n"),
+					0o600,
+				),
+			)
+			if parentLink {
+				require.NoError(t, os.Symlink(outside, filepath.Dir(path)))
+			} else {
+				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+				require.NoError(t, os.Symlink(outsideFile, path))
+			}
+			_, err := fixtures.CollectFixtureFiles(root)
+			require.Error(t, err)
+			fixture, err := fixtures.NewFixture(root, path)
+			require.NoError(t, err)
+			data, err := fixture.Read()
+			require.Error(t, err)
+			require.Empty(t, data)
+		})
+	}
+}
+
+func TestFixtureReadConfinesReplacedSymlink(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	relPath := "cardano-api/capture.json"
+	path := filepath.Join(root, filepath.FromSlash(relPath))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("inside"), 0o600))
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(root, "manifest.txt"),
+			[]byte(relPath+"\n"),
+			0o600,
+		),
+	)
+	collected, err := fixtures.CollectFixtures(root)
+	require.NoError(t, err)
+	require.Len(t, collected, 1)
+	data, err := collected[0].Read()
+	require.NoError(t, err)
+	require.Equal(t, []byte("inside"), data)
+	outsideFile := filepath.Join(outside, "capture.json")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("outside"), 0o600))
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, os.Symlink(outsideFile, path))
+	data, err = collected[0].Read()
+	require.Error(t, err)
+	require.Empty(t, data)
+}
+
+func TestFixtureReadPathOwnership(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "capture.json")
+	require.NoError(t, os.WriteFile(path, []byte("capture"), 0o600))
+	for _, fixture := range []fixtures.Fixture{
+		{Path: path},
+		{Path: path, RelPath: "capture.json"},
+	} {
+		data, err := fixture.Read()
+		require.NoError(t, err)
+		require.Equal(t, []byte("capture"), data)
+	}
+	for _, relPath := range []string{"../capture.json", "other.json", "other/capture.json"} {
+		_, err := (fixtures.Fixture{Path: path, RelPath: relPath}).Read()
+		require.Error(t, err)
+	}
+	inside := filepath.Join(root, "alias.json")
+	require.NoError(t, os.Symlink("capture.json", inside))
+	data, err := (fixtures.Fixture{Path: inside}).Read()
+	require.NoError(t, err)
+	require.Equal(t, []byte("capture"), data)
+}

@@ -138,3 +138,29 @@ func TestScriptExecutionRejectsAlteredPayloadAndPair(t *testing.T) {
 		})
 	}
 }
+
+func TestScriptExecutionPinsUnpairedCapture(t *testing.T) {
+	for _, test := range []struct {
+		name, text, err string
+	}{
+		{name: "upstream hash", text: "4701000022220011"},
+		{name: "altered hash", text: "4100", err: "script hash"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := fixtureHarness(t, map[string][]byte{
+				scriptRoot + "alwayssucceeds.txt": []byte(test.text),
+			})
+			result, err := harness.ExecuteFixture(
+				scriptRoot + "alwayssucceeds.txt",
+			)
+			require.NoError(t, err)
+			if test.err == "" {
+				require.NoError(t, result.Error)
+				require.True(t, result.Success)
+			} else {
+				require.ErrorContains(t, result.Error, test.err)
+				require.False(t, result.Success)
+			}
+		})
+	}
+}
