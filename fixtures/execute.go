@@ -397,10 +397,6 @@ func executeHeaderFixture(
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindBlock); ok {
-		if counterpart.Repo == RepoOuroborosConsensus &&
-			counterpart.Era == "dijkstra" {
-			return 1, nil
-		}
 		block, err := counterpart.DecodeLedgerBlock()
 		if err != nil {
 			return 0, fmt.Errorf(
