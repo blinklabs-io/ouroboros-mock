@@ -452,3 +452,31 @@ func firstSliceDifference(
 	}
 	return -1, "", ""
 }
+
+func TestConsensusBlockFixturesDecodeFully(t *testing.T) {
+	t.Parallel()
+	harness := fixtures.NewHarness(fixtures.HarnessConfig{})
+	blocks, err := harness.Collect()
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+	checked := 0
+	for _, fixture := range blocks {
+		if fixture.Repo != fixtures.RepoOuroborosConsensus ||
+			fixture.Kind != fixtures.KindBlock {
+			continue
+		}
+		checked++
+		block, err := fixture.DecodeLedgerBlock()
+		if err != nil {
+			t.Errorf("%s: full block decode failed: %v", fixture.RelPath, err)
+			continue
+		}
+		if block.Hash().String() == "" {
+			t.Errorf("%s: decoded block has no hash", fixture.RelPath)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no consensus block fixtures collected")
+	}
+}

@@ -39,7 +39,8 @@ Intentional exclusions:
   from the pinned `cardano-blueprint` submodule; see `conformance/CORPUS.md`.
 - Plutus conformance data is managed separately in `plutigo`
 - `SerialisedBlock_*` and `SerialisedHeader_*` placeholder files from
-  `ouroboros-consensus` are not imported
+  `ouroboros-consensus` are not imported; upstream publishes no full Dijkstra
+  block golden, so the corpus carries no Dijkstra `Block_*` fixture
 
 ### Curated source contracts
 
@@ -171,8 +172,6 @@ if tx.Type() != int(ledger.TxTypeConway) {
 
 Current upstream exceptions are encoded in the harness rather than ignored:
 
-- the current `Block_Dijkstra` consensus payload is truncated upstream, so the
-  runner validates the outer wrapper/header path instead of full block decode
 - The upstream `GenTx_Byron` and `GenTxId_Byron` files are not a matching
   transaction/ID pair. The ID value matches the GenTx's referenced input ID,
   not its transaction-body hash. Both fixtures are decoded and checked

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"testing"
 
@@ -273,10 +272,6 @@ func executeBlockFixture(
 	fixture Fixture,
 	fixtureMap map[string]Fixture,
 ) (int, error) {
-	if fixture.Repo == RepoOuroborosConsensus && fixture.Era == "dijkstra" {
-		return executeDijkstraConsensusBlockFixture(fixture, fixtureMap)
-	}
-
 	block, err := fixture.DecodeLedgerBlock()
 	if err != nil {
 		return 0, fmt.Errorf(
@@ -775,104 +770,6 @@ func executeTranslationFixture(fixture Fixture) (int, error) {
 	}
 
 	return len(cases), nil
-}
-
-func executeDijkstraConsensusBlockFixture(
-	fixture Fixture,
-	fixtureMap map[string]Fixture,
-) (int, error) {
-	wrappedBytes, err := fixture.ConsensusBlockBytes()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to extract consensus block wrapper %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	dec, err := cbor.NewStreamDecoder(wrappedBytes)
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to create consensus block stream decoder %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	arrayLen, _, _, err := dec.DecodeArrayHeader()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode Dijkstra block wrapper header %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	if arrayLen != 2 {
-		return 0, fmt.Errorf(
-			"unexpected Dijkstra block wrapper width for %s: got %d want 2",
-			fixture.RelPath,
-			arrayLen,
-		)
-	}
-	var era uint
-	if _, _, err := dec.Decode(&era); err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode Dijkstra block era %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	expectedType, err := fixture.LedgerBlockType()
-	if err != nil {
-		return 0, err
-	}
-	if era != expectedType {
-		return 0, fmt.Errorf(
-			"unexpected one-era block identifier for %s: got %d want %d",
-			fixture.RelPath,
-			era,
-			expectedType,
-		)
-	}
-	if dec.EOF() {
-		return 0, fmt.Errorf(
-			"decoded Dijkstra block payload is empty: %s",
-			fixture.RelPath,
-		)
-	}
-	if _, _, err := dec.Skip(); err != nil {
-		// The streaming decoder can report io.ErrUnexpectedEOF on valid CBOR
-		// payloads that the non-streaming decoder accepts; tolerate it here.
-		if !errors.Is(err, io.ErrUnexpectedEOF) {
-			return 0, fmt.Errorf(
-				"failed to validate Dijkstra block payload %s: %w",
-				fixture.RelPath,
-				err,
-			)
-		}
-	} else if !dec.EOF() {
-		return 0, fmt.Errorf(
-			"unexpected trailing data in Dijkstra block wrapper %s",
-			fixture.RelPath,
-		)
-	}
-
-	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindHeader); ok {
-		header, err := counterpart.DecodeLedgerHeader()
-		if err != nil {
-			return 0, fmt.Errorf(
-				"failed to decode related header fixture %s: %w",
-				counterpart.RelPath,
-				err,
-			)
-		}
-		if len(header.Cbor()) == 0 {
-			return 0, fmt.Errorf(
-				"decoded related header has empty CBOR: %s",
-				counterpart.RelPath,
-			)
-		}
-	}
-
-	return 1, nil
 }
 
 func executeDijkstraConsensusTransactionFixture(
