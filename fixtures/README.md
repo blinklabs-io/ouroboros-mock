@@ -195,6 +195,20 @@ Use `GenerateBabbageChainWithProtocolVersion` when a test needs valid Babbage
 bytes with a specific header protocol version, including an unknown version for
 fail-closed classification coverage.
 
+`NewBlockBuilder(era)` builds one block for any era in `SupportedEras`. Set the
+block number, slot, previous hash, issuer key, and protocol version, and add
+transactions with `WithTransactions`: each carries its era's transaction CBOR
+(for example a `conway.ConwayTransaction`), and a transaction whose validity
+flag is false is listed as invalid. The header's body size and hash are derived
+from the encoded body, and `Build` returns the block as `gouroboros` decodes it;
+`BuildHeader` returns its header. Byron builds an epoch boundary block, or a
+regular block with `WithByronMainBlock`; Byron blocks carry no transactions.
+Dijkstra blocks use the pinned CDDL shape described below. `NewSequence(era)`
+builds connected blocks one at a time with `Next` or in bulk with `Blocks`,
+`GenesisBlock` returns the first block of an era, and `RandomBlock(era, seed)`
+returns a block whose fields are drawn from the seed. The `Generate*Chain`
+functions are built on these.
+
 `NewDijkstraBlockBuilder` builds one Dijkstra block in the pinned Dijkstra CDDL
 shape: a non-segregated body with the optional Leios and Peras certificate
 slots, and a 12-field header body whose `block_body_contains_leios_cert` flag
