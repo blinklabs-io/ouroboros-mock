@@ -27,6 +27,7 @@ type GenesisKeyDelegationBuilder struct {
 	vrfKeyHash          []byte
 }
 
+// NewGenesisKeyDelegation returns an empty genesis key delegation builder.
 func NewGenesisKeyDelegation() *GenesisKeyDelegationBuilder {
 	return &GenesisKeyDelegationBuilder{}
 }
@@ -55,6 +56,8 @@ func (b *GenesisKeyDelegationBuilder) WithVrfKeyHash(
 	return b
 }
 
+// Build returns the certificate, or an error when a hash has the wrong
+// length.
 func (b *GenesisKeyDelegationBuilder) Build() (*lcommon.GenesisKeyDelegationCertificate, error) {
 	switch {
 	case len(b.genesisHash) != hashSize:
