@@ -15,11 +15,9 @@
 package fixtures
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 
-	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -48,91 +46,9 @@ func GenerateConwayChain(
 	startSlot, slotIncrement uint64,
 	count int,
 ) ([]ledger.Block, error) {
-	if count <= 0 {
-		return []ledger.Block{}, nil
-	}
-	// All generated blocks have identical empty bodies, so the four component
-	// CBORs and the resulting block body hash are constant across the chain.
-	emptyTxsCbor, err := cbor.Encode([]ledger.ConwayTransactionBody{})
-	if err != nil {
-		return nil, fmt.Errorf("encode empty tx bodies: %w", err)
-	}
-	emptyWitsCbor, err := cbor.Encode([]ledger.ConwayTransactionWitnessSet{})
-	if err != nil {
-		return nil, fmt.Errorf("encode empty witnesses: %w", err)
-	}
-	emptyAux, err := emptyAuxiliaryDataSet()
-	if err != nil {
-		return nil, err
-	}
-	emptyAuxCbor, err := cbor.Encode(emptyAux)
-	if err != nil {
-		return nil, fmt.Errorf("encode empty metadata set: %w", err)
-	}
-	emptyInvalidCbor, err := cbor.Encode([]uint{})
-	if err != nil {
-		return nil, fmt.Errorf("encode empty invalid txs: %w", err)
-	}
-	bodyHash := ComputeBlockBodyHash(
-		emptyTxsCbor, emptyWitsCbor, emptyAuxCbor, emptyInvalidCbor,
+	return generateEraChain(
+		6, startBlockNumber, prevHash, startSlot, slotIncrement, count,
 	)
-	bodySize := computeBlockBodySize(
-		emptyTxsCbor,
-		emptyWitsCbor,
-		emptyAuxCbor,
-		emptyInvalidCbor,
-	)
-	blocks := make([]ledger.Block, 0, count)
-	currentPrev := prevHash
-	for i := range count {
-		body := babbage.BabbageBlockHeaderBody{
-			BlockNumber: startBlockNumber + uint64(i),
-			Slot:        startSlot + uint64(i)*slotIncrement,
-			PrevHash:    currentPrev,
-			IssuerVkey:  common.IssuerVkey{},
-			VrfKey:      make([]byte, 32),
-			VrfResult: common.VrfResult{
-				Output: make([]byte, 64),
-				Proof:  make([]byte, 80),
-			},
-			BlockBodySize: bodySize,
-			BlockBodyHash: bodyHash,
-			OpCert: babbage.BabbageOpCert{
-				HotVkey:   make([]byte, 32),
-				Signature: make([]byte, 64),
-			},
-			ProtoVersion: babbage.BabbageProtoVersion{Major: 9, Minor: 0},
-		}
-		block := &ledger.ConwayBlock{
-			BlockHeader: &ledger.ConwayBlockHeader{
-				BabbageBlockHeader: ledger.BabbageBlockHeader{
-					Body:      body,
-					Signature: make([]byte, 448),
-				},
-			},
-			TransactionMetadataSet: emptyAux,
-		}
-		blockCbor, err := cbor.Encode(block)
-		if err != nil {
-			return nil, fmt.Errorf("encode block %d: %w", i, err)
-		}
-		// Re-decode so the returned block carries the canonical Cbor() a
-		// consumer's reconcile path will observe, and so Hash() reads from the
-		// post-round-trip header bytes.
-		decoded, err := conway.NewConwayBlockFromCbor(blockCbor)
-		if err != nil {
-			return nil, fmt.Errorf("decode generated block %d: %w", i, err)
-		}
-		if !bytes.Equal(decoded.Cbor(), blockCbor) {
-			return nil, fmt.Errorf(
-				"block %d Cbor mismatch after round-trip",
-				i,
-			)
-		}
-		blocks = append(blocks, decoded)
-		currentPrev = decoded.Hash()
-	}
-	return blocks, nil
 }
 
 // GenerateConwayChainWithTransactions builds count connected Conway blocks,
@@ -147,95 +63,27 @@ func GenerateConwayChainWithTransactions(
 	startSlot, slotIncrement uint64,
 	count int,
 ) ([]ledger.Block, error) {
-	if count <= 0 {
-		return []ledger.Block{}, nil
-	}
-	blocks := make([]ledger.Block, 0, count)
+	blocks := make([]ledger.Block, 0, max(count, 0))
 	currentPrev := prevHash
-	for i := range count {
-		transactionBody, err := newConwayFixtureTransactionBody(
-			uint64(i),
-		)
+	for i := range max(count, 0) {
+		transactionBody, err := newConwayFixtureTransactionBody(uint64(i))
 		if err != nil {
 			return nil, fmt.Errorf("build transaction %d: %w", i, err)
 		}
-		transactionBodies := []ledger.ConwayTransactionBody{transactionBody}
-		transactionWitnessSets := []ledger.ConwayTransactionWitnessSet{{}}
-		txsCbor, err := cbor.Encode(transactionBodies)
+		block, err := NewBlockBuilder(ledger.GetEraById(6)).
+			WithBlockNumber(startBlockNumber + uint64(i)).
+			WithSlot(startSlot + uint64(i)*slotIncrement).
+			WithPreviousHash(currentPrev).
+			WithTransactions(&conway.ConwayTransaction{
+				Body:      transactionBody,
+				TxIsValid: true,
+			}).
+			Build()
 		if err != nil {
-			return nil, fmt.Errorf("encode transaction bodies %d: %w", i, err)
+			return nil, fmt.Errorf("build block %d: %w", i, err)
 		}
-		witsCbor, err := cbor.Encode(transactionWitnessSets)
-		if err != nil {
-			return nil, fmt.Errorf("encode witnesses %d: %w", i, err)
-		}
-		emptyAux, err := emptyAuxiliaryDataSet()
-		if err != nil {
-			return nil, err
-		}
-		auxCbor, err := cbor.Encode(emptyAux)
-		if err != nil {
-			return nil, fmt.Errorf("encode metadata set %d: %w", i, err)
-		}
-		invalidCbor, err := cbor.Encode([]uint{})
-		if err != nil {
-			return nil, fmt.Errorf("encode invalid transactions %d: %w", i, err)
-		}
-		bodyHash := ComputeBlockBodyHash(
-			txsCbor, witsCbor, auxCbor, invalidCbor,
-		)
-		bodySize := computeBlockBodySize(
-			txsCbor, witsCbor, auxCbor, invalidCbor,
-		)
-		body := babbage.BabbageBlockHeaderBody{
-			BlockNumber: startBlockNumber + uint64(i),
-			Slot:        startSlot + uint64(i)*slotIncrement,
-			PrevHash:    currentPrev,
-			IssuerVkey:  common.IssuerVkey{},
-			VrfKey:      make([]byte, 32),
-			VrfResult: common.VrfResult{
-				Output: make([]byte, 64),
-				Proof:  make([]byte, 80),
-			},
-			BlockBodySize: bodySize,
-			BlockBodyHash: bodyHash,
-			OpCert: babbage.BabbageOpCert{
-				HotVkey:   make([]byte, 32),
-				Signature: make([]byte, 64),
-			},
-			ProtoVersion: babbage.BabbageProtoVersion{Major: 9, Minor: 0},
-		}
-		block := &ledger.ConwayBlock{
-			BlockHeader: &ledger.ConwayBlockHeader{
-				BabbageBlockHeader: ledger.BabbageBlockHeader{
-					Body:      body,
-					Signature: make([]byte, 448),
-				},
-			},
-			TransactionBodies:      transactionBodies,
-			TransactionWitnessSets: transactionWitnessSets,
-			TransactionMetadataSet: emptyAux,
-			InvalidTransactions:    []uint{},
-		}
-		blockCbor, err := cbor.Encode(block)
-		if err != nil {
-			return nil, fmt.Errorf("encode block %d: %w", i, err)
-		}
-		// Re-decode so the returned block carries the canonical Cbor() a
-		// consumer's reconcile path will observe, and so Hash() reads from the
-		// post-round-trip header bytes.
-		decoded, err := conway.NewConwayBlockFromCbor(blockCbor)
-		if err != nil {
-			return nil, fmt.Errorf("decode generated block %d: %w", i, err)
-		}
-		if !bytes.Equal(decoded.Cbor(), blockCbor) {
-			return nil, fmt.Errorf(
-				"block %d Cbor mismatch after round-trip",
-				i,
-			)
-		}
-		blocks = append(blocks, decoded)
-		currentPrev = decoded.Hash()
+		blocks = append(blocks, block)
+		currentPrev = block.Hash()
 	}
 	return blocks, nil
 }
@@ -272,17 +120,6 @@ func newConwayFixtureTransactionBody(
 		}},
 		TxFee: 1,
 	}, nil
-}
-
-// emptyAuxiliaryDataSet returns an empty auxiliary_data_set that encodes as
-// the empty map the era CDDL requires; gouroboros encodes a zero
-// TransactionMetadataSet as CBOR null.
-func emptyAuxiliaryDataSet() (common.TransactionMetadataSet, error) {
-	var set common.TransactionMetadataSet
-	if _, err := cbor.Decode([]byte{0xa0}, &set); err != nil {
-		return set, fmt.Errorf("decode empty auxiliary data set: %w", err)
-	}
-	return set, nil
 }
 
 // ComputeBlockBodyHash returns
