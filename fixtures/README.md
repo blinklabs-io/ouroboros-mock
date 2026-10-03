@@ -176,9 +176,6 @@ Current upstream exceptions are encoded in the harness rather than ignored:
   transaction/ID pair. The ID value matches the GenTx's referenced input ID,
   not its transaction-body hash. Both fixtures are decoded and checked
   independently; pair comparisons use the explicit unpaired-fixture metadata.
-- Dijkstra `GenTx_*` fixtures currently validate through payload/body-hash
-  semantics because the imported fixture shape is ahead of full
-  `gouroboros` transaction decoding support
 
 ## Generated block chains
 
