@@ -432,3 +432,49 @@ func TestDijkstraTransactionBuilderRejectsInvalidAccountFields(t *testing.T) {
 		Build()
 	require.ErrorContains(t, err, "requires a lower or upper bound")
 }
+
+// A decoded body keeps its original bytes, so each account setter must drop
+// them or Build would encode the body without the new field.
+func TestDijkstraTransactionBuilderAccountFieldsReplaceDecodedBodyCBOR(
+	t *testing.T,
+) {
+	t.Parallel()
+	account := testAccountAddress(t, 1)
+	exact := uint64(10)
+	for _, test := range []struct {
+		name string
+		key  uint64
+		set  func(*fixtures.DijkstraTransactionBuilder) *fixtures.DijkstraTransactionBuilder
+	}{
+		{"direct deposit", 25, func(b *fixtures.DijkstraTransactionBuilder) *fixtures.DijkstraTransactionBuilder {
+			return b.WithDirectDeposit(account, 5)
+		}},
+		{"balance interval", 26, func(b *fixtures.DijkstraTransactionBuilder) *fixtures.DijkstraTransactionBuilder {
+			return b.WithAccountBalanceInterval(
+				account,
+				dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+			)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			bodyCBOR, err := cbor.Encode(map[uint64]any{
+				0: []any{},
+				1: []any{},
+				2: uint64(0),
+			})
+			require.NoError(t, err)
+			var body dijkstra.DijkstraTransactionBody
+			_, err = cbor.Decode(bodyCBOR, &body)
+			require.NoError(t, err)
+			require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+
+			tx, err := test.set(
+				fixtures.NewDijkstraTransactionBuilder().WithBody(body),
+			).Build()
+			require.NoError(t, err)
+			_, fields := blockTransactionFields(t, tx)
+			require.Contains(t, fields, test.key)
+		})
+	}
+}
