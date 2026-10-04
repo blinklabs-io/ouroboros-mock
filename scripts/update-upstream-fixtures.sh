@@ -8,7 +8,7 @@ ROOT_DIR=$(
 DEST_DIR="${ROOT_DIR}/fixtures/upstream"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ouroboros-mock-fixtures.XXXXXX")
 
-OUROBOROS_CONSENSUS_REVISION=${OUROBOROS_CONSENSUS_REVISION:-54765ad9f916793ebf817b74def1ab4e8394ba63}
+OUROBOROS_CONSENSUS_REVISION=${OUROBOROS_CONSENSUS_REVISION:-259e00754b326a1e645b94c084815aab7f3797c2}
 CARDANO_LEDGER_REVISION=${CARDANO_LEDGER_REVISION:-82a4485f4b34da4752538cda7504aef346b9953b}
 CARDANO_API_REVISION=${CARDANO_API_REVISION:-c57b8893544aca0855b70bc07330005b7b514054}
 CARDANO_NODE_REVISION=${CARDANO_NODE_REVISION:-126efd54008b8f0f33b236a2fab43a16a1f3b4f1}
@@ -121,8 +121,10 @@ consensus_files=(
 )
 
 for era in Shelley Allegra Mary Alonzo Babbage Conway Dijkstra; do
+	if [[ "${era}" != "Dijkstra" ]]; then
+		consensus_files+=("${consensus_prefix}/Block_${era}")
+	fi
 	consensus_files+=(
-		"${consensus_prefix}/Block_${era}"
 		"${consensus_prefix}/Header_${era}"
 		"${consensus_prefix}/GenTx_${era}"
 		"${consensus_prefix}/GenTxId_${era}"

@@ -298,6 +298,8 @@ type PoolRegistrationBuilder struct {
 func NewPoolRegistration(network uint) *PoolRegistrationBuilder {
 	return &PoolRegistrationBuilder{
 		margin:  cbor.Rat{Rat: big.NewRat(0, 1)},
+		owners:  []lcommon.AddrKeyHash{},
+		relays:  []lcommon.PoolRelay{},
 		network: network,
 	}
 }
@@ -384,7 +386,7 @@ func (b *PoolRegistrationBuilder) WithOwners(
 func (b *PoolRegistrationBuilder) WithRelays(
 	relays ...lcommon.PoolRelay,
 ) *PoolRegistrationBuilder {
-	b.relays = append([]lcommon.PoolRelay(nil), relays...)
+	b.relays = append([]lcommon.PoolRelay{}, relays...)
 	return b
 }
 

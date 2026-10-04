@@ -16,6 +16,9 @@ package fixtures_test
 
 import (
 	"bytes"
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -160,9 +163,8 @@ func TestBlockBuilderProtocolVersion(t *testing.T) {
 			if _, err := cbor.Decode(header[0], &body); err != nil {
 				t.Fatal(err)
 			}
-			// The protocol version is the last header body field before
-			// the operational certificate in Shelley-style headers and a
-			// trailing [major, minor] pair in Praos-style headers.
+			// Shelley-style headers end in major/minor fields after the
+			// operational certificate; Praos headers end in their pair.
 			var version []uint64
 			if _, err := cbor.Decode(body[len(body)-1], &version); err != nil {
 				var major, minor uint64
@@ -507,5 +509,99 @@ func TestBlockBuilderOverridesBodySizeAndHash(t *testing.T) {
 			WithBodyHash(wantHash).Build(); err == nil {
 			t.Errorf("%s accepted a body hash override", era.Name)
 		}
+	}
+}
+
+func TestGenerateByronChainPreservesEmptyAndAlignmentContracts(t *testing.T) {
+	t.Parallel()
+	era := ledger.GetEraById(byron.EraIdByron)
+	for _, count := range []int{-1, 0} {
+		blocks, err := fixtures.GenerateChain(
+			era,
+			0,
+			common.Blake2b256{},
+			1,
+			1,
+			count,
+		)
+		if err != nil || blocks == nil || len(blocks) != 0 {
+			t.Fatalf(
+				"count%d returned %v, %v; want empty nonnil chain",
+				count,
+				blocks,
+				err,
+			)
+		}
+	}
+	for _, slots := range [][2]uint64{{1, 0}, {0, 1}, {1, 1}} {
+		_, err := fixtures.GenerateChain(
+			era,
+			0,
+			common.Blake2b256{},
+			slots[0],
+			slots[1],
+			1,
+		)
+		want := fmt.Sprintf(
+			"byron fixture slots must be epoch-aligned: start=%d increment=%d",
+			slots[0],
+			slots[1],
+		)
+		if err == nil || err.Error() != want {
+			t.Fatalf("alignment error %v, want%s", err, want)
+		}
+	}
+	blocks, err := fixtures.GenerateChain(
+		era,
+		0,
+		common.Blake2b256{},
+		byron.ByronSlotsPerEpoch,
+		byron.ByronSlotsPerEpoch,
+		2,
+	)
+	if err != nil || len(blocks) != 2 {
+		t.Fatalf("aligned chain: %v, %v", blocks, err)
+	}
+}
+
+func TestSequenceRejectsNumberAndSlotOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		number, slot, increment uint64
+		message                 string
+	}{
+		{"block_number", math.MaxUint64, 0, 1, "block number range overflows uint64"},
+		{"slot", 0, math.MaxUint64, 1, "slot range overflows uint64"},
+		{"slot_increment", 0, math.MaxUint64 - 1, 2, "slot range overflows uint64"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sequence := fixtures.NewSequence(ledger.GetEraById(1)).
+				WithStart(tc.number, tc.slot, common.Blake2b256{}).
+				WithSlotIncrement(tc.increment)
+			first, err := sequence.Next()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.BlockNumber() != tc.number || first.SlotNumber() != tc.slot {
+				t.Fatal("first representable block changed")
+			}
+			block, err := sequence.Next()
+			if err == nil || !strings.Contains(err.Error(), tc.message) || block != nil {
+				t.Fatalf("overflow returned block=%T error=%v", block, err)
+			}
+			sequence.WithStart(0, 0, common.Blake2b256{})
+			reset, err := sequence.Next()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reset.BlockNumber() != 0 || reset.SlotNumber() != 0 {
+				t.Fatal("explicit start did not reset sequence")
+			}
+			blocks, err := fixtures.GenerateChain(ledger.GetEraById(1),
+				tc.number, common.Blake2b256{}, tc.slot, tc.increment, 2)
+			if err == nil || !strings.Contains(err.Error(), tc.message) || blocks != nil {
+				t.Fatalf("overflow bulk returned %d blocks error=%v", len(blocks), err)
+			}
+		})
 	}
 }

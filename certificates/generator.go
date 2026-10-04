@@ -16,16 +16,19 @@ package certificates
 
 import (
 	"encoding/binary"
+	"math/big"
 	"math/rand/v2"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 )
 
 // Generator produces pseudo-random certificate inputs and certificates. Two
-// generators created with the same seed produce the same sequence.
+// generators created with the same seed produce the same sequence within
+// a Go release.
 type Generator struct {
-	source *rand.ChaCha8
-	rng    *rand.Rand
+	source  *rand.ChaCha8
+	rng     *rand.Rand
+	network uint
 }
 
 // NewGenerator returns a generator seeded with seed.
@@ -33,8 +36,18 @@ func NewGenerator(seed uint64) *Generator {
 	var chachaSeed [32]byte
 	binary.LittleEndian.PutUint64(chachaSeed[:], seed)
 	source := rand.NewChaCha8(chachaSeed)
-	//nolint:gosec // deterministic test fixtures do not need cryptographic randomness.
-	return &Generator{source: source, rng: rand.New(source)}
+	//nolint:gosec // deterministic fixture randomness.
+	return &Generator{
+		source:  source,
+		rng:     rand.New(source),
+		network: lcommon.AddressNetworkTestnet,
+	}
+}
+
+// WithNetwork sets the network ID of generated pool reward accounts.
+func (g *Generator) WithNetwork(network uint) *Generator {
+	g.network = network
+	return g
 }
 
 // KeyHash returns a random 28-byte hash, the width of a stake credential,
@@ -64,7 +77,7 @@ var certificateKinds = []func(g *Generator) (lcommon.Certificate, error){
 			Build()
 	},
 	func(g *Generator) (lcommon.Certificate, error) {
-		return NewPoolRegistration(lcommon.AddressNetworkTestnet).
+		return NewPoolRegistration(g.network).
 			WithOperator(g.KeyHash()).
 			WithVrfKeyHash(g.bytes(lcommon.Blake2b256Size)).
 			WithPledge(g.amount()).
@@ -85,6 +98,16 @@ var certificateKinds = []func(g *Generator) (lcommon.Certificate, error){
 			WithGenesisHash(g.KeyHash()).
 			WithGenesisDelegateHash(g.KeyHash()).
 			WithVrfKeyHash(g.bytes(lcommon.Blake2b256Size)).
+			Build()
+	},
+	func(g *Generator) (lcommon.Certificate, error) {
+		builder := NewMoveInstantaneousRewards(g.rng.UintN(2))
+		if g.rng.IntN(2) == 0 {
+			return builder.WithOtherPot(g.amount()).Build()
+		}
+		return builder.
+			WithRewardKey(g.KeyHash(), big.NewInt(g.rng.Int64N(1<<40)-(1<<39))).
+			WithRewardScript(g.KeyHash(), big.NewInt(g.rng.Int64N(1<<40)-(1<<39))).
 			Build()
 	},
 	func(g *Generator) (lcommon.Certificate, error) {

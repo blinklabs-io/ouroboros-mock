@@ -39,7 +39,9 @@ Intentional exclusions:
   from the pinned `cardano-blueprint` submodule; see `conformance/CORPUS.md`.
 - Plutus conformance data is managed separately in `plutigo`
 - `SerialisedBlock_*` and `SerialisedHeader_*` placeholder files from
-  `ouroboros-consensus` are not imported
+  `ouroboros-consensus` are not imported. The pinned revision has no full
+  `Block_Dijkstra` capture; current Dijkstra blocks are built and decoded
+  directly by the block builder tests.
 
 ### Curated source contracts
 
@@ -112,6 +114,7 @@ format, era, and underlying error for downstream diagnostics.
 | Fixture family | Shared harness checks | Downstream implementation checks |
 | --- | --- | --- |
 | Blocks and headers | Decode supported era payloads; check paired era, hash, slot and block number | Ledger transitions, consensus acceptance, body proofs and cryptographic validity |
+| Curated consensus `Header_Dijkstra` | Decode the producer's generic ten-field Praos header and check the wrapper era | Current Leios ledger header decoding and consensus acceptance |
 | Transactions and IDs | Decode supported payloads; compare paired transaction hashes except explicitly unpaired captures | UTxO rules, fees, witnesses, scripts and transaction acceptance |
 | Genesis and protocol parameters | Decode genesis values, derive parameter values, decode and apply parameter updates | Epoch transitions and effects on ledger state |
 | Governance metadata | Validate the imported metadata schema and expected invalid metadata failures | Anchor retrieval and governance state transitions |
@@ -171,15 +174,16 @@ if tx.Type() != int(ledger.TxTypeConway) {
 
 Current upstream exceptions are encoded in the harness rather than ignored:
 
-- the current `Block_Dijkstra` consensus payload is truncated upstream, so the
-  runner validates the outer wrapper/header path instead of full block decode
 - The upstream `GenTx_Byron` and `GenTxId_Byron` files are not a matching
   transaction/ID pair. The ID value matches the GenTx's referenced input ID,
   not its transaction-body hash. Both fixtures are decoded and checked
   independently; pair comparisons use the explicit unpaired-fixture metadata.
-- Dijkstra `GenTx_*` fixtures currently validate through payload/body-hash
-  semantics because the imported fixture shape is ahead of full
-  `gouroboros` transaction decoding support
+- The curated consensus `Header_Dijkstra` comes from
+  `examplesDijkstra` through `fromShelleyLedgerExamplesPraos`. That producer
+  constructs a generic ten-field Praos `HeaderBody`. The harness validates
+  that exact producer family with the Praos header codec and retains the
+  consensus era tag. Full current Dijkstra ledger headers use the separate
+  twelve-field Leios header decoder.
 
 ## Generated block chains
 
@@ -207,10 +211,11 @@ Dijkstra blocks use the pinned CDDL shape described below. `NewSequence(era)`
 builds connected blocks one at a time with `Next` or in bulk with `Blocks`,
 `GenesisBlock` returns the first block of an era, and `RandomBlock(era, seed)`
 returns a block whose fields are drawn from the seed. The `Generate*Chain`
-functions are built on these.
+functions for Shelley through Conway use the same sequence builder.
+`GenerateDijkstraChain` constructs Dijkstra blocks directly.
 
-`NewDijkstraBlockBuilder` builds one Dijkstra block in the pinned Dijkstra CDDL
-shape: a non-segregated body with the optional Leios and Peras certificate
+`NewDijkstraBlockBuilder` builds one Dijkstra block in the canonical
+dependency's Leios prototype CDDL shape: a non-segregated body with the optional Leios and Peras certificate
 slots, and a 12-field header body whose `block_body_contains_leios_cert` flag
 follows the body's Leios certificate and whose `eb_announcement` is set with
 `WithEbAnnouncement`. It derives the body size and hash and decodes its output
@@ -220,8 +225,7 @@ transaction is encoded as the transaction builder encodes it. Both builders
 reject a transaction whose encoding lacks a required body key, carries an
 empty sub-transaction set, or uses a witness set key outside 0-7. `GenerateConwayToDijkstraChain` builds a connected chain
 spanning the PV12 era boundary from the same builder. `GenerateDijkstraChain`
-keeps the 10-field Babbage header body, which `ledger.DetermineBlockType`
-classifies; that function rejects the 12-field Dijkstra header body.
+uses the canonical Dijkstra header encoder.
 
 Use `NewDijkstraTransactionBuilder` to construct Dijkstra block
 transactions with guards, subtransactions, redeemers, metadata, and the

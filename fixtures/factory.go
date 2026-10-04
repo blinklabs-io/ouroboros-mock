@@ -54,8 +54,12 @@ func GenerateChain(
 			era.Name,
 		)
 	}
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
 	if era.Id == byron.EraIdByron &&
-		slotIncrement%byron.ByronSlotsPerEpoch != 0 {
+		(startSlot%byron.ByronSlotsPerEpoch != 0 ||
+			slotIncrement%byron.ByronSlotsPerEpoch != 0) {
 		return nil, fmt.Errorf(
 			"byron fixture slots must be epoch-aligned: start=%d increment=%d",
 			startSlot,

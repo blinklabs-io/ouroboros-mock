@@ -87,6 +87,9 @@ type SlotToTimeFunc func(uint64) (time.Time, error)
 // TimeToSlotFunc is a callback for converting time to slots
 type TimeToSlotFunc func(time.Time) (uint64, error)
 
+// EpochForSlotFunc maps a slot to its epoch using the configured era history.
+type EpochForSlotFunc func(uint64) (uint64, error)
+
 // PoolCurrentStateFunc is a callback for pool state lookups
 type PoolCurrentStateFunc func(lcommon.PoolKeyHash) (*lcommon.PoolRegistrationCertificate, *uint64, error)
 
@@ -145,8 +148,9 @@ type MockLedgerState struct {
 	stakeCredentialDeposits   map[RewardAccountKey]uint64 // credential -> original deposit
 
 	// SlotState callbacks
-	SlotToTimeCallback SlotToTimeFunc
-	TimeToSlotCallback TimeToSlotFunc
+	SlotToTimeCallback   SlotToTimeFunc
+	TimeToSlotCallback   TimeToSlotFunc
+	EpochForSlotCallback EpochForSlotFunc
 
 	// PoolState callbacks and state
 	PoolCurrentStateCallback PoolCurrentStateFunc
@@ -251,6 +255,15 @@ func (ls *MockLedgerState) TimeToSlot(t time.Time) (uint64, error) {
 		return ls.TimeToSlotCallback(t)
 	}
 	return 0, nil
+}
+
+// EpochForSlot returns the configured slot's epoch, or an error when no
+// epoch mapping has been supplied.
+func (ls *MockLedgerState) EpochForSlot(slot uint64) (uint64, error) {
+	if ls.EpochForSlotCallback == nil {
+		return 0, errors.New("ledger: epoch mapping is not configured")
+	}
+	return ls.EpochForSlotCallback(slot)
 }
 
 // PoolCurrentState returns the current state of a pool
@@ -662,7 +675,15 @@ func (b *LedgerStateBuilder) WithSlotToTime(
 	return b
 }
 
-// WithTimeToSlot sets the time to slot conversion callback
+// WithEpochForSlot sets the slot-to-epoch mapping used by ledger validation.
+func (b *LedgerStateBuilder) WithEpochForSlot(
+	fn EpochForSlotFunc,
+) *LedgerStateBuilder {
+	b.state.EpochForSlotCallback = fn
+	return b
+}
+
+// WithTimeToSlot sets the time to slot conversion callback.
 func (b *LedgerStateBuilder) WithTimeToSlot(
 	fn TimeToSlotFunc,
 ) *LedgerStateBuilder {

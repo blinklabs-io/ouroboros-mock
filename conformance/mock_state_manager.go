@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"math/big"
 	"slices"
 	"sort"
@@ -41,6 +42,7 @@ type MockStateManager struct {
 
 	// currentEpoch tracks the current epoch
 	currentEpoch uint64
+	epochForSlot ledger.EpochForSlotFunc
 
 	// utxos stores UTxOs by their ID string
 	utxos map[string]common.Utxo
@@ -116,6 +118,7 @@ func (m *MockStateManager) LoadInitialState(
 ) error {
 	m.protocolParams = pp
 	m.currentEpoch = state.CurrentEpoch
+	m.epochForSlot = nil
 
 	// Clear existing state
 	m.utxos = make(map[string]common.Utxo)
@@ -1520,6 +1523,28 @@ func applyParameterUpdate(
 	pp.Update(update)
 }
 
+// ConfigureEpochMapping supplies the active vector's slot-to-epoch history.
+// Loading or resetting state clears this configuration.
+func (m *MockStateManager) ConfigureEpochMapping(
+	initialEpoch, startSlot, epochLength uint64,
+) {
+	m.epochForSlot = func(slot uint64) (uint64, error) {
+		if epochLength == 0 {
+			return 0, errors.New("epoch length is zero")
+		}
+		if slot < startSlot {
+			return 0, fmt.Errorf(
+				"slot %d precedes configured start slot %d", slot, startSlot,
+			)
+		}
+		delta := (slot - startSlot) / epochLength
+		if delta > math.MaxUint64-initialEpoch {
+			return 0, errors.New("slot epoch exceeds uint64")
+		}
+		return initialEpoch + delta, nil
+	}
+}
+
 // GetStateProvider implements StateManager.GetStateProvider.
 func (m *MockStateManager) GetStateProvider() StateProvider {
 	return m.buildLedgerState()
@@ -1602,6 +1627,7 @@ func (m *MockStateManager) GetProtocolParameters() common.ProtocolParameters {
 func (m *MockStateManager) Reset() error {
 	m.protocolParams = nil
 	m.currentEpoch = 0
+	m.epochForSlot = nil
 	m.utxos = make(map[string]common.Utxo)
 	m.stakeRegistrations = make(map[ledger.RewardAccountKey]uint64)
 	m.stakeCredentialDeposits = make(map[ledger.RewardAccountKey]uint64)
@@ -1618,6 +1644,7 @@ func (m *MockStateManager) Reset() error {
 // buildLedgerState builds a MockLedgerState from current state.
 func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	builder := ledger.NewLedgerStateBuilder()
+	builder.WithEpochForSlot(m.epochForSlot)
 
 	// Set up UTxO lookup callback
 	utxos := m.utxos // capture for closure

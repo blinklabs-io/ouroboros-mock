@@ -76,3 +76,30 @@ func TestDatumAndRedeemerBuilders(t *testing.T) {
 		t.Fatalf("unexpected value: %#v", value)
 	}
 }
+
+func TestNativeScriptSignedThresholds(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		threshold int64
+		wire      []byte
+		valid     bool
+	}{
+		{"negative", -1, []byte{0x83, 0x03, 0x20, 0x80}, true},
+		{"zero", 0, []byte{0x83, 0x03, 0x00, 0x80}, true},
+		{"positive", 1, []byte{0x83, 0x03, 0x01, 0x80}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script, err := NewScriptAtLeast(tc.threshold)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(tc.wire, script.RawScriptBytes()) {
+				t.Fatalf("threshold wire: got %x want %x",
+					script.RawScriptBytes(), tc.wire)
+			}
+			if script.Evaluate(0, 0, 0, nil) != tc.valid {
+				t.Fatalf("threshold %d evaluation mismatch", tc.threshold)
+			}
+		})
+	}
+}

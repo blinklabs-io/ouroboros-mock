@@ -64,13 +64,11 @@ func TestGeneratorBuildsEveryEncodableCertificateType(t *testing.T) {
 		require.Equal(t, wire, decodedWire, "certificate type %d", cert.Type())
 		seen[cert.Type()] = true
 	}
-	// Move instantaneous rewards is the one type gouroboros decodes but does
-	// not encode in its wire shape, so no builder offers it.
 	want := map[uint]bool{}
-	for kind := lcommon.CertificateTypeStakeRegistration; kind <= lcommon.CertificateTypeUpdateDrep; kind++ {
-		if kind != lcommon.CertificateTypeMoveInstantaneousRewards {
-			want[uint(kind)] = true
-		}
+	firstKind := lcommon.CertificateTypeStakeRegistration
+	lastKind := lcommon.CertificateTypeUpdateDrep
+	for kind := firstKind; kind <= lastKind; kind++ {
+		want[uint(kind)] = true
 	}
 	require.Equal(t, want, seen)
 }
@@ -181,4 +179,84 @@ func mustEncode(t *testing.T, v any) []byte {
 	wire, err := cbor.Encode(v)
 	require.NoError(t, err)
 	return wire
+}
+
+func TestGeneratorSelectsPoolRewardNetwork(t *testing.T) {
+	t.Parallel()
+	networks := []uint{
+		lcommon.AddressNetworkTestnet,
+		lcommon.AddressNetworkMainnet,
+	}
+	for _, network := range networks {
+		generator := certificates.NewGenerator(7).WithNetwork(network)
+		seen := false
+		for range 2000 {
+			cert, err := generator.Certificate()
+			require.NoError(t, err)
+			if pool, ok := cert.(*lcommon.PoolRegistrationCertificate); ok {
+				wire, err := cbor.Encode(pool)
+				require.NoError(t, err)
+				var decoded lcommon.PoolRegistrationCertificate
+				_, err = cbor.Decode(wire, &decoded)
+				require.NoError(t, err)
+				gotNetwork, ok := decoded.RewardAccountNetworkId()
+				require.True(t, ok)
+				require.Equal(t, network, gotNetwork)
+				seen = true
+			}
+		}
+		require.True(t, seen)
+	}
+}
+
+func TestGeneratorIncludesBothMIRTargets(t *testing.T) {
+	t.Parallel()
+	generator := certificates.NewGenerator(7)
+	seenMap, seenTransfer := false, false
+	for range 2000 {
+		cert, err := generator.Certificate()
+		require.NoError(t, err)
+		if mir, ok := cert.(*lcommon.MoveInstantaneousRewardsCertificate); ok {
+			require.LessOrEqual(t, mir.Reward.Source, uint(1))
+			if mir.Reward.Rewards == nil {
+				seenTransfer = true
+			} else {
+				seenMap = true
+			}
+		}
+	}
+	require.True(t, seenMap)
+	require.True(t, seenTransfer)
+}
+
+func TestPoolLifecycleEncodesEmptyCollectionsAsArrays(t *testing.T) {
+	certs, err := certificates.PoolLifecycle(0, poolHash, vrfHash, 99)
+	require.NoError(t, err)
+	assertEmptyPoolCollections(t, certs[0])
+}
+
+func TestPoolBuilderPreservesExplicitEmptyCollections(t *testing.T) {
+	cert, err := certificates.NewPoolRegistration(0).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountKey(stakeHash).
+		WithOwners(stakeHash).
+		WithRelays(lcommon.PoolRelay{Type: 2}).
+		WithOwners().
+		WithRelays().
+		Build()
+	require.NoError(t, err)
+	assertEmptyPoolCollections(t, cert)
+}
+
+func assertEmptyPoolCollections(t *testing.T, cert lcommon.Certificate) {
+	t.Helper()
+	wire, err := cbor.Encode(cert)
+	require.NoError(t, err)
+	var fields []cbor.RawMessage
+	_, err = cbor.Decode(wire, &fields)
+	require.NoError(t, err)
+	require.Len(t, fields, 10)
+	require.Equal(t, cbor.RawMessage{0x80}, fields[7], "empty owner set")
+	require.Equal(t, cbor.RawMessage{0x80}, fields[8], "empty relay list")
 }

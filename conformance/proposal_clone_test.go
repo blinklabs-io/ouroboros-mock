@@ -115,7 +115,12 @@ func TestProposalComparisonUsesParameterFields(t *testing.T) {
 	for name, tc := range map[string]struct {
 		gotRaw, wantRaw []byte
 		mutate          func(*conway.ConwayProtocolParameterUpdate)
-		equal           bool
+		prepare         func(
+			*testing.T,
+			*conway.ConwayProtocolParameterUpdate,
+			*conway.ConwayProtocolParameterUpdate,
+		)
+		equal bool
 	}{
 		"equivalent encodings": {
 			gotRaw:  []byte{0xa1, 0x00, 0x01},
@@ -123,15 +128,24 @@ func TestProposalComparisonUsesParameterFields(t *testing.T) {
 			equal:   true,
 		},
 		"equal large rational": {
-			// A0 = 2^65 / 1: accepted by the parameter decoder, but its
-			// rational encoder cannot encode the numerator as uint64.
-			gotRaw: []byte{
-				0xa1, 0x09, 0xd8, 0x1e, 0x82, 0xc2, 0x49,
-				0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
-			},
-			wantRaw: []byte{
-				0xa1, 0x09, 0xd8, 0x1e, 0x82, 0xc2, 0x49,
-				0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+			gotRaw:  []byte{0xa1, 0x09, 0xd8, 0x1e, 0x82, 0x01, 0x01},
+			wantRaw: []byte{0xa1, 0x09, 0xd8, 0x1e, 0x82, 0x01, 0x01},
+			prepare: func(
+				t *testing.T, got, want *conway.ConwayProtocolParameterUpdate,
+			) {
+				t.Helper()
+				updates := []*conway.ConwayProtocolParameterUpdate{got, want}
+				for _, update := range updates {
+					numerator := new(big.Int).Lsh(big.NewInt(1), 65)
+					update.A0 = &cbor.Rat{
+						Rat: new(big.Rat).SetFrac(numerator, big.NewInt(1)),
+					}
+					uncached := *update
+					uncached.SetCbor(nil)
+					if _, err := cbor.Encode(&uncached); err == nil {
+						t.Fatal("out-of-Word64 rational was encoded")
+					}
+				}
 			},
 			equal: true,
 		},
@@ -163,6 +177,9 @@ func TestProposalComparisonUsesParameterFields(t *testing.T) {
 			}
 			if tc.mutate != nil {
 				tc.mutate(&got)
+			}
+			if tc.prepare != nil {
+				tc.prepare(t, &got, &want)
 			}
 			a := map[string]*ProposalState{
 				"p": {GovActionInfo: GovActionInfo{ParameterUpdate: &got}},

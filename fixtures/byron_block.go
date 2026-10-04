@@ -31,8 +31,8 @@ import (
 var (
 	byronEmptyTxPayload  = []byte{0x9f, 0xff}
 	byronExtraBodyData   = []byte{0x81, 0xa0}
-	byronEmptyDlgPayload = []byte{0x80}
-	byronEmptyUpdPayload = []byte{0x82, 0x80, 0x80}
+	byronEmptyDlgPayload = []byte{0x9f, 0xff}
+	byronEmptyUpdPayload = []byte{0x82, 0x80, 0x9f, 0xff}
 	// byronEmptySscPayload is a certificates payload holding an empty
 	// tag-258 set; its proof hashes the empty canonical map.
 	byronEmptySscPayload = []byte{0x82, 0x03, 0xd9, 0x01, 0x02, 0x80}

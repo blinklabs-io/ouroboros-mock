@@ -80,6 +80,10 @@ type stubBackend struct {
 // Verify the stub satisfies the interface at compile time.
 var _ ledger.StateProvider = (*stubBackend)(nil)
 
+func (s *stubBackend) EpochForSlot(slot uint64) (uint64, error) {
+	return s.getInner().(common.EpochState).EpochForSlot(slot)
+}
+
 type committeeStateProvider interface {
 	ledger.StateProvider
 	CommitteeStateAvailable() (bool, error)
@@ -300,6 +304,12 @@ func (m *customStateManager) LoadInitialState(
 	// In a real integration: hydrate your database from state and pp.
 	// Here we just forward to the in-memory manager so the test runs.
 	return m.inner.LoadInitialState(state, pp)
+}
+
+func (m *customStateManager) ConfigureEpochMapping(
+	initialEpoch, startSlot, epochLength uint64,
+) {
+	m.inner.ConfigureEpochMapping(initialEpoch, startSlot, epochLength)
 }
 
 func (m *customStateManager) ApplyTransaction(

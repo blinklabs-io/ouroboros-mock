@@ -115,7 +115,8 @@ func TestDijkstraBlockBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Dijkstra block builder to reject Plutus V4 witness scripts")
 	}
-	if !strings.Contains(err.Error(), "plutus V4 witness scripts are not part of the Dijkstra CDDL") {
+	expected := "dijkstra witness set does not support field 8"
+	if !strings.Contains(err.Error(), expected) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 }
@@ -186,13 +187,13 @@ func TestDijkstraBlockBuilderEncodesInProcessTransactionMetadata(t *testing.T) {
 func TestDijkstraBlockBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
 	var body dijkstra.DijkstraTransactionBody
 	_, err := cbor.Decode(
-		[]byte{
-			0xa4, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00,
-			0x17, 0xd9, 0x01, 0x02, 0x80,
-		},
-		&body,
+		[]byte{0xa3, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00}, &body,
 	)
 	require.NoError(t, err)
+	body.SetCbor([]byte{
+		0xa4, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00,
+		0x17, 0xd9, 0x01, 0x02, 0x80,
+	})
 	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
 
 	_, err = fixtures.NewDijkstraBlockBuilder().
@@ -208,20 +209,14 @@ func TestDijkstraBlockBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
 func TestDijkstraBlockBuilderRejectsDecodedBlockTransactionMissingRequiredKeys(
 	t *testing.T,
 ) {
-	var decoded dijkstra.DijkstraBlockBody
-	_, err := cbor.Decode(
-		[]byte{
-			0x83,
-			0x81, 0x84, 0xa1, 0x00, 0x80, 0xa0, 0xf6, 0xf5,
-			0xf6, 0xf6,
-		},
-		&decoded,
-	)
+	tx, err := fixtures.NewDijkstraTransactionBuilder().Build()
 	require.NoError(t, err)
-	require.Len(t, decoded.Transactions, 1)
+	tx.SetCbor([]byte{
+		0x84, 0xa1, 0x00, 0x80, 0xa0, 0xf6, 0xf5,
+	})
 
 	_, err = fixtures.NewDijkstraBlockBuilder().
-		WithTransactions(decoded.Transactions[0]).
+		WithTransactions(*tx).
 		Build()
 	require.ErrorContains(
 		t, err, "transaction 0: transaction body is missing required key 1",

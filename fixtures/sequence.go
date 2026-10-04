@@ -29,6 +29,7 @@ import (
 type Sequence struct {
 	template      BlockBuilder
 	slotIncrement uint64
+	advanceErr    error
 }
 
 // NewSequence creates a sequence of empty blocks for era that starts at block
@@ -50,6 +51,7 @@ func (s *Sequence) WithStart(
 	s.template.blockNumber = blockNumber
 	s.template.slot = slot
 	s.template.prevHash = prevHash
+	s.advanceErr = nil
 	return s
 }
 
@@ -65,22 +67,41 @@ func (s *Sequence) WithProtocolVersion(major, minor uint64) *Sequence {
 	return s
 }
 
-// Next builds the next block of the sequence.
+// Next builds the next block, rejecting number or slot overflow.
 func (s *Sequence) Next() (ledger.Block, error) {
+	if s.advanceErr != nil {
+		return nil, s.advanceErr
+	}
 	block, err := s.template.Build()
 	if err != nil {
 		return nil, err
 	}
-	s.template.blockNumber++
-	s.template.slot += s.slotIncrement
-	s.template.prevHash = block.Hash()
+	s.advanceErr = checkChainRange(
+		s.template.blockNumber, s.template.slot, s.slotIncrement, 2,
+	)
+	if s.advanceErr == nil {
+		s.template.blockNumber++
+		s.template.slot += s.slotIncrement
+		s.template.prevHash = block.Hash()
+	}
 	return block, nil
 }
 
 // Blocks builds the next count blocks. A count of zero or less returns an
 // empty, non-nil slice.
 func (s *Sequence) Blocks(count int) ([]ledger.Block, error) {
-	blocks := make([]ledger.Block, 0, max(count, 0))
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
+	if s.advanceErr != nil {
+		return nil, s.advanceErr
+	}
+	if err := checkChainRange(
+		s.template.blockNumber, s.template.slot, s.slotIncrement, uint64(count),
+	); err != nil {
+		return nil, err
+	}
+	blocks := make([]ledger.Block, 0, count)
 	for range count {
 		block, err := s.Next()
 		if err != nil {
@@ -99,14 +120,14 @@ func GenesisBlock(era common.Era) (ledger.Block, error) {
 
 // RandomBlock returns an empty block of era whose block number, slot,
 // previous hash and issuer key are drawn from seed. The same era and seed
-// always produce the same block. Byron blocks are epoch boundary blocks, so
-// their slot is a multiple of the Byron epoch length.
+// produce the same block within a Go release. Byron blocks are epoch boundary
+// blocks, so their slot is a multiple of the Byron epoch length.
 func RandomBlock(era common.Era, seed uint64) (ledger.Block, error) {
 	var chachaSeed [32]byte
 	binary.LittleEndian.PutUint64(chachaSeed[:], seed)
 	chachaSeed[8] = era.Id
 	source := rand.NewChaCha8(chachaSeed)
-	//nolint:gosec // deterministic test fixtures do not need cryptographic randomness.
+	//nolint:gosec // deterministic fixture randomness.
 	rng := rand.New(source)
 	var prevHash common.Blake2b256
 	var issuer common.IssuerVkey

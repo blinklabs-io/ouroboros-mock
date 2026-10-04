@@ -239,6 +239,7 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 	h.currentEpoch = initialState.CurrentEpoch
 	h.initialEpoch = initialState.CurrentEpoch
 	h.currentSlot = h.startSlot
+	h.configureEpochMapping()
 
 	// Process events
 	for i, event := range vector.Events {
@@ -827,6 +828,7 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 	h.currentEpoch = initialState.CurrentEpoch
 	h.initialEpoch = initialState.CurrentEpoch
 	h.currentSlot = h.startSlot
+	h.configureEpochMapping()
 
 	// Process events
 	for i, event := range vector.Events {
@@ -977,6 +979,7 @@ func (h *Harness) rollback(targetSlot uint64) error {
 	h.protocolParams = h.initialProtocolParams
 	h.currentEpoch = h.initialEpoch
 	h.currentSlot = h.startSlot
+	h.configureEpochMapping()
 
 	h.replaying = true
 	defer func() { h.replaying = false }()
@@ -1173,6 +1176,14 @@ func skipCborItem(data []byte, pos int) int {
 		return pos + 1
 	}
 	return pos + 1
+}
+
+func (h *Harness) configureEpochMapping() {
+	if manager, ok := h.stateManager.(interface {
+		ConfigureEpochMapping(uint64, uint64, uint64)
+	}); ok {
+		manager.ConfigureEpochMapping(h.initialEpoch, h.startSlot, h.epochLength)
+	}
 }
 
 // parseEpochLength extracts the epoch_length from the config array.
