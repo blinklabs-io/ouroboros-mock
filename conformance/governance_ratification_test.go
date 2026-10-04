@@ -23,26 +23,26 @@ import (
 
 // TestGovernanceRatificationFlow tests the complete ratification and enactment flow.
 // This validates that:
-// 1. Proposals with votes are ratified in the epoch after submission
+// 1. Proposals meeting their vote thresholds are ratified in the epoch after submission
 // 2. Ratified proposals are enacted in the following epoch
 // 3. Enacted proposals update governance roots
 func TestGovernanceRatificationFlow(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	stateManager := NewMockStateManager()
+	f := newGovFixture(t)
+	stateManager := f.sm
 	govState := stateManager.GetGovernanceState()
+	drep := f.drep(100)
+	committeeVote := f.ccMember(10, true)
+	f.committeeThreshold(1, 2)
 
-	// Epoch 0: Add a constitution proposal with votes
-	// Votes must be in format "voterType:credHash" with at least 2 voter types
-	// Vote values per CIP-1694: 0=No, 1=Yes, 2=Abstain
+	// Epoch 0: Add a constitution proposal that the committee and the DRep
+	// holding all delegated stake both vote Yes on (vote value 1).
 	proposalId := "test_proposal#0"
 	govState.AddProposal(proposalId, GovActionInfo{
 		ActionType:     common.GovActionTypeNewConstitution,
 		SubmittedEpoch: 0,
 		ExpiresAfter:   10,
-		Votes: map[string]uint8{
-			"0:cc_voter_hash":   1, // CC Yes vote (type 0, vote=1=Yes)
-			"2:drep_voter_hash": 1, // DRep Yes vote (type 2, vote=1=Yes)
-		},
+		Votes:          yes(committeeVote, drep),
 	})
 
 	// Verify initial state

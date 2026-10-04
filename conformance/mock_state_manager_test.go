@@ -2678,24 +2678,24 @@ func TestUpdateCommitteeCountsProposalDepositInDRepStake(t *testing.T) {
 	}
 
 	stake := stateManager.credentialVotingStake(5)
-	assert.True(t, stateManager.drepAcceptedForUpdateCommittee(
+	assert.True(t, stateManager.drepAccepted(
 		proposal,
 		stake,
 		big.NewRat(1, 2),
 	))
-	assert.True(t, stateManager.spoAcceptedForUpdateCommittee(
+	assert.True(t, stateManager.spoAccepted(
 		proposal,
 		stake,
 		new(big.Rat),
 	))
-	accepted, err := stateManager.updateCommitteeAcceptedWithStake(
+	accepted, err := stateManager.proposalAccepted(
 		proposal,
 		stake,
 	)
 	require.NoError(t, err)
 	assert.True(t, accepted)
 	proposal.Deposit = 0
-	accepted, err = stateManager.updateCommitteeAcceptedWithStake(
+	accepted, err = stateManager.proposalAccepted(
 		proposal,
 		stateManager.credentialVotingStake(5),
 	)
@@ -2963,17 +2963,17 @@ func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
 	}}
 
 	stake := stateManager.credentialVotingStake(0)
-	assert.True(t, stateManager.drepAcceptedForUpdateCommittee(
+	assert.True(t, stateManager.drepAccepted(
 		proposal,
 		stake,
 		new(big.Rat),
 	))
-	assert.False(t, stateManager.spoAcceptedForUpdateCommittee(
+	assert.False(t, stateManager.spoAccepted(
 		proposal,
 		stake,
 		big.NewRat(3, 5),
 	))
-	accepted, err := stateManager.updateCommitteeAcceptedWithStake(
+	accepted, err := stateManager.proposalAccepted(
 		proposal,
 		stake,
 	)
@@ -2984,12 +2984,12 @@ func TestUpdateCommitteeUsesStakeWeightedSPOApproval(t *testing.T) {
 		common.VoterTypeStakingPoolKeyHash,
 		hex.EncodeToString(noPool[:]),
 	)] = 1
-	assert.True(t, stateManager.spoAcceptedForUpdateCommittee(
+	assert.True(t, stateManager.spoAccepted(
 		proposal,
 		stake,
 		big.NewRat(3, 5),
 	))
-	accepted, err = stateManager.updateCommitteeAcceptedWithStake(
+	accepted, err = stateManager.proposalAccepted(
 		proposal,
 		stake,
 	)

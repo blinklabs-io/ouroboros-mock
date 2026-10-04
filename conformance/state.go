@@ -18,6 +18,7 @@ package conformance
 import (
 	"bytes"
 	"maps"
+	"math/big"
 	"sort"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -207,6 +208,14 @@ type GovernanceState struct {
 
 	// Constitution contains the current constitution.
 	Constitution *ConstitutionInfo
+
+	// CommitteeThreshold is the fraction of committee votes an action needs.
+	// It is nil when the committee is absent. The value is never mutated in
+	// place, so clones may share it.
+	CommitteeThreshold *big.Rat
+
+	// Treasury is the treasury balance in lovelace.
+	Treasury uint64
 }
 
 // CommitteeMemberInfo contains committee member details.
@@ -326,6 +335,8 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.EnactedProposals = make(map[string]bool)
 	g.Roots = ProposalRoots{}
 	g.Constitution = nil
+	g.CommitteeThreshold = state.CommitteeThreshold
+	g.Treasury = state.Treasury
 
 	// Load committee members
 	committeeMembers := maps.Clone(state.CommitteeMembersByCredential)
@@ -711,16 +722,25 @@ func (g *GovernanceState) GetRewardAccountBalance(
 func (g *GovernanceState) GetEnactedRoot(
 	actionType common.GovActionType,
 ) *string {
+	if slot := g.Roots.forAction(actionType); slot != nil {
+		return *slot
+	}
+	return nil
+}
+
+// forAction returns the root slot of the purpose the action type chains
+// within, or nil for actions that do not chain.
+func (r *ProposalRoots) forAction(actionType common.GovActionType) **string {
 	//exhaustive:ignore
 	switch actionType {
 	case common.GovActionTypeParameterChange:
-		return g.Roots.ProtocolParameters
+		return &r.ProtocolParameters
 	case common.GovActionTypeHardForkInitiation:
-		return g.Roots.HardFork
+		return &r.HardFork
 	case common.GovActionTypeNoConfidence, common.GovActionTypeUpdateCommittee:
-		return g.Roots.ConstitutionalCommittee
+		return &r.ConstitutionalCommittee
 	case common.GovActionTypeNewConstitution:
-		return g.Roots.Constitution
+		return &r.Constitution
 	default:
 		return nil
 	}

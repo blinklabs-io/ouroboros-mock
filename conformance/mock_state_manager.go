@@ -453,6 +453,20 @@ func (m *MockStateManager) ApplyTransaction(
 				info.ProposedMembers = committeeMembersByHash(
 					info.ProposedMembersByCredential,
 				)
+				info.ProposedThreshold = ga.Quorum.Rat
+			case *common.TreasuryWithdrawalGovAction:
+				info.Withdrawals = make(
+					map[ledger.RewardAccountKey]uint64,
+					len(ga.Withdrawals),
+				)
+				for recipient, amount := range ga.Withdrawals {
+					if recipient == nil {
+						continue
+					}
+					if credential, ok := recipient.StakeCredential(); ok {
+						info.Withdrawals[ledger.NewRewardAccountKey(credential)] += amount
+					}
+				}
 			case *common.NoConfidenceGovAction:
 				if ga.ActionId != nil {
 					key := fmt.Sprintf("%x#%d", ga.ActionId.TransactionId[:], ga.ActionId.GovActionIdx)
@@ -864,31 +878,51 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 		}
 	}
 
-	// Phase 1: Enact proposals that were ratified in previous epochs
-	// Collect proposals to enact (can't modify map while iterating)
-	var toEnact []string
-	for id, proposal := range m.govState.Proposals {
-		if proposal == nil {
-			continue
-		}
-		if proposal.RatifiedEpoch != nil && newEpoch > *proposal.RatifiedEpoch {
-			toEnact = append(toEnact, id)
-		}
-	}
-	sort.Strings(toEnact)
-
-	// Enact collected proposals (update roots)
-	for _, id := range toEnact {
+	// Phase 1: Enact proposals that were ratified in previous epochs, in
+	// identifier order. A proposal waits for the pass that enacts its parent;
+	// proposals whose parent never becomes the root are enacted last.
+	pending := m.govState.proposalIDs(func(p *ProposalState) bool {
+		return p.RatifiedEpoch != nil && newEpoch > *p.RatifiedEpoch &&
+			p.ActionType != common.GovActionTypeInfo
+	})
+	slices.Sort(pending)
+	enact := func(id string) {
 		proposal := m.govState.Proposals[id]
-		if proposal == nil {
-			continue
-		}
-		// Info proposals cannot be enacted (per Cardano spec)
-		// They just stay ratified until they expire
-		if proposal.ActionType == common.GovActionTypeInfo {
-			continue
-		}
+		slot := m.govState.Roots.forAction(proposal.ActionType)
+		chained := slot != nil && parentMatchesRoot(proposal, *slot)
 		m.enactProposal(id, proposal)
+		if !chained {
+			return
+		}
+		// Siblings chained off the same parent can no longer be enacted.
+		var siblings []string
+		for siblingID, sibling := range m.govState.Proposals {
+			if sibling != nil && sibling.RatifiedEpoch == nil &&
+				m.govState.Roots.forAction(sibling.ActionType) == slot &&
+				parentMatchesRoot(sibling, proposal.ParentActionId) {
+				siblings = append(siblings, siblingID)
+			}
+		}
+		m.removeWithDescendants(siblings)
+	}
+	for len(pending) > 0 {
+		var waiting []string
+		for _, id := range pending {
+			proposal := m.govState.Proposals[id]
+			slot := m.govState.Roots.forAction(proposal.ActionType)
+			if slot == nil || parentMatchesRoot(proposal, *slot) {
+				enact(id)
+			} else {
+				waiting = append(waiting, id)
+			}
+		}
+		if len(waiting) == len(pending) {
+			for _, id := range waiting {
+				enact(id)
+			}
+			break
+		}
+		pending = waiting
 	}
 
 	// Phase 2: Ratify proposals that meet threshold requirements
@@ -896,17 +930,51 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 		return err
 	}
 
-	// Phase 3: Expire old proposals
-	for id, proposal := range m.govState.Proposals {
-		if proposal == nil {
-			continue
-		}
-		if newEpoch > proposal.ExpiresAfter {
-			delete(m.govState.Proposals, id)
-		}
-	}
+	// Phase 3: Expire old proposals and return their deposits.
+	m.removeWithDescendants(m.govState.proposalIDs(
+		func(p *ProposalState) bool { return newEpoch > p.ExpiresAfter },
+	))
+	m.syncRewardBalanceMirrors()
 
 	return nil
+}
+
+// removeProposal drops a proposal and returns its deposit.
+func (m *MockStateManager) removeProposal(id string) {
+	proposal := m.govState.Proposals[id]
+	delete(m.govState.Proposals, id)
+	if proposal == nil || proposal.Deposit == 0 {
+		return
+	}
+	if proposal.ReturnAccount != nil {
+		if _, registered := m.stakeRegistrations[*proposal.ReturnAccount]; registered {
+			m.rewardAccounts[*proposal.ReturnAccount] += proposal.Deposit
+			return
+		}
+	}
+	m.govState.Treasury += proposal.Deposit
+}
+
+// removeWithDescendants removes the proposals and every proposal chained off
+// them, returning each deposit.
+func (m *MockStateManager) removeWithDescendants(ids []string) {
+	removed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		removed[id] = true
+	}
+	for grew := true; grew; {
+		grew = false
+		for id, p := range m.govState.Proposals {
+			if p != nil && !removed[id] && p.ParentActionId != nil &&
+				removed[*p.ParentActionId] {
+				removed[id] = true
+				grew = true
+			}
+		}
+	}
+	for id := range removed {
+		m.removeProposal(id)
+	}
 }
 
 func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
@@ -919,6 +987,8 @@ func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
 	staged.govState = cloneGovernanceState(m.govState)
 	staged.poolRegistrations = maps.Clone(m.poolRegistrations)
 	staged.stakeCredentialDeposits = maps.Clone(m.stakeCredentialDeposits)
+	staged.stakeRegistrations = maps.Clone(m.stakeRegistrations)
+	staged.rewardAccounts = maps.Clone(m.rewardAccounts)
 	staged.committeeMembers = maps.Clone(m.committeeMembers)
 	staged.hotKeyAuthorizations = maps.Clone(m.hotKeyAuthorizations)
 	staged.committeeResignations = maps.Clone(m.committeeResignations)
@@ -929,6 +999,8 @@ func (m *MockStateManager) commitEpochBoundary(staged *MockStateManager) {
 	m.currentEpoch = staged.currentEpoch
 	m.poolRegistrations = staged.poolRegistrations
 	m.stakeCredentialDeposits = staged.stakeCredentialDeposits
+	m.stakeRegistrations = staged.stakeRegistrations
+	m.rewardAccounts = staged.rewardAccounts
 	m.committeeMembers = staged.committeeMembers
 	m.hotKeyAuthorizations = staged.hotKeyAuthorizations
 	m.committeeResignations = staged.committeeResignations
@@ -1041,6 +1113,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 	cloned.Votes = maps.Clone(proposal.Votes)
 	cloned.RemovedMembers = maps.Clone(proposal.RemovedMembers)
 	cloned.ProposedMembers = maps.Clone(proposal.ProposedMembers)
+	cloned.Withdrawals = maps.Clone(proposal.Withdrawals)
 	cloned.ProposedMembersByCredential = maps.Clone(
 		proposal.ProposedMembersByCredential,
 	)
@@ -1108,320 +1181,14 @@ func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
 	return &cloned
 }
 
-// ratifyProposals models the action acceptance needed by the conformance
-// vectors. UpdateCommittee uses stake-weighted DRep and SPO thresholds; the
-// remaining actions retain the harness's stakeholder-presence approximation.
-func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
-	var updateCommitteeStake map[ledger.RewardAccountKey]*big.Int
-	proposalIDs := make([]string, 0, len(m.govState.Proposals))
-	for id := range m.govState.Proposals {
-		proposalIDs = append(proposalIDs, id)
-	}
-	sort.Strings(proposalIDs)
-	toRatify := make([]string, 0, len(proposalIDs))
-	for _, id := range proposalIDs {
-		proposal := m.govState.Proposals[id]
-		if proposal == nil || currentEpoch > proposal.ExpiresAfter {
-			continue
-		}
-		// Skip already-ratified proposals
-		if proposal.RatifiedEpoch != nil {
-			continue
-		}
-
-		// Require at least 1 epoch between submission and ratification
-		if currentEpoch <= proposal.SubmittedEpoch {
-			continue
-		}
-
-		// Info proposals are auto-ratified (no votes required)
-		if proposal.ActionType == common.GovActionTypeInfo {
-			toRatify = append(toRatify, id)
-			continue
-		}
-
-		// A zero-threshold UpdateCommittee action can ratify without votes.
-		// Other action types retain the mock's existing vote-presence rule.
-		if proposal.ActionType != common.GovActionTypeUpdateCommittee &&
-			len(proposal.Votes) == 0 {
-			continue
-		}
-
-		// Count YES votes by voter type
-		// Vote values per CIP-1694: 0=No, 1=Yes, 2=Abstain
-		voterTypesWithYes := make(map[uint8]bool)
-		for voterKey, voteValue := range proposal.Votes {
-			// Only count YES votes (value = 1)
-			if voteValue != 1 {
-				continue
-			}
-			// Voter key format is "voterType:credHash"
-			if len(voterKey) > 0 {
-				voterType := voterKey[0] - '0' // Simple parse of first char
-				voterTypesWithYes[voterType] = true
-			}
-		}
-
-		// Check if required voter types have voted YES based on action type
-		hasCC := voterTypesWithYes[0] ||
-			voterTypesWithYes[1] // Type 0 or 1 (hot key hash or script)
-		hasDRep := voterTypesWithYes[2] || voterTypesWithYes[3] // Type 2 or 3
-		hasSPO := voterTypesWithYes[4] || voterTypesWithYes[5]  // Type 4 or 5
-
-		var meetsRequirements bool
-		//exhaustive:ignore
-		switch proposal.ActionType {
-		case common.GovActionTypeNoConfidence,
-			common.GovActionTypeHardForkInitiation:
-			// Requires CC + DRep + SPO
-			meetsRequirements = hasCC && hasDRep && hasSPO
-		case common.GovActionTypeUpdateCommittee:
-			if updateCommitteeStake == nil {
-				updateCommitteeStake = m.credentialVotingStake(currentEpoch)
-			}
-			var err error
-			meetsRequirements, err = m.updateCommitteeAcceptedWithStake(
-				proposal,
-				updateCommitteeStake,
-			)
-			if err != nil {
-				return fmt.Errorf("ratify proposal %s: %w", id, err)
-			}
-		case common.GovActionTypeNewConstitution,
-			common.GovActionTypeParameterChange,
-			common.GovActionTypeTreasuryWithdrawal:
-			// Requires CC + DRep (no SPO)
-			meetsRequirements = hasCC && hasDRep
-		default:
-			// Unknown action type - require any 2 voter types as fallback
-			meetsRequirements = len(voterTypesWithYes) >= 2
-		}
-
-		if !meetsRequirements {
-			continue
-		}
-		toRatify = append(toRatify, id)
-	}
-
-	// Commit only after every proposal has been evaluated successfully. This
-	// keeps an action-specific parameter error from leaving partial ratification
-	// state behind.
-	for _, id := range toRatify {
-		proposal := m.govState.Proposals[id]
-		if proposal == nil {
-			continue
-		}
-		epoch := currentEpoch
-		proposal.RatifiedEpoch = &epoch
-		m.govState.Proposals[id] = proposal
-	}
-	return nil
-}
-
-func (m *MockStateManager) updateCommitteeAcceptedWithStake(
-	proposal *ProposalState,
-	stake map[ledger.RewardAccountKey]*big.Int,
-) (bool, error) {
-	pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters)
-	if !ok {
-		return false, errors.New("conway protocol parameters unavailable")
-	}
-	electedCommittee := m.govState.hasActiveCommitteeMember(m.currentEpoch)
-	drepThreshold := pp.DRepVotingThresholds.CommitteeNoConfidence.Rat
-	poolThreshold := pp.PoolVotingThresholds.CommitteeNoConfidence.Rat
-	if electedCommittee {
-		drepThreshold = pp.DRepVotingThresholds.CommitteeNormal.Rat
-		poolThreshold = pp.PoolVotingThresholds.CommitteeNormal.Rat
-	}
-	if drepThreshold == nil {
-		return false, errors.New("DRep voting threshold unavailable")
-	}
-	if poolThreshold == nil {
-		return false, errors.New("SPO voting threshold unavailable")
-	}
-	return m.drepAcceptedForUpdateCommittee(
-		proposal,
-		stake,
-		drepThreshold,
-	) && m.spoAcceptedForUpdateCommittee(proposal, stake, poolThreshold), nil
-}
-
-func (m *MockStateManager) credentialVotingStake(
-	currentEpoch uint64,
-) map[ledger.RewardAccountKey]*big.Int {
-	credentialStake := make(map[ledger.RewardAccountKey]*big.Int)
-	addStake := func(credential ledger.RewardAccountKey, amount *big.Int) {
-		if amount == nil || amount.Sign() <= 0 {
-			return
-		}
-		if current := credentialStake[credential]; current != nil {
-			current.Add(current, amount)
-		} else {
-			credentialStake[credential] = new(big.Int).Set(amount)
-		}
-	}
-	for _, utxo := range m.utxos {
-		if utxo.Output == nil {
-			continue
-		}
-		address := utxo.Output.Address()
-		credential, ok := address.StakeCredential()
-		if !ok {
-			continue
-		}
-		addStake(ledger.NewRewardAccountKey(credential), utxo.Output.Amount())
-	}
-	for credential, balance := range m.rewardAccounts {
-		addStake(credential, new(big.Int).SetUint64(balance))
-	}
-	for _, activeProposal := range m.govState.Proposals {
-		if activeProposal == nil || activeProposal.ReturnAccount == nil ||
-			activeProposal.Deposit == 0 ||
-			currentEpoch > activeProposal.ExpiresAfter {
-			continue
-		}
-		addStake(
-			*activeProposal.ReturnAccount,
-			new(big.Int).SetUint64(activeProposal.Deposit),
-		)
-	}
-	return credentialStake
-}
-
-func (m *MockStateManager) drepAcceptedForUpdateCommittee(
-	proposal *ProposalState,
-	credentialStake map[ledger.RewardAccountKey]*big.Int,
-	threshold *big.Rat,
-) bool {
-	if threshold.Sign() == 0 {
-		return true
-	}
-	yesStake := new(big.Int)
-	totalStake := new(big.Int)
-	for stakeCredential, stake := range credentialStake {
-		delegation, ok := m.govState.DRepDelegationsByCredential[stakeCredential]
-		if !ok {
-			continue
-		}
-		switch delegation.Type {
-		case common.DrepTypeAbstain:
-			continue
-		case common.DrepTypeNoConfidence:
-			totalStake.Add(totalStake, stake)
-		case common.DrepTypeAddrKeyHash, common.DrepTypeScriptHash:
-			if len(delegation.Credential) != common.Blake2b224Size {
-				continue
-			}
-			drepCredential := common.Credential{
-				CredType:   common.CredentialTypeAddrKeyHash,
-				Credential: common.NewBlake2b224(delegation.Credential),
-			}
-			voterType := common.VoterTypeDRepKeyHash
-			if delegation.Type == common.DrepTypeScriptHash {
-				drepCredential.CredType = common.CredentialTypeScriptHash
-				voterType = common.VoterTypeDRepScriptHash
-			}
-			if !m.govState.IsDRepCredentialActive(
-				drepCredential,
-				m.currentEpoch,
-			) {
-				continue
-			}
-			vote, voted := proposal.Votes[fmt.Sprintf(
-				"%d:%s",
-				voterType,
-				hex.EncodeToString(drepCredential.Credential[:]),
-			)]
-			if voted && vote == 2 {
-				continue
-			}
-			totalStake.Add(totalStake, stake)
-			if voted && vote == 1 {
-				yesStake.Add(yesStake, stake)
-			}
-		}
-	}
-	return votingStakeAccepted(yesStake, totalStake, threshold)
-}
-
-func (m *MockStateManager) spoAcceptedForUpdateCommittee(
-	proposal *ProposalState,
-	credentialStake map[ledger.RewardAccountKey]*big.Int,
-	threshold *big.Rat,
-) bool {
-	if threshold.Sign() == 0 {
-		return true
-	}
-	poolStake := make(map[common.PoolKeyHash]*big.Int)
-	for stakeCredential, stake := range credentialStake {
-		pool, ok := m.govState.PoolDelegationsByCredential[stakeCredential]
-		if !ok || !m.govState.IsPoolRegistered(pool) {
-			continue
-		}
-		if current := poolStake[pool]; current != nil {
-			current.Add(current, stake)
-		} else {
-			poolStake[pool] = new(big.Int).Set(stake)
-		}
-	}
-	yesStake := new(big.Int)
-	totalStake := new(big.Int)
-	for pool, stake := range poolStake {
-		vote, voted := proposal.Votes[fmt.Sprintf(
-			"%d:%s",
-			common.VoterTypeStakingPoolKeyHash,
-			hex.EncodeToString(pool[:]),
-		)]
-		if voted {
-			switch vote {
-			case 1:
-				yesStake.Add(yesStake, stake)
-				totalStake.Add(totalStake, stake)
-			case 0:
-				totalStake.Add(totalStake, stake)
-			case 2:
-			}
-			continue
-		}
-		if pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok &&
-			pp.ProtocolVersion.Major == common.ProtocolVersionConway {
-			continue
-		}
-		if rewardAccount, ok := m.govState.PoolRewardAccounts[pool]; ok {
-			if delegation, ok := m.govState.DRepDelegationsByCredential[rewardAccount]; ok &&
-				delegation.Type == common.DrepTypeAbstain {
-				continue
-			}
-		}
-		totalStake.Add(totalStake, stake)
-	}
-	return votingStakeAccepted(yesStake, totalStake, threshold)
-}
-
-func votingStakeAccepted(
-	yesStake *big.Int,
-	totalStake *big.Int,
-	threshold *big.Rat,
-) bool {
-	if threshold.Sign() == 0 {
-		return true
-	}
-	if totalStake.Sign() == 0 {
-		return false
-	}
-	return new(big.Int).Mul(
-		yesStake,
-		threshold.Denom(),
-	).Cmp(new(big.Int).Mul(totalStake, threshold.Num())) >= 0
-}
-
 // enactProposal processes a ratified proposal by updating the appropriate root.
 func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
-	// Update the appropriate root based on action type
+	if slot := m.govState.Roots.forAction(proposal.ActionType); slot != nil {
+		*slot = &id
+	}
 	//exhaustive:ignore
 	switch proposal.ActionType {
 	case common.GovActionTypeNewConstitution:
-		m.govState.Roots.Constitution = &id
 		// Update the constitution's policy hash from the enacted proposal
 		// A NewConstitution with empty PolicyHash removes the guardrails policy
 		if m.govState.Constitution == nil {
@@ -1438,7 +1205,6 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 			m.govState.Constitution.PolicyHash = nil
 		}
 	case common.GovActionTypeParameterChange:
-		m.govState.Roots.ProtocolParameters = &id
 		// Apply parameter updates to protocol parameters
 		if proposal.ParameterUpdate != nil {
 			if conwayPP, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok {
@@ -1446,9 +1212,24 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 			}
 		}
 	case common.GovActionTypeHardForkInitiation:
-		m.govState.Roots.HardFork = &id
+		if conwayPP, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok &&
+			conwayPP != nil && proposal.ProtocolVersion != nil {
+			conwayPP.ProtocolVersion = common.ProtocolParametersProtocolVersion{
+				Major: proposal.ProtocolVersion.Major,
+				Minor: proposal.ProtocolVersion.Minor,
+			}
+		}
+	case common.GovActionTypeTreasuryWithdrawal:
+		for account, amount := range proposal.Withdrawals {
+			_, registered := m.stakeRegistrations[account]
+			if registered && amount <= m.govState.Treasury {
+				m.rewardAccounts[account] += amount
+				m.govState.Treasury -= amount
+			}
+		}
+		m.syncRewardBalanceMirrors()
 	case common.GovActionTypeNoConfidence:
-		m.govState.Roots.ConstitutionalCommittee = &id
+		m.govState.CommitteeThreshold = nil
 		clear(m.govState.CommitteeMembers)
 		clear(m.govState.CommitteeMembersByCredential)
 		clear(m.committeeMembers)
@@ -1458,7 +1239,9 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 		clear(m.govState.CommitteeResignations)
 		clear(m.committeeResignations)
 	case common.GovActionTypeUpdateCommittee:
-		m.govState.Roots.ConstitutionalCommittee = &id
+		if proposal.ProposedThreshold != nil {
+			m.govState.CommitteeThreshold = proposal.ProposedThreshold
+		}
 		for coldKey := range proposal.RemovedMembers {
 			delete(m.govState.CommitteeMembersByCredential, coldKey)
 			delete(m.govState.CommitteeMembers, coldKey.Credential)
@@ -1508,7 +1291,7 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 
 	// Mark as enacted and remove from active proposals
 	m.govState.EnactedProposals[id] = true
-	delete(m.govState.Proposals, id)
+	m.removeProposal(id)
 }
 
 // applyParameterUpdate applies a parameter update to protocol parameters.

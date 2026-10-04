@@ -53,7 +53,7 @@ if hasWithdrawalRedeemer {
 Proposals follow a strict lifecycle:
 1. **Submission** - Added to active proposals with ExpiresAfter = currentEpoch + govActionLifetime
 2. **Voting** - Votes are recorded during the epoch
-3. **Ratification** - At epoch boundary, proposals meeting thresholds are marked with RatifiedEpoch
+3. **Ratification** - At epoch boundary, proposals whose parent is the enacted root and that meet their stake-weighted committee, DRep and SPO thresholds are marked with RatifiedEpoch
 4. **Enactment** - In the NEXT epoch, ratified proposals are enacted (roots updated)
 5. **Expiration** - Proposals past ExpiresAfter are removed
 
