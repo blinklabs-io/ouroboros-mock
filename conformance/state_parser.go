@@ -2016,20 +2016,9 @@ func decodeWithdrawals(raw any) map[mockledger.RewardAccountKey]uint64 {
 	}
 	result := make(map[mockledger.RewardAccountKey]uint64, len(withdrawals))
 	for account, amount := range withdrawals {
-		raw := account.Bytes()
-		if len(raw) != 1+common.Blake2b224Size {
-			continue
+		if key := extractRewardAccountKey(account); key != nil {
+			result[*key] += amount
 		}
-		credential := mockledger.RewardAccountKey{
-			CredType:   common.CredentialTypeAddrKeyHash,
-			Credential: common.NewBlake2b224(raw[1:]),
-		}
-		// The header's high nibble is 0xe for a key credential and 0xf for a
-		// script credential.
-		if raw[0]>>4 == 0xf {
-			credential.CredType = common.CredentialTypeScriptHash
-		}
-		result[credential] += amount
 	}
 	return result
 }
