@@ -29,16 +29,15 @@ import (
 )
 
 // Ratification follows the Conway ratification rules. An action ratifies when
-// its parent is the enacted root of its purpose, the committee, DRep and SPO
+// its parent is the enacted root of its purpose, an UpdateCommittee action's
+// new terms fit the committee term limit, the committee, DRep and SPO
 // stake-weighted ratios meet the action's thresholds, a treasury withdrawal
 // fits in the treasury, and no earlier delaying action ratified in the same
-// epoch.
+// epoch. Info actions never ratify.
 //
-// Unsupported edge cases: actions of one priority tier are ordered by
+// Unsupported edge case: actions of one priority tier are ordered by
 // submission epoch and then by identifier, because the state does not record
-// the order of proposals within an epoch; committee term limits are not
-// checked at ratification; and ratified Info actions are kept until expiry
-// rather than never ratifying.
+// the order of proposals within an epoch.
 
 // ratifyPriority orders actions as the ledger's ratification does.
 func ratifyPriority(actionType common.GovActionType) int {
@@ -132,7 +131,8 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 	candidates := m.govState.proposalIDs(func(p *ProposalState) bool {
 		// Ratification needs at least one epoch between submission and the
 		// boundary that ratifies.
-		return currentEpoch <= p.ExpiresAfter &&
+		return p.ActionType != common.GovActionTypeInfo &&
+			currentEpoch <= p.ExpiresAfter &&
 			p.RatifiedEpoch == nil &&
 			currentEpoch > p.SubmittedEpoch
 	})
@@ -143,25 +143,24 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 	})
 	for _, id := range candidates {
 		proposal := m.govState.Proposals[id]
-		if proposal.ActionType != common.GovActionTypeInfo {
-			if stake == nil {
-				stake = m.credentialVotingStake(currentEpoch)
-			}
-			accepted, err := m.proposalAccepted(proposal, stake)
-			if err != nil {
-				return fmt.Errorf("ratify proposal %s: %w", id, err)
-			}
-			rootSlot := roots.forAction(proposal.ActionType)
-			if !accepted ||
-				rootSlot != nil && !parentMatchesRoot(proposal, *rootSlot) ||
-				proposal.withdrawalTotal() > treasury {
-				continue
-			}
-			if rootSlot != nil {
-				*rootSlot = &id
-			}
-			treasury -= proposal.withdrawalTotal()
+		if stake == nil {
+			stake = m.credentialVotingStake(currentEpoch)
 		}
+		accepted, err := m.proposalAccepted(proposal, stake)
+		if err != nil {
+			return fmt.Errorf("ratify proposal %s: %w", id, err)
+		}
+		rootSlot := roots.forAction(proposal.ActionType)
+		if !accepted ||
+			rootSlot != nil && !parentMatchesRoot(proposal, *rootSlot) ||
+			!m.withinCommitteeTermLimit(proposal, currentEpoch) ||
+			proposal.withdrawalTotal() > treasury {
+			continue
+		}
+		if rootSlot != nil {
+			*rootSlot = &id
+		}
+		treasury -= proposal.withdrawalTotal()
 		toRatify = append(toRatify, id)
 		if delaysRatification(proposal.ActionType) {
 			break
@@ -176,6 +175,30 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 		m.govState.Proposals[id].RatifiedEpoch = &epoch
 	}
 	return nil
+}
+
+// withinCommitteeTermLimit reports whether every member an UpdateCommittee
+// action elects expires no later than the term limit allows from currentEpoch.
+func (m *MockStateManager) withinCommitteeTermLimit(
+	proposal *ProposalState,
+	currentEpoch uint64,
+) bool {
+	pp, ok := m.protocolParams.(*conway.ConwayProtocolParameters)
+	if !ok || pp == nil ||
+		proposal.ActionType != common.GovActionTypeUpdateCommittee {
+		return true
+	}
+	for _, expiry := range proposal.ProposedMembersByCredential {
+		if expiry > currentEpoch+pp.CommitteeTermLimit {
+			return false
+		}
+	}
+	for _, expiry := range proposal.ProposedMembers {
+		if expiry > currentEpoch+pp.CommitteeTermLimit {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *ProposalState) withdrawalTotal() uint64 {
@@ -250,7 +273,7 @@ func (m *MockStateManager) thresholdParameters(
 	case common.GovActionTypeNoConfidence:
 		return []cbor.Rat{drep.MotionNoConfidence}, &pool.MotionNoConfidence
 	case common.GovActionTypeUpdateCommittee:
-		if m.govState.hasActiveCommitteeMember(m.currentEpoch) {
+		if m.govState.hasCommittee() {
 			return []cbor.Rat{drep.CommitteeNormal}, &pool.CommitteeNormal
 		}
 		return []cbor.Rat{drep.CommitteeNoConfidence},
@@ -307,20 +330,20 @@ func parameterGroupThresholds(
 	return rats
 }
 
-// committeeAccepted applies the committee vote. NoConfidence, UpdateCommittee
-// and Info do not need it. Members that are expired or without an authorized
-// hot credential (a resignation removes it) abstain; members that did not vote count as No.
+// committeeAccepted applies the committee vote, which NoConfidence and
+// UpdateCommittee do not need. Members that are expired or without an
+// authorized hot credential (a resignation removes it) abstain; members that
+// did not vote count as No.
 func (m *MockStateManager) committeeAccepted(proposal *ProposalState) bool {
 	//exhaustive:ignore
 	switch proposal.ActionType {
 	case common.GovActionTypeNoConfidence,
-		common.GovActionTypeUpdateCommittee,
-		common.GovActionTypeInfo:
+		common.GovActionTypeUpdateCommittee:
 		return true
 	}
 	g := m.govState
 	threshold := g.CommitteeThreshold
-	if len(g.CommitteeMembersByCredential) == 0 || threshold == nil {
+	if threshold == nil {
 		return false
 	}
 	yesVotes, total := new(big.Int), new(big.Int)

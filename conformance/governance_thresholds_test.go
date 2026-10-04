@@ -830,3 +830,84 @@ func TestExpiredProposalRemovesDescendants(t *testing.T) {
 		"a child cannot outlive its expired parent")
 	assert.Equal(t, uint64(6), f.sm.rewardAccounts[refund])
 }
+
+func TestRatificationRejectsUpdateCommitteeBeyondTermLimit(t *testing.T) {
+	t.Parallel()
+	// Ratifying at epoch 1 with a term limit of 5 admits expiries up to 6.
+	for _, test := range []struct {
+		name     string
+		expiry   uint64
+		ratified bool
+	}{
+		{"within term limit", 6, true},
+		{"beyond term limit", 7, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			f := newGovFixture(t)
+			f.params().CommitteeTermLimit = 5
+			f.params().PoolVotingThresholds.CommitteeNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+			drep := f.drep(100)
+			f.propose("update#0", GovActionInfo{
+				ActionType: common.GovActionTypeUpdateCommittee,
+				ProposedMembersByCredential: map[ledger.RewardAccountKey]uint64{
+					keyCredential(common.Blake2b224{0x55}): test.expiry,
+				},
+				Votes: yes(drep),
+			})
+			require.NoError(t, f.sm.ProcessEpochBoundary(1))
+			assert.Equal(t, test.ratified, f.ratified("update#0"))
+		})
+	}
+}
+
+func TestRatificationNeverRatifiesInfoAction(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	drep := f.drep(100)
+	pool := f.pool(100)
+	cc := f.ccMember(10, true)
+	f.committeeThreshold(1, 2)
+	f.propose("info#0", GovActionInfo{
+		ActionType: common.GovActionTypeInfo,
+		Votes:      yes(drep, pool, cc),
+	})
+	require.NoError(t, f.sm.ProcessEpochBoundary(1))
+	assert.False(t, f.ratified("info#0"),
+		"an info action has no threshold and stays until it expires")
+}
+
+func TestRatificationCommitteeWithoutMembersUsesItsThreshold(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	drep := f.drep(100)
+	f.sm.govState.CommitteeThreshold = new(big.Rat)
+	f.propose("constitution#0", GovActionInfo{
+		ActionType: common.GovActionTypeNewConstitution,
+		Votes:      yes(drep),
+	})
+	require.NoError(t, f.sm.ProcessEpochBoundary(1))
+	assert.True(t, f.ratified("constitution#0"),
+		"a zero committee threshold accepts with no eligible members when the minimum size is zero")
+}
+
+func TestRatificationUpdateCommitteeUsesNormalThresholdWhileCommitteeExists(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	f.params().DRepVotingThresholds.CommitteeNoConfidence = cbor.Rat{Rat: big.NewRat(1, 1)}
+	f.params().PoolVotingThresholds.CommitteeNormal = cbor.Rat{Rat: new(big.Rat)}
+	f.params().PoolVotingThresholds.CommitteeNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+	drep := f.drep(60)
+	f.drep(40)
+	// Every member expired before the ratifying epoch, yet the committee
+	// itself is still in place.
+	f.ccMember(0, true)
+	f.committeeThreshold(1, 2)
+	f.propose("update#0", GovActionInfo{
+		ActionType: common.GovActionTypeUpdateCommittee,
+		Votes:      yes(drep),
+	})
+	require.NoError(t, f.sm.ProcessEpochBoundary(1))
+	assert.True(t, f.ratified("update#0"),
+		"an elected committee selects the normal threshold even when no member is active")
+}

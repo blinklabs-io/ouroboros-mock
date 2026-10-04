@@ -141,7 +141,7 @@ Called for each `PassEpoch` event. Perform standard epoch-transition bookkeeping
 
 1. **Advance epoch**: update `GovernanceState.CurrentEpoch` to `newEpoch`.
 2. **Enact previously ratified proposals**: for any proposal whose `RatifiedEpoch < newEpoch`, call your enactment logic and update proposal roots. Enactment happens one epoch *after* ratification.
-3. **Ratify eligible proposals**: visit active proposals in priority order (NoConfidence, UpdateCommittee, NewConstitution, HardFork, ParameterChange, TreasuryWithdrawal, Info). A proposal ratifies when its parent is the enacted root of its purpose, the committee, DRep and SPO stake-weighted thresholds for its action type are met, a treasury withdrawal fits in the treasury, and no earlier NoConfidence, UpdateCommittee, NewConstitution or HardFork action ratified this epoch. See `ratification.go` for the reference implementation and its documented edge cases. If ratified, set `RatifiedEpoch = newEpoch`.
+3. **Ratify eligible proposals**: visit active proposals in priority order (NoConfidence, UpdateCommittee, NewConstitution, HardFork, ParameterChange, TreasuryWithdrawal). A proposal ratifies when its parent is the enacted root of its purpose, an UpdateCommittee action's new member terms end within `committeeMaxTermLength` epochs of `newEpoch`, the committee, DRep and SPO stake-weighted thresholds for its action type are met, a treasury withdrawal fits in the treasury, and no earlier NoConfidence, UpdateCommittee, NewConstitution or HardFork action ratified this epoch. Info actions never ratify. See `ratification.go` for the reference implementation and its documented edge cases. If ratified, set `RatifiedEpoch = newEpoch`.
 4. **Expire old proposals**: remove proposals where `ExpiresAfter < newEpoch`, together with proposals chained off them. Return each removed proposal's deposit to its return account, or to the treasury when that account is not registered.
 5. **Process pool retirements**: remove pools whose retirement epoch has arrived.
 
@@ -155,7 +155,7 @@ Called for each `PassEpoch` event. Perform standard epoch-transition bookkeeping
 | `NoConfidence` | Record in the `ConstitutionalCommittee` root, clear the committee and its threshold. |
 | `HardForkInitiation` | Record in the `HardFork` root and set the protocol version. |
 | `TreasuryWithdrawal` | Credit each registered recipient's reward account and debit the treasury; funds for unregistered recipients stay in the treasury. |
-| `InfoAction` | Auto-ratified; no state change. |
+| `InfoAction` | Never ratified; removed at expiry with its deposit returned. |
 
 After enacting a `ParameterChange`, refresh your in-memory protocol parameters so `GetProtocolParameters()` reflects the update. The harness calls `GetProtocolParameters()` after each epoch boundary.
 

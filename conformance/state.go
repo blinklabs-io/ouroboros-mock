@@ -662,6 +662,14 @@ func (g *GovernanceState) hasActiveCommitteeMember(currentEpoch uint64) bool {
 	return false
 }
 
+// hasCommittee reports whether a committee is in place, even one whose
+// members have all expired. No-confidence removes it.
+func (g *GovernanceState) hasCommittee() bool {
+	return g.CommitteeThreshold != nil ||
+		len(g.CommitteeMembersByCredential) > 0 ||
+		len(g.CommitteeMembers) > 0
+}
+
 func (g *GovernanceState) hasCommitteeState(currentEpoch uint64) bool {
 	if g.hasActiveCommitteeMember(currentEpoch) {
 		return true
