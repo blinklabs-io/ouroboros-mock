@@ -320,6 +320,14 @@ func RandomRewardWithRand(
 		BuildReward()
 }
 
+// BuildAccount builds a CIP-159 account address. An account address has the
+// reward address wire form (header 0xe0, 0xe1, 0xf0 or 0xf1 followed by the
+// staking credential hash), so this is BuildReward under the name the Dijkstra
+// account fields use.
+func (b *AddressBuilder) BuildAccount() (common.Address, error) {
+	return b.BuildReward()
+}
+
 func (b *AddressBuilder) BuildReward() (common.Address, error) {
 	if len(b.stake) != common.AddressHashSize {
 		return common.Address{}, fmt.Errorf(

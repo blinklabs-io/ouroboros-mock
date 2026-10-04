@@ -21,6 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
+	"github.com/blinklabs-io/ouroboros-mock/address"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 	"github.com/blinklabs-io/plutigo/data"
 	"github.com/stretchr/testify/require"
@@ -331,4 +332,103 @@ func TestDijkstraTransactionBuilderRebuildsDecodedWitnessSet(t *testing.T) {
 	encoded, err := cbor.Encode(got.Data)
 	require.NoError(t, err)
 	require.Equal(t, []byte{0x02}, encoded, "replacement redeemer datum")
+}
+
+func testAccountAddress(t *testing.T, seed byte) common.Address {
+	t.Helper()
+	hash := make([]byte, common.AddressHashSize)
+	hash[0] = seed
+	account, err := address.NewAddress().WithStakingKeyHash(hash).BuildAccount()
+	require.NoError(t, err)
+	return account
+}
+
+func TestDijkstraTransactionBuilderEncodesDirectDeposits(t *testing.T) {
+	t.Parallel()
+	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
+	firstBytes, err := first.Bytes()
+	require.NoError(t, err)
+	secondBytes, err := second.Bytes()
+	require.NoError(t, err)
+
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
+		WithDirectDeposit(first, 5).
+		WithDirectDeposit(second, 7).
+		WithDirectDeposit(first, 9).
+		Build()
+	require.NoError(t, err)
+	require.Equal(t, map[cbor.ByteString]uint64{
+		cbor.NewByteString(firstBytes):  9,
+		cbor.NewByteString(secondBytes): 7,
+	}, tx.Body.TxDirectDeposits)
+	_, body := blockTransactionFields(t, tx)
+	require.Contains(t, body, uint64(25))
+}
+
+func TestDijkstraTransactionBuilderEncodesAccountBalanceIntervals(t *testing.T) {
+	t.Parallel()
+	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
+	exact, lower, upper := uint64(10), uint64(20), uint64(30)
+
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
+		WithAccountBalanceInterval(
+			first,
+			dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+		).
+		WithAccountBalanceInterval(
+			second,
+			dijkstra.DijkstraAccountBalanceInterval{LowerBound: &lower},
+		).
+		WithAccountBalanceInterval(
+			second,
+			dijkstra.DijkstraAccountBalanceInterval{
+				LowerBound: &lower,
+				UpperBound: &upper,
+			},
+		).
+		Build()
+	require.NoError(t, err)
+	require.Len(t, tx.Body.TxBalanceIntervals, 2)
+	got := map[byte]dijkstra.DijkstraAccountBalanceInterval{}
+	for credential, interval := range tx.Body.TxBalanceIntervals {
+		require.Equal(t, uint(common.CredentialTypeAddrKeyHash), credential.CredType)
+		got[credential.Credential[0]] = *interval
+	}
+	require.Equal(t, dijkstra.DijkstraAccountBalanceInterval{Exact: &exact}, got[1])
+	require.Equal(
+		t,
+		dijkstra.DijkstraAccountBalanceInterval{LowerBound: &lower, UpperBound: &upper},
+		got[2],
+		"a later interval for the same account replaces the earlier one",
+	)
+	_, body := blockTransactionFields(t, tx)
+	require.Contains(t, body, uint64(26))
+}
+
+func TestDijkstraTransactionBuilderRejectsInvalidAccountFields(t *testing.T) {
+	t.Parallel()
+	enterprise, err := address.RandomEnterprise(address.Testnet)
+	require.NoError(t, err)
+	account := testAccountAddress(t, 1)
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().
+		WithDirectDeposit(enterprise, 1).
+		Build()
+	require.ErrorContains(t, err, "not a reward account")
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().
+		WithAccountBalanceInterval(
+			enterprise,
+			dijkstra.DijkstraAccountBalanceInterval{Exact: new(uint64)},
+		).
+		Build()
+	require.ErrorContains(t, err, "not a reward account")
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().
+		WithAccountBalanceInterval(
+			account,
+			dijkstra.DijkstraAccountBalanceInterval{},
+		).
+		Build()
+	require.ErrorContains(t, err, "requires a lower or upper bound")
 }

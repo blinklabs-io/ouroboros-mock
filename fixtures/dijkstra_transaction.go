@@ -45,6 +45,7 @@ const (
 type DijkstraTransactionBuilder struct {
 	tx       dijkstra.DijkstraTransaction
 	metadata common.TransactionMetadatum
+	err      error
 }
 
 // NewDijkstraTransactionBuilder creates an empty Dijkstra transaction builder.
@@ -82,6 +83,59 @@ func (b *DijkstraTransactionBuilder) WithSubTransactions(
 	)
 	items = append(items, subtransactions...)
 	b.tx.Body.TxSubTransactions = cbor.NewSetType(items, true)
+	b.tx.Body.SetCbor(nil)
+	return b
+}
+
+// WithDirectDeposit sets the CIP-159 direct deposit of coin lovelace to
+// account, replacing any earlier deposit to the same account. Build rejects an
+// address that is not an account (reward) address.
+func (b *DijkstraTransactionBuilder) WithDirectDeposit(
+	account common.Address,
+	coin uint64,
+) *DijkstraTransactionBuilder {
+	if _, err := account.RewardAccountCredential(); err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("direct deposit: %w", err))
+		return b
+	}
+	raw, err := account.Bytes()
+	if err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("direct deposit: %w", err))
+		return b
+	}
+	if b.tx.Body.TxDirectDeposits == nil {
+		b.tx.Body.TxDirectDeposits = map[cbor.ByteString]uint64{}
+	}
+	b.tx.Body.TxDirectDeposits[cbor.NewByteString(raw)] = coin
+	b.tx.Body.SetCbor(nil)
+	return b
+}
+
+// WithAccountBalanceInterval sets the CIP-159 balance interval asserted for
+// account, replacing any earlier interval for the same account. Build rejects
+// an address that is not an account (reward) address.
+func (b *DijkstraTransactionBuilder) WithAccountBalanceInterval(
+	account common.Address,
+	interval dijkstra.DijkstraAccountBalanceInterval,
+) *DijkstraTransactionBuilder {
+	credential, err := account.RewardAccountCredential()
+	if err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("balance interval: %w", err))
+		return b
+	}
+	intervals := b.tx.Body.TxBalanceIntervals
+	if intervals == nil {
+		intervals = dijkstra.DijkstraAccountBalanceIntervals{}
+		b.tx.Body.TxBalanceIntervals = intervals
+	}
+	// Credential is keyed by pointer, so replace by value.
+	for existing := range intervals {
+		if existing.CredType == credential.CredType &&
+			existing.Credential == credential.Credential {
+			delete(intervals, existing)
+		}
+	}
+	intervals[&credential] = &interval
 	b.tx.Body.SetCbor(nil)
 	return b
 }
@@ -129,6 +183,9 @@ func (b *DijkstraTransactionBuilder) Build() (
 	*dijkstra.DijkstraTransaction,
 	error,
 ) {
+	if b.err != nil {
+		return nil, b.err
+	}
 	var auxCBOR []byte
 	if b.metadata != nil {
 		encoded, err := encodeDijkstraMetadata(b.metadata)

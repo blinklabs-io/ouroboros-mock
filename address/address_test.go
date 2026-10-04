@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAddressBuilderTypes(t *testing.T) {
@@ -212,4 +213,34 @@ func TestAddressBuilderPointerCoordinates(t *testing.T) {
 			pointer,
 		)
 	}
+}
+
+func TestBuildAccountMatchesCIP159Header(t *testing.T) {
+	t.Parallel()
+	hash := bytes.Repeat([]byte{7}, common.AddressHashSize)
+	for _, tc := range []struct {
+		name    string
+		builder *AddressBuilder
+		header  byte
+		credTyp uint
+	}{
+		{"testnet key", NewAddress().WithStakingKeyHash(hash), 0xe0, common.CredentialTypeAddrKeyHash},
+		{"mainnet key", NewAddress().WithMainnet().WithStakingKeyHash(hash), 0xe1, common.CredentialTypeAddrKeyHash},
+		{"testnet script", NewAddress().WithStakingScript(hash), 0xf0, common.CredentialTypeScriptHash},
+		{"mainnet script", NewAddress().WithMainnet().WithStakingScript(hash), 0xf1, common.CredentialTypeScriptHash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			account, err := tc.builder.BuildAccount()
+			require.NoError(t, err)
+			raw, err := account.Bytes()
+			require.NoError(t, err)
+			require.Equal(t, append([]byte{tc.header}, hash...), raw)
+			credential, err := account.RewardAccountCredential()
+			require.NoError(t, err)
+			require.Equal(t, tc.credTyp, credential.CredType)
+		})
+	}
+	_, err := NewAddress().BuildAccount()
+	require.Error(t, err)
 }
