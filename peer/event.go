@@ -27,9 +27,9 @@
 // transactions through tx-submission and records what the node requests;
 // [Upstream] collects what a node relays to it.
 //
-// Every peer publishes [Event] values on a channel that never drops and never
-// blocks the protocol, so tests wait on the event they expect instead of
-// sleeping.
+// Every peer publishes [Event] values on a bounded, ordered channel. Tests
+// should consume events as the protocol runs; a stalled consumer applies
+// backpressure instead of allowing event memory to grow without limit.
 package peer
 
 import (
@@ -108,12 +108,13 @@ type Event struct {
 	Err error
 }
 
-// eventStream is an unbounded, ordered event queue drained onto a channel.
-// Publishing never blocks, so a protocol callback can report an event without
-// waiting on the test.
+const eventQueueCapacity = 256
+
+// eventStream is a bounded, ordered event queue drained onto a channel.
 type eventStream struct {
 	mu     sync.Mutex
 	queue  []Event
+	slots  chan struct{}
 	wake   chan struct{}
 	out    chan Event
 	done   chan struct{}
@@ -123,18 +124,26 @@ type eventStream struct {
 
 func newEventStream() *eventStream {
 	s := &eventStream{
-		wake: make(chan struct{}, 1),
-		out:  make(chan Event),
-		done: make(chan struct{}),
+		queue: make([]Event, 0, eventQueueCapacity),
+		slots: make(chan struct{}, eventQueueCapacity),
+		wake:  make(chan struct{}, 1),
+		out:   make(chan Event),
+		done:  make(chan struct{}),
 	}
 	go s.pump()
 	return s
 }
 
 func (s *eventStream) publish(e Event) {
+	select {
+	case s.slots <- struct{}{}:
+	case <-s.done:
+		return
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		<-s.slots
 		return
 	}
 	s.queue = append(s.queue, e)
@@ -153,7 +162,6 @@ func (s *eventStream) pump() {
 		have := len(s.queue) > 0
 		if have {
 			e = s.queue[0]
-			s.queue = s.queue[1:]
 		}
 		s.mu.Unlock()
 		if !have {
@@ -166,6 +174,11 @@ func (s *eventStream) pump() {
 		}
 		select {
 		case s.out <- e:
+			s.mu.Lock()
+			s.queue[0] = Event{}
+			s.queue = s.queue[1:]
+			s.mu.Unlock()
+			<-s.slots
 		case <-s.done:
 			return
 		}

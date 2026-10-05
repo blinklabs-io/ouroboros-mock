@@ -282,8 +282,8 @@ func (u *Upstream) Close() error {
 	for _, s := range sessions {
 		_ = s.conn.Close()
 	}
-	u.wg.Wait()
 	u.events.close()
+	u.wg.Wait()
 	return nil
 }
 
