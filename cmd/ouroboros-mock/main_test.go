@@ -262,6 +262,49 @@ func TestTCPConversationDrainsFinalResponse(t *testing.T) {
 	}
 }
 
+func TestTCPConversationPreservesResponseAfterCloseWrite(t *testing.T) {
+	_, entries, err := loadConfiguration(strings.NewReader(demoConfig))
+	require.NoError(t, err)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	result := make(chan error, 1)
+	go func() { result <- serve(context.Background(), listener, entries) }()
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	require.NoError(t, err)
+	client := conn.(*net.TCPConn)
+	defer client.Close()
+	require.NoError(t, client.SetDeadline(time.Now().Add(5*time.Second)))
+	sendMessage(
+		t,
+		client,
+		handshake.ProtocolId,
+		handshake.NewMsgProposeVersions(
+			protocol.ProtocolVersionMap{
+				13: protocol.VersionDataNtN13andUp{
+					VersionDataNtN11to12: protocol.VersionDataNtN11to12{CborNetworkMagic: 42},
+				},
+			},
+		),
+	)
+	_ = readMessage(t, client, handshake.ProtocolId)
+	sendMessage(t, client, keepalive.ProtocolId, keepalive.NewMsgKeepAlive(123))
+	require.NoError(t, client.CloseWrite())
+	payload := readMessage(t, client, keepalive.ProtocolId)
+	decoded, err := keepalive.NewMsgFromCbor(keepalive.MessageTypeKeepAliveResponse, payload)
+	require.NoError(t, err)
+	require.Equal(t, uint16(123), decoded.(*keepalive.MsgKeepAliveResponse).Cookie)
+	var one [1]byte
+	_, err = client.Read(one[:])
+	require.ErrorIs(t, err, io.EOF)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("listener did not finish after draining the half-closed client response")
+	}
+}
+
 func TestIdleClientTimesOutBeforeInitialMessageCompletes(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

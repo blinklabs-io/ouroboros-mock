@@ -209,11 +209,16 @@ func bridge(
 	case result = <-conversation:
 	case inResult = <-incoming:
 		inDone = true
-		if inResult.sourceErr == nil && (errors.Is(inResult.err, io.ErrClosedPipe) || errors.Is(inResult.err, net.ErrClosed)) {
+		if errors.Is(inResult.sourceErr, io.EOF) ||
+			(inResult.sourceErr == nil && (errors.Is(inResult.err, io.ErrClosedPipe) || errors.Is(inResult.err, net.ErrClosed))) {
+			timer := time.NewTimer(drainTimeout)
+			defer timer.Stop()
 			select {
 			case result = <-conversation:
 			case <-ctx.Done():
 				result = ctx.Err()
+			case <-timer.C:
+				result = io.ErrUnexpectedEOF
 			}
 		} else {
 			select {
