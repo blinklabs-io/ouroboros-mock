@@ -238,6 +238,44 @@ func TestConcurrentOversizedSends(t *testing.T) {
 	csmock.VerifyConcurrentOversizedSends(t)
 }
 
+// Concurrent Harness.FindIntersect calls, each sending a multi-segment
+// message, must all reach the responder as complete requests.
+func TestConcurrentFindIntersect(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	const numPoints = 2000
+	const senders = 4
+	points := make([]pcommon.Point, numPoints)
+	for i := range points {
+		hash := make([]byte, 32)
+		binary.BigEndian.PutUint64(hash, uint64(i))
+		points[i] = pcommon.NewPoint(uint64(i), hash)
+	}
+
+	gotCounts := make(chan int, senders)
+	r := &responder{
+		findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
+			gotCounts <- len(p)
+			return csmock.OriginPoint(), chainsync.Tip{}, nil
+		},
+	}
+	h := newHarness(t, csmock.ModeNtC, r)
+	defer h.Close()
+
+	sendErrs := make(chan error, senders)
+	for range senders {
+		go func() { sendErrs <- h.FindIntersect(points) }()
+	}
+	for range senders {
+		require.NoError(t, <-sendErrs)
+	}
+	for range senders {
+		msg := observe(t, h)
+		require.True(t, msg.IsIntersectFound(), "expected IntersectFound")
+		require.Equal(t, numPoints, <-gotCounts)
+	}
+}
+
 func TestRequestNextRollForward(t *testing.T) {
 	for _, tc := range allModes() {
 		t.Run(tc.name, func(t *testing.T) {
