@@ -100,7 +100,15 @@ func TestBridgePreservesReadFailureAfterConversationCompletion(t *testing.T) {
 			conversation := make(chan error)
 			close(conversation)
 			result := make(chan error, 1)
-			go func() { result <- bridge(context.Background(), conn, mocked, conversation) }()
+			go func() {
+				result <- bridge(
+					context.Background(),
+					conn,
+					mocked,
+					conversation,
+					handshake.ConfirmTimeout,
+				)
+			}()
 			select {
 			case err := <-result:
 				if errors.Is(readErr, failure) {
@@ -438,7 +446,13 @@ func TestBridgeWriteFailureUnwindsConversation(t *testing.T) {
 	defer conn.Close()
 	result := make(chan error, 1)
 	go func() {
-		result <- bridge(context.Background(), failingWriterConn{Conn: server, err: failure}, conn, conn.ErrorChan())
+		result <- bridge(
+			context.Background(),
+			failingWriterConn{Conn: server, err: failure},
+			conn,
+			conn.ErrorChan(),
+			handshake.ConfirmTimeout,
+		)
 	}()
 	select {
 	case err := <-result:
@@ -453,6 +467,52 @@ func TestBridgeWriteFailureUnwindsConversation(t *testing.T) {
 	case <-conn.ErrorChan():
 	case <-time.After(time.Second):
 		t.Fatal("conversation did not unwind")
+	}
+}
+
+func TestBridgeBoundsSuccessfulResponseDrain(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	mocked, producer := net.Pipe()
+	defer producer.Close()
+	conversation := make(chan error)
+	result := make(chan error, 1)
+	go func() {
+		result <- bridge(
+			context.Background(),
+			server,
+			mocked,
+			conversation,
+			25*time.Millisecond,
+		)
+	}()
+	produced := make(chan error, 1)
+	go func() {
+		_, err := producer.Write([]byte("response"))
+		produced <- err
+		close(conversation)
+	}()
+	select {
+	case err := <-produced:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		_ = client.Close()
+		<-result
+		t.Fatal("mock response was not forwarded to the socket writer")
+	}
+	select {
+	case err := <-result:
+		require.Error(t, err)
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			require.True(t, netErr.Timeout())
+		} else {
+			t.Fatalf("blocked response drain did not return a network timeout: %v", err)
+		}
+	case <-time.After(time.Second):
+		_ = client.Close()
+		err := <-result
+		t.Fatalf("successful response drain remained blocked: %v", err)
 	}
 }
 

@@ -100,7 +100,7 @@ func serveWithInitialMessageTimeout(
 	if !ok {
 		return errors.New("mock connection does not report conversation completion")
 	}
-	return bridge(ctx, conn, mocked, conversation.ErrorChan())
+	return bridge(ctx, conn, mocked, conversation.ErrorChan(), handshake.ConfirmTimeout)
 }
 
 type initialMessageConn struct {
@@ -169,7 +169,12 @@ func copyConnection(destination io.Writer, source io.Reader, result chan<- copyR
 	result <- copyResult{err: err, sourceErr: reader.err}
 }
 
-func bridge(ctx context.Context, conn, mocked net.Conn, conversation <-chan error) error {
+func bridge(
+	ctx context.Context,
+	conn, mocked net.Conn,
+	conversation <-chan error,
+	drainTimeout time.Duration,
+) error {
 	incoming := make(chan copyResult, 1)
 	outgoing := make(chan copyResult, 1)
 	go copyConnection(mocked, conn, incoming)
@@ -222,6 +227,13 @@ func bridge(ctx context.Context, conn, mocked net.Conn, conversation <-chan erro
 	}
 	// Successful completion drains the last response before closing the socket.
 	if !outDone {
+		if result == nil {
+			if err := conn.SetWriteDeadline(time.Now().Add(drainTimeout)); err != nil &&
+				!errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, net.ErrClosed) {
+				result = fmt.Errorf("set response drain deadline: %w", err)
+				_ = conn.Close()
+			}
+		}
 		outResult = <-outgoing
 	}
 	_ = conn.Close()
