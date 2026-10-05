@@ -112,23 +112,25 @@ const eventQueueCapacity = 256
 
 // eventStream is a bounded, ordered event queue drained onto a channel.
 type eventStream struct {
-	mu     sync.Mutex
-	queue  []Event
-	slots  chan struct{}
-	wake   chan struct{}
-	out    chan Event
-	done   chan struct{}
-	closed bool
-	once   sync.Once
+	mu      sync.Mutex
+	queue   []Event
+	slots   chan struct{}
+	wake    chan struct{}
+	out     chan Event
+	done    chan struct{}
+	stopped chan struct{}
+	closed  bool
+	once    sync.Once
 }
 
 func newEventStream() *eventStream {
 	s := &eventStream{
-		queue: make([]Event, 0, eventQueueCapacity),
-		slots: make(chan struct{}, eventQueueCapacity),
-		wake:  make(chan struct{}, 1),
-		out:   make(chan Event),
-		done:  make(chan struct{}),
+		queue:   make([]Event, 0, eventQueueCapacity),
+		slots:   make(chan struct{}, eventQueueCapacity),
+		wake:    make(chan struct{}, 1),
+		out:     make(chan Event),
+		done:    make(chan struct{}),
+		stopped: make(chan struct{}),
 	}
 	go s.pump()
 	return s
@@ -155,7 +157,10 @@ func (s *eventStream) publish(e Event) {
 }
 
 func (s *eventStream) pump() {
-	defer close(s.out)
+	defer func() {
+		close(s.out)
+		close(s.stopped)
+	}()
 	for {
 		s.mu.Lock()
 		var e Event
@@ -193,5 +198,9 @@ func (s *eventStream) close() {
 		s.closed = true
 		s.mu.Unlock()
 		close(s.done)
+		<-s.stopped
+		s.mu.Lock()
+		s.queue = nil
+		s.mu.Unlock()
 	})
 }

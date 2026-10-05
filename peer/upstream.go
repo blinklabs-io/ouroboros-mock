@@ -96,10 +96,18 @@ func (u *Upstream) Chain() *Chain {
 
 // Append extends the selected chain and answers clients waiting at the tip.
 func (u *Upstream) Append(blocks ...ledger.Block) error {
+	u.mu.Lock()
+	if u.closed {
+		u.mu.Unlock()
+		return ErrClosed
+	}
 	if err := u.chain.Append(blocks...); err != nil {
+		u.mu.Unlock()
 		return err
 	}
-	u.wakeSessions()
+	sessions := u.sessionsLocked()
+	u.mu.Unlock()
+	wakeSessions(sessions)
 	return nil
 }
 
@@ -108,11 +116,19 @@ func (u *Upstream) Append(blocks ...ledger.Block) error {
 // to it and then the new branch; clients waiting at the old tip are answered
 // without a further request.
 func (u *Upstream) SwitchFork(fork []ledger.Block) (pcommon.Point, error) {
+	u.mu.Lock()
+	if u.closed {
+		u.mu.Unlock()
+		return pcommon.Point{}, ErrClosed
+	}
 	point, err := u.chain.SwitchFork(fork)
 	if err != nil {
+		u.mu.Unlock()
 		return pcommon.Point{}, err
 	}
-	u.wakeSessions()
+	sessions := u.sessionsLocked()
+	u.mu.Unlock()
+	wakeSessions(sessions)
 	return point, nil
 }
 
@@ -287,13 +303,15 @@ func (u *Upstream) Close() error {
 	return nil
 }
 
-func (u *Upstream) wakeSessions() {
-	u.mu.Lock()
+func (u *Upstream) sessionsLocked() []*session {
 	sessions := make([]*session, 0, len(u.sessions))
 	for _, s := range u.sessions {
 		sessions = append(sessions, s)
 	}
-	u.mu.Unlock()
+	return sessions
+}
+
+func wakeSessions(sessions []*session) {
 	for _, s := range sessions {
 		s.wake()
 	}

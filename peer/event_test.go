@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -134,4 +135,15 @@ func TestEventStreamCloseUnblocksPublisher(t *testing.T) {
 			return false
 		}
 	}, time.Second, time.Millisecond)
+}
+
+func TestEventStreamCloseDiscardsQueuedEvents(t *testing.T) {
+	s := newEventStream()
+	s.publish(Event{Kind: EventRequestNext, Points: make([]pcommon.Point, 1)})
+
+	s.close()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	require.Empty(t, s.queue)
 }

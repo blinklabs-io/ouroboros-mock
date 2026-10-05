@@ -15,6 +15,8 @@
 package peer_test
 
 import (
+	"net"
+	"sync/atomic"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -23,6 +25,16 @@ import (
 	"github.com/blinklabs-io/ouroboros-mock/peer"
 	"github.com/stretchr/testify/require"
 )
+
+type closeTrackingConn struct {
+	net.Conn
+	closed atomic.Bool
+}
+
+func (c *closeTrackingConn) Close() error {
+	c.closed.Store(true)
+	return c.Conn.Close()
+}
 
 func newFollower(
 	t *testing.T,
@@ -142,4 +154,16 @@ func TestFollowerRollsBackToItsIntersection(t *testing.T) {
 		[]pcommon.Point{csmock.PointOf(fork[0]), csmock.PointOf(fork[1])},
 		f.Followed(),
 	)
+}
+
+func TestNewFollowerClosesConnectionAfterHandshakeFailure(t *testing.T) {
+	t.Parallel()
+	client, server := net.Pipe()
+	conn := &closeTrackingConn{Conn: client}
+	require.NoError(t, server.Close())
+
+	_, err := peer.NewFollower(peer.FollowerConfig{Conn: conn})
+
+	require.Error(t, err)
+	require.True(t, conn.closed.Load())
 }

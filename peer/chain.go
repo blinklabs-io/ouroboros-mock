@@ -227,6 +227,7 @@ func (c *Chain) find(
 func (c *Chain) rangeOf(start, end pcommon.Point) ([]ledger.Block, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	startAtOrigin := start.Slot == 0 && len(start.Hash) == 0
 	var out []ledger.Block
 	hash := end.Hash
 	for {
@@ -242,6 +243,11 @@ func (c *Chain) rangeOf(start, end pcommon.Point) ([]ledger.Block, bool) {
 			break
 		}
 		hash = b.PrevHash().Bytes()
+		if startAtOrigin {
+			if _, ok := c.byHash[string(hash)]; !ok {
+				break
+			}
+		}
 	}
 	if out[0].SlotNumber() != end.Slot {
 		return nil, false

@@ -16,6 +16,7 @@ package peer_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"testing"
@@ -399,5 +400,102 @@ func TestUpstreamCloseUnblocksPendingHandshake(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(closeTimeout):
 		require.FailNow(t, "Close did not return")
+	}
+}
+
+func TestUpstreamRejectsChainChangesAfterClose(t *testing.T) {
+	t.Parallel()
+	chain := buildChain(t, 2, common.Blake2b256{}, 1, 100)
+	up, err := peer.NewUpstream(peer.UpstreamConfig{Blocks: chain})
+	require.NoError(t, err)
+	require.NoError(t, up.Close())
+
+	more := buildChain(t, 1, chain[1].Hash(), 3, 120)
+	require.ErrorIs(t, up.Append(more...), peer.ErrClosed)
+	require.Len(t, up.Chain().Blocks(), len(chain))
+
+	fork := forkOf(t, chain, 0, 1)
+	_, err = up.SwitchFork(fork)
+	require.ErrorIs(t, err, peer.ErrClosed)
+	require.Equal(t, chain, up.Chain().Blocks())
+}
+
+func TestUpstreamCloseSerializesChainChanges(t *testing.T) {
+	t.Parallel()
+	chain := buildChain(t, 2, common.Blake2b256{}, 1, 100)
+	fork := forkOf(t, chain, 0, 1)
+	appendBlocks := buildChain(t, 1, chain[1].Hash(), 3, 120)
+
+	for _, change := range []struct {
+		name string
+		fn   func(*peer.Upstream) error
+		want []ledger.Block
+	}{
+		{
+			name: "append",
+			fn: func(up *peer.Upstream) error {
+				return up.Append(appendBlocks...)
+			},
+			want: append(append([]ledger.Block(nil), chain...), appendBlocks...),
+		},
+		{
+			name: "switch fork",
+			fn: func(up *peer.Upstream) error {
+				_, err := up.SwitchFork(fork)
+				return err
+			},
+			want: append(append([]ledger.Block(nil), chain[:1]...), fork...),
+		},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			t.Parallel()
+			prior, err := peer.NewUpstream(peer.UpstreamConfig{Blocks: chain})
+			require.NoError(t, err)
+			require.NoError(t, change.fn(prior))
+			priorClosed := make(chan error, 1)
+			go func() { priorClosed <- prior.Close() }()
+			select {
+			case err := <-priorClosed:
+				require.NoError(t, err)
+			case <-time.After(closeTimeout):
+				require.FailNow(t, "Close did not return after chain change")
+			}
+			require.Equal(t, change.want, prior.Chain().Blocks())
+
+			up, err := peer.NewUpstream(peer.UpstreamConfig{Blocks: chain})
+			require.NoError(t, err)
+
+			start := make(chan struct{})
+			closed := make(chan error, 1)
+			changed := make(chan error, 1)
+			go func() {
+				<-start
+				closed <- up.Close()
+			}()
+			go func() {
+				<-start
+				changed <- change.fn(up)
+			}()
+			close(start)
+
+			select {
+			case err := <-closed:
+				require.NoError(t, err)
+			case <-time.After(closeTimeout):
+				require.FailNow(t, "Close did not return")
+			}
+			select {
+			case err := <-changed:
+				require.True(t, err == nil || errors.Is(err, peer.ErrClosed))
+				expected := chain
+				if err == nil {
+					expected = change.want
+				}
+				require.Equal(t, expected, up.Chain().Blocks())
+			case <-time.After(closeTimeout):
+				require.FailNow(t, "chain change did not return")
+			}
+			require.ErrorIs(t, change.fn(up), peer.ErrClosed)
+		})
 	}
 }

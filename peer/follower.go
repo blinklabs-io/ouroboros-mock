@@ -94,6 +94,7 @@ func NewFollower(cfg FollowerConfig) (*Follower, error) {
 		ouroboros.WithBlockFetchConfig(bfCfg),
 	)
 	if err != nil {
+		_ = cfg.Conn.Close()
 		f.events.close()
 		return nil, fmt.Errorf("handshake: %w", err)
 	}

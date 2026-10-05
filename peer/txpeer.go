@@ -178,7 +178,7 @@ func (p *TxPeer) requestTxs(
 	for _, id := range ids {
 		requested = append(requested, id.TxId)
 		for _, tx := range p.txs[:p.announced] {
-			if tx.ID == id.TxId {
+			if tx.EraId == id.EraId && tx.ID == id.TxId {
 				out = append(out, txsubmission.TxBody{
 					EraId:  tx.EraId,
 					TxBody: tx.Raw,
