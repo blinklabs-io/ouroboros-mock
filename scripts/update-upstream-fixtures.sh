@@ -133,6 +133,10 @@ copy_with_parents "${consensus_root}" "ouroboros-consensus" \
 	"${consensus_files[@]}"
 
 ledger_files=(
+	"eras/byron/ledger/impl/golden/cbor/ssc/CommitmentsMap"
+	"eras/byron/ledger/impl/golden/cbor/ssc/OpeningsMap"
+	"eras/byron/ledger/impl/golden/cbor/ssc/SharesMap"
+	"eras/byron/ledger/impl/golden/cbor/ssc/VssCertificatesMap"
 	"eras/shelley/impl/golden/pparams.json"
 	"eras/shelley/impl/golden/pparams-update.json"
 	"eras/alonzo/test-suite/golden/block.cbor"
@@ -152,6 +156,8 @@ done
 copy_with_parents "${ledger_root}" "cardano-ledger" "${ledger_files[@]}"
 
 api_files=(
+	"cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.bin"
+	"cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.txt"
 	"cardano-api/test/cardano-api-golden/files/LegacyProtocolParameters.json"
 	"cardano-api/test/cardano-api-golden/files/ShelleyGenesis.json"
 	"cardano-api/test/cardano-api-golden/files/tx-canonical.json"

@@ -17,8 +17,10 @@ package fixtures
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -39,20 +41,66 @@ type ConsensusEnvelope struct {
 	Payload cbor.RawMessage
 }
 
-// Read returns the raw fixture file contents from disk.
+// Read returns the raw fixture file contents from disk, confined to the root
+// described by Path and RelPath. A fixture with only Path uses its parent
+// directory as the root. Symlinks must stay within that root.
 func (f Fixture) Read() ([]byte, error) {
-	return os.ReadFile(f.Path)
+	if f.Path == "" {
+		return nil, errors.New("fixture path is empty")
+	}
+	path := filepath.Clean(f.Path)
+	if f.RelPath == "" {
+		return readFileInRoot(filepath.Dir(path), filepath.Base(path))
+	}
+	relPath := filepath.FromSlash(f.RelPath)
+	if !filepath.IsLocal(relPath) {
+		return nil, fmt.Errorf("fixture path %q escapes its root", f.RelPath)
+	}
+	relPath = filepath.Clean(relPath)
+	root := path
+	for range strings.Split(relPath, string(filepath.Separator)) {
+		root = filepath.Dir(root)
+	}
+	if filepath.Join(root, relPath) != path {
+		return nil, fmt.Errorf(
+			"fixture path %q does not match relative path %q",
+			f.Path,
+			f.RelPath,
+		)
+	}
+	return readFileInRoot(root, relPath)
 }
 
-// DecodeHex decodes a hex-encoded fixture payload.
+func readFileInRoot(root, name string) ([]byte, error) {
+	file, err := openRegularFileInRoot(root, name)
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(file)
+	return data, errors.Join(err, file.Close())
+}
+
+// DecodeHex decodes a hex-encoded fixture payload, including upstream annotated
+// dumps whose hexadecimal offsets must match the decoded byte positions.
 func (f Fixture) DecodeHex() ([]byte, error) {
-	if f.Format != FormatHex {
+	if f.Format != FormatHex && f.Format != FormatHexDump {
 		return nil, fmt.Errorf("fixture %s is not hex-encoded", f.RelPath)
 	}
 
 	data, err := f.Read()
 	if err != nil {
 		return nil, err
+	}
+	if f.Format == FormatHexDump {
+		decoded, err := decodeHexDump(data)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to decode hex fixture %s: %w",
+				f.RelPath,
+				err,
+			)
+		}
+		return decoded, nil
 	}
 
 	decoded, err := hex.DecodeString(strings.TrimSpace(string(data)))
