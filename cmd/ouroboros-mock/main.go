@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +24,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/blinklabs-io/gouroboros/protocol/handshake"
 	mock "github.com/blinklabs-io/ouroboros-mock"
 )
 
@@ -63,6 +66,15 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 }
 
 func serve(ctx context.Context, listener net.Listener, entries []mock.ConversationEntry) error {
+	return serveWithInitialMessageTimeout(ctx, listener, entries, handshake.ProposeTimeout)
+}
+
+func serveWithInitialMessageTimeout(
+	ctx context.Context,
+	listener net.Listener,
+	entries []mock.ConversationEntry,
+	timeout time.Duration,
+) error {
 	acceptDone := make(chan struct{})
 	stopAccept := context.AfterFunc(ctx, func() { _ = listener.Close(); close(acceptDone) })
 	defer func() {
@@ -78,6 +90,10 @@ func serve(ctx context.Context, listener net.Listener, entries []mock.Conversati
 		return fmt.Errorf("accept: %w", err)
 	}
 	defer conn.Close()
+	conn, err = withInitialMessageTimeout(conn, timeout)
+	if err != nil {
+		return err
+	}
 	mocked := mock.NewConnection(mock.ProtocolRoleClient, entries)
 	defer mocked.Close()
 	conversation, ok := mocked.(interface{ ErrorChan() <-chan error })
@@ -85,6 +101,48 @@ func serve(ctx context.Context, listener net.Listener, entries []mock.Conversati
 		return errors.New("mock connection does not report conversation completion")
 	}
 	return bridge(ctx, conn, mocked, conversation.ErrorChan())
+}
+
+type initialMessageConn struct {
+	net.Conn
+	header           [8]byte
+	headerBytes      int
+	payloadRemaining int
+	complete         bool
+}
+
+func withInitialMessageTimeout(conn net.Conn, timeout time.Duration) (net.Conn, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, fmt.Errorf("set initial message deadline: %w", err)
+	}
+	return &initialMessageConn{Conn: conn}, nil
+}
+
+func (c *initialMessageConn) Read(data []byte) (int, error) {
+	n, err := c.Conn.Read(data)
+	if n == 0 || c.complete {
+		return n, err
+	}
+	remaining := data[:n]
+	if c.headerBytes < len(c.header) {
+		copied := copy(c.header[c.headerBytes:], remaining)
+		c.headerBytes += copied
+		remaining = remaining[copied:]
+		if c.headerBytes == len(c.header) {
+			c.payloadRemaining = int(binary.BigEndian.Uint16(c.header[6:8]))
+		}
+	}
+	if c.headerBytes == len(c.header) {
+		consumed := min(len(remaining), c.payloadRemaining)
+		c.payloadRemaining -= consumed
+		if c.payloadRemaining == 0 {
+			c.complete = true
+			if clearErr := c.SetReadDeadline(time.Time{}); clearErr != nil && err == nil {
+				err = fmt.Errorf("clear initial message deadline: %w", clearErr)
+			}
+		}
+	}
+	return n, err
 }
 
 type copyResult struct {

@@ -69,6 +69,8 @@ If the entry produces an error matching the `ExpectedError`, the conversation co
 Run `ouroboros-mock demo.yaml` to listen for one connection and execute the
 conversation. The process exits after the conversation finishes. Interrupting
 the process cancels the listener and active conversation.
+The first complete multiplexed message must arrive within the 10-second
+node-to-node handshake proposal timeout.
 
 ```yaml
 listener:

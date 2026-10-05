@@ -254,6 +254,102 @@ func TestTCPConversationDrainsFinalResponse(t *testing.T) {
 	}
 }
 
+func TestIdleClientTimesOutBeforeInitialMessageCompletes(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	result := make(chan error, 1)
+	go func() {
+		result <- serveWithInitialMessageTimeout(
+			context.Background(),
+			listener,
+			[]mock.ConversationEntry{
+				mock.ConversationEntryInput{
+					ProtocolId:      handshake.ProtocolId,
+					MessageType:     handshake.MessageTypeProposeVersions,
+					MsgFromCborFunc: handshake.NewMsgFromCbor,
+				},
+			},
+			50*time.Millisecond,
+		)
+	}()
+	client, err := net.Dial("tcp", listener.Addr().String())
+	require.NoError(t, err)
+	defer client.Close()
+	_, err = client.Write([]byte{0})
+	require.NoError(t, err)
+	select {
+	case err := <-result:
+		require.Error(t, err)
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			require.True(t, netErr.Timeout())
+		} else {
+			t.Fatalf("initial message failure is not a network timeout: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("partial initial message kept the listener occupied")
+	}
+}
+
+func TestInitialMessageTimeoutClearsAfterCompleteSegment(t *testing.T) {
+	_, entries, err := loadConfiguration(strings.NewReader(strings.Replace(
+		demoConfig,
+		"  - output:\n      type: handshake.accept_version",
+		"  - sleep: 100ms\n  - output:\n      type: handshake.accept_version",
+		1,
+	)))
+	require.NoError(t, err)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	result := make(chan error, 1)
+	go func() {
+		result <- serveWithInitialMessageTimeout(
+			context.Background(),
+			listener,
+			entries,
+			25*time.Millisecond,
+		)
+	}()
+	client, err := net.Dial("tcp", listener.Addr().String())
+	require.NoError(t, err)
+	defer client.Close()
+	require.NoError(t, client.SetDeadline(time.Now().Add(time.Second)))
+	sendMessage(
+		t,
+		client,
+		handshake.ProtocolId,
+		handshake.NewMsgProposeVersions(
+			protocol.ProtocolVersionMap{
+				13: protocol.VersionDataNtN13andUp{
+					VersionDataNtN11to12: protocol.VersionDataNtN11to12{CborNetworkMagic: 42},
+				},
+			},
+		),
+	)
+	header := make([]byte, 8)
+	_, err = io.ReadFull(client, header)
+	require.NoError(t, err, "initial message deadline remained active after a complete segment")
+	require.Equal(t, uint16(handshake.ProtocolId|0x8000), binary.BigEndian.Uint16(header[4:6]))
+	payload := make([]byte, binary.BigEndian.Uint16(header[6:8]))
+	_, err = io.ReadFull(client, payload)
+	require.NoError(t, err, "initial message deadline remained active after a complete segment")
+	decoded, err := handshake.NewMsgFromCbor(handshake.MessageTypeAcceptVersion, payload)
+	require.NoError(t, err)
+	accepted, ok := decoded.(*handshake.MsgAcceptVersion)
+	require.True(t, ok)
+	require.Equal(t, uint16(13), accepted.Version)
+	sendMessage(t, client, keepalive.ProtocolId, keepalive.NewMsgKeepAlive(123))
+	_ = readMessage(t, client, keepalive.ProtocolId)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("listener did not finish")
+	}
+}
+
 func sendMessage(t *testing.T, conn net.Conn, protocolID uint16, message protocol.Message) {
 	t.Helper()
 	payload, err := cbor.Encode(message)
