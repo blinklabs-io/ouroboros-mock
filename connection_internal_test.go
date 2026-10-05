@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/protocol"
+	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,5 +100,49 @@ func TestConnectionErrorDeliverySurvivesConcurrentClose(t *testing.T) {
 		}()
 		wg.Wait()
 		conn.closeErrorChan()
+	}
+}
+
+func TestCloseInterruptsConversationSleep(t *testing.T) {
+	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{
+		ConversationEntryOutput{ProtocolId: keepalive.ProtocolId, IsResponse: true, Messages: []protocol.Message{keepalive.NewMsgKeepAliveResponse(7)}},
+		ConversationEntrySleep{Duration: time.Hour},
+	}).(*Connection)
+	// Reading the output lets the conversation proceed to its sleep.
+	data := make([]byte, 64)
+	_, err := conn.Read(data)
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	select {
+	case _, ok := <-conn.ErrorChan():
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("closed conversation still sleeping")
+	}
+}
+
+func TestConversationSleepHonorsDuration(t *testing.T) {
+	started := time.Now()
+	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{ConversationEntrySleep{Duration: 50 * time.Millisecond}}).(*Connection)
+	defer conn.Close()
+	select {
+	case _, ok := <-conn.ErrorChan():
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("sleep did not finish")
+	}
+	require.GreaterOrEqual(t, time.Since(started), 50*time.Millisecond)
+}
+
+func TestCanceledConversationSleepReturnsImmediately(t *testing.T) {
+	conn := &Connection{doneChan: make(chan any)}
+	close(conn.doneChan)
+	finished := make(chan struct{})
+	go func() { conn.processSleepEntry(ConversationEntrySleep{Duration: 2 * time.Second}); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(500 * time.Millisecond):
+		<-finished
+		t.Fatal("canceled conversation slept for its original duration")
 	}
 }
