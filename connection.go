@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"reflect"
 	"regexp"
@@ -47,6 +48,8 @@ type Connection struct {
 	muxerRecvChan chan *muxer.Segment
 	doneChan      chan any
 	onceClose     sync.Once
+	onceInput     sync.Once
+	inputAccepted chan struct{}
 	errorChan     chan error
 	errorMu       sync.Mutex
 	errorClosed   bool
@@ -59,10 +62,11 @@ func NewConnection(
 	conversation []ConversationEntry,
 ) net.Conn {
 	c := &Connection{
-		conversation: conversation,
-		doneChan:     make(chan any),
-		errorChan:    make(chan error, 1),
-		inputBuffers: make(map[uint16]*bytes.Buffer),
+		conversation:  conversation,
+		doneChan:      make(chan any),
+		inputAccepted: make(chan struct{}),
+		errorChan:     make(chan error, 1),
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
 	}
 	c.conn, c.mockConn = net.Pipe()
 	// Start a muxer on the mocked side of the connection
@@ -93,6 +97,11 @@ func NewConnection(
 
 func (c *Connection) ErrorChan() <-chan error {
 	return c.errorChan
+}
+
+// FirstInputAccepted is closed after the first expected input message is decoded.
+func (c *Connection) FirstInputAccepted() <-chan struct{} {
+	return c.inputAccepted
 }
 
 // Read provides a proxy to the client-side connection's Read function. This is needed to satisfy the net.Conn interface
@@ -212,6 +221,8 @@ func (c *Connection) asyncLoop() {
 			} else if err != nil {
 				c.sendError(fmt.Errorf("input error: %w", err))
 				return
+			} else {
+				c.onceInput.Do(func() { close(c.inputAccepted) })
 			}
 		case ConversationEntryOutput:
 			err := c.processOutputEntry(entry)
@@ -267,7 +278,7 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 		// Wait for segment to be received from muxer
 		segment, ok := <-c.muxerRecvChan
 		if !ok {
-			return nil
+			return io.ErrUnexpectedEOF
 		}
 		if segment.GetProtocolId() != entry.ProtocolId {
 			return fmt.Errorf(

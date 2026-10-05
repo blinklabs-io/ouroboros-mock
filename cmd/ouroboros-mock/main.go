@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -96,53 +95,70 @@ func serveWithInitialMessageTimeout(
 	}
 	mocked := mock.NewConnection(mock.ProtocolRoleClient, entries)
 	defer mocked.Close()
-	conversation, ok := mocked.(interface{ ErrorChan() <-chan error })
+	conversation, ok := mocked.(interface {
+		ErrorChan() <-chan error
+		FirstInputAccepted() <-chan struct{}
+	})
 	if !ok {
 		return errors.New("mock connection does not report conversation completion")
 	}
-	return bridge(ctx, conn, mocked, conversation.ErrorChan(), handshake.ConfirmTimeout)
-}
-
-type initialMessageConn struct {
-	net.Conn
-	header           [8]byte
-	headerBytes      int
-	payloadRemaining int
-	complete         bool
+	return bridge(
+		ctx,
+		conn,
+		mocked,
+		waitForInitialMessage(conn, conversation.FirstInputAccepted(), conversation.ErrorChan()),
+		handshake.ConfirmTimeout,
+	)
 }
 
 func withInitialMessageTimeout(conn net.Conn, timeout time.Duration) (net.Conn, error) {
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, fmt.Errorf("set initial message deadline: %w", err)
 	}
-	return &initialMessageConn{Conn: conn}, nil
+	return conn, nil
 }
 
-func (c *initialMessageConn) Read(data []byte) (int, error) {
-	n, err := c.Conn.Read(data)
-	if n == 0 || c.complete {
-		return n, err
-	}
-	remaining := data[:n]
-	if c.headerBytes < len(c.header) {
-		copied := copy(c.header[c.headerBytes:], remaining)
-		c.headerBytes += copied
-		remaining = remaining[copied:]
-		if c.headerBytes == len(c.header) {
-			c.payloadRemaining = int(binary.BigEndian.Uint16(c.header[6:8]))
-		}
-	}
-	if c.headerBytes == len(c.header) {
-		consumed := min(len(remaining), c.payloadRemaining)
-		c.payloadRemaining -= consumed
-		if c.payloadRemaining == 0 {
-			c.complete = true
-			if clearErr := c.SetReadDeadline(time.Time{}); clearErr != nil && err == nil {
-				err = fmt.Errorf("clear initial message deadline: %w", clearErr)
+func waitForInitialMessage(
+	conn net.Conn,
+	accepted <-chan struct{},
+	conversation <-chan error,
+) <-chan error {
+	result := make(chan error, 1)
+	go func() {
+		defer close(result)
+		var pendingErr error
+		conversationOpen := true
+		select {
+		case <-accepted:
+		case err, ok := <-conversation:
+			select {
+			case <-accepted:
+				pendingErr = err
+				conversationOpen = ok
+			default:
+				if ok && err != nil {
+					result <- err
+				} else {
+					result <- errors.New("conversation completed before initial message")
+				}
+				return
 			}
 		}
-	}
-	return n, err
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			result <- fmt.Errorf("clear initial message deadline: %w", err)
+			return
+		}
+		if pendingErr != nil {
+			result <- pendingErr
+		}
+		if !conversationOpen {
+			return
+		}
+		for err := range conversation {
+			result <- err
+		}
+	}()
+	return result
 }
 
 type copyResult struct {

@@ -300,6 +300,108 @@ func TestIdleClientTimesOutBeforeInitialMessageCompletes(t *testing.T) {
 	}
 }
 
+func TestInitialMessageTimeoutRejectsUndecodedSegments(t *testing.T) {
+	for name, payload := range map[string][]byte{
+		"zero length":     nil,
+		"incomplete CBOR": {0x82},
+	} {
+		t.Run(name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			defer listener.Close()
+			result := make(chan error, 1)
+			go func() {
+				result <- serveWithInitialMessageTimeout(
+					context.Background(),
+					listener,
+					[]mock.ConversationEntry{
+						mock.ConversationEntryInput{
+							ProtocolId:      handshake.ProtocolId,
+							MessageType:     handshake.MessageTypeProposeVersions,
+							MsgFromCborFunc: handshake.NewMsgFromCbor,
+						},
+					},
+					50*time.Millisecond,
+				)
+			}()
+			client, err := net.Dial("tcp", listener.Addr().String())
+			require.NoError(t, err)
+			defer client.Close()
+			header := make([]byte, 8)
+			binary.BigEndian.PutUint16(header[4:6], handshake.ProtocolId)
+			binary.BigEndian.PutUint16(header[6:8], uint16(len(payload)))
+			_, err = client.Write(append(header, payload...))
+			require.NoError(t, err)
+			select {
+			case err := <-result:
+				require.Error(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("undecoded initial segment removed the read deadline")
+			}
+		})
+	}
+}
+
+type readDeadlineRecorder struct {
+	net.Conn
+	set chan time.Time
+}
+
+func (c *readDeadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	c.set <- deadline
+	return c.Conn.SetReadDeadline(deadline)
+}
+
+func TestInitialMessageDeadlineFollowsAcceptance(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	recorder := &readDeadlineRecorder{Conn: server, set: make(chan time.Time, 2)}
+	conn, err := withInitialMessageTimeout(recorder, time.Second)
+	require.NoError(t, err)
+	require.False(t, (<-recorder.set).IsZero())
+	accepted := make(chan struct{})
+	conversation := make(chan error)
+	close(accepted)
+	result := waitForInitialMessage(conn, accepted, conversation)
+	select {
+	case deadline := <-recorder.set:
+		require.True(t, deadline.IsZero())
+	case <-time.After(time.Second):
+		t.Fatal("accepted initial message did not clear the read deadline")
+	}
+	close(conversation)
+	require.NoError(t, <-result)
+
+	for name, conversationErr := range map[string]error{
+		"zero length":     nil,
+		"incomplete CBOR": errors.New("decode initial message: unexpected EOF"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			server, client := net.Pipe()
+			defer server.Close()
+			defer client.Close()
+			recorder := &readDeadlineRecorder{Conn: server, set: make(chan time.Time, 2)}
+			conn, err := withInitialMessageTimeout(recorder, time.Second)
+			require.NoError(t, err)
+			require.False(t, (<-recorder.set).IsZero())
+			accepted := make(chan struct{})
+			conversation := make(chan error, 1)
+			if conversationErr != nil {
+				conversation <- conversationErr
+			}
+			close(conversation)
+			result := waitForInitialMessage(conn, accepted, conversation)
+			require.Error(t, <-result)
+			select {
+			case <-recorder.set:
+				t.Fatal("rejected initial message cleared the read deadline")
+			default:
+			}
+		})
+	}
+}
+
 func TestInitialMessageTimeoutClearsAfterCompleteSegment(t *testing.T) {
 	_, entries, err := loadConfiguration(strings.NewReader(strings.Replace(
 		demoConfig,
