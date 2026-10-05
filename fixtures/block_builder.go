@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -225,6 +226,9 @@ func (b *BlockBuilder) buildDijkstra() (ledger.Block, error) {
 	}
 	txs := make([]dijkstra.DijkstraTransaction, len(b.transactions))
 	for i, tx := range b.transactions {
+		if transactionIsNil(tx) {
+			return nil, fmt.Errorf("transaction %d is nil", i)
+		}
 		v, ok := tx.(*dijkstra.DijkstraTransaction)
 		if !ok {
 			return nil, fmt.Errorf(
@@ -416,6 +420,9 @@ func splitTransaction(
 	tx common.Transaction,
 	hasValidFlag bool,
 ) (transactionParts, error) {
+	if transactionIsNil(tx) {
+		return transactionParts{}, errors.New("transaction is nil")
+	}
 	raw := tx.Cbor()
 	if len(raw) == 0 {
 		var err error
@@ -458,4 +465,16 @@ func splitTransaction(
 		parts.aux = auxField
 	}
 	return parts, nil
+}
+
+func transactionIsNil(tx common.Transaction) bool {
+	if tx == nil {
+		return true
+	}
+	value := reflect.ValueOf(tx)
+	kind := value.Kind()
+	canBeNil := kind == reflect.Chan || kind == reflect.Func ||
+		kind == reflect.Interface || kind == reflect.Map ||
+		kind == reflect.Pointer || kind == reflect.Slice
+	return canBeNil && value.IsNil()
 }

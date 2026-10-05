@@ -75,8 +75,8 @@ func (b *GenesisKeyDelegationBuilder) Build() (*lcommon.GenesisKeyDelegationCert
 	}
 	return &lcommon.GenesisKeyDelegationCertificate{
 		CertType:            uint(lcommon.CertificateTypeGenesisKeyDelegation),
-		GenesisHash:         b.genesisHash,
-		GenesisDelegateHash: b.genesisDelegateHash,
+		GenesisHash:         append([]byte(nil), b.genesisHash...),
+		GenesisDelegateHash: append([]byte(nil), b.genesisDelegateHash...),
 		VrfKeyHash:          lcommon.NewBlake2b256(b.vrfKeyHash),
 	}, nil
 }

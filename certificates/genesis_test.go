@@ -84,3 +84,23 @@ func TestGenesisKeyDelegationRejectsBadHashes(t *testing.T) {
 	_, err = good().WithVrfKeyHash(make([]byte, 28)).Build()
 	require.Error(t, err)
 }
+
+func TestGenesisKeyDelegationBuildsIndependentResults(t *testing.T) {
+	t.Parallel()
+	builder := certificates.NewGenesisKeyDelegation().
+		WithGenesisHash(bytes.Repeat([]byte{0x01}, 28)).
+		WithGenesisDelegateHash(bytes.Repeat([]byte{0x02}, 28)).
+		WithVrfKeyHash(bytes.Repeat([]byte{0x03}, 32))
+	first, err := builder.Build()
+	require.NoError(t, err)
+	second, err := builder.Build()
+	require.NoError(t, err)
+	first.GenesisHash[0] = 0xff
+	first.GenesisDelegateHash[0] = 0xff
+	require.Equal(t, byte(0x01), second.GenesisHash[0])
+	require.Equal(t, byte(0x02), second.GenesisDelegateHash[0])
+	third, err := builder.Build()
+	require.NoError(t, err)
+	require.Equal(t, byte(0x01), third.GenesisHash[0])
+	require.Equal(t, byte(0x02), third.GenesisDelegateHash[0])
+}

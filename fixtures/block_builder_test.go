@@ -335,6 +335,25 @@ func TestBlockBuilderRejectsMismatchedTransactions(t *testing.T) {
 	}
 }
 
+func TestBlockBuilderRejectsNilTransactions(t *testing.T) {
+	t.Parallel()
+	var conwayTx *conway.ConwayTransaction
+	_, err := fixtures.NewBlockBuilder(ledger.GetEraById(conway.EraIdConway)).
+		WithTransactions(conwayTx).
+		Build()
+	if err == nil || err.Error() != "transaction 0: transaction is nil" {
+		t.Fatalf("Conway nil transaction error = %v", err)
+	}
+
+	var dijkstraTx *dijkstra.DijkstraTransaction
+	_, err = fixtures.NewBlockBuilder(ledger.GetEraById(dijkstra.EraIdDijkstra)).
+		WithTransactions(dijkstraTx).
+		Build()
+	if err == nil || err.Error() != "transaction 0 is nil" {
+		t.Fatalf("Dijkstra nil transaction error = %v", err)
+	}
+}
+
 func TestBlockBuilderByronMainBlock(t *testing.T) {
 	t.Parallel()
 	era := ledger.GetEraById(byron.EraIdByron)
