@@ -453,7 +453,7 @@ func (m *MockStateManager) ApplyTransaction(
 				info.ProposedMembers = committeeMembersByHash(
 					info.ProposedMembersByCredential,
 				)
-				info.ProposedThreshold = ga.Quorum.Rat
+				info.ProposedThreshold = cloneBigRat(ga.Quorum.Rat)
 			case *common.TreasuryWithdrawalGovAction:
 				info.Withdrawals = make(
 					map[ledger.RewardAccountKey]uint64,

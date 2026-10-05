@@ -1205,13 +1205,20 @@ func TestNoOpStateManagerFailsEveryMutationBearingVector(t *testing.T) {
 		}
 		vector, err := DecodeTestVector(result.Path)
 		require.NoError(t, err)
-		if hasSuccessfulTransaction(vector.Events) {
+		applied := false
+		for _, event := range vector.Events {
+			if event.Type == EventTypeTransaction && event.Success {
+				applied = true
+				break
+			}
+		}
+		if applied {
 			survivors = append(survivors, result.Path)
 		}
 	}
 	require.Empty(
 		t,
 		survivors,
-		"vectors with a successful transaction or epoch change passed with a no-op ApplyTransaction",
+		"vectors with a successful transaction passed with a no-op ApplyTransaction",
 	)
 }

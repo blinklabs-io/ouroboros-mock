@@ -32,10 +32,9 @@ import (
 // govFixture builds a Conway governance state in which every voter class has
 // explicit stake, so each test can state the exact vote weights it exercises.
 type govFixture struct {
-	t     *testing.T
-	sm    *MockStateManager
-	seed  byte
-	votes map[string]uint8
+	t    *testing.T
+	sm   *MockStateManager
+	seed byte
 	// lastCold and lastPool identify the most recently added member and pool.
 	lastCold common.Blake2b224
 	lastPool common.PoolKeyHash
@@ -67,7 +66,7 @@ func newGovFixture(t *testing.T) *govFixture {
 			PpSecurityGroup:       half(),
 		},
 	}
-	return &govFixture{t: t, sm: sm, votes: map[string]uint8{}}
+	return &govFixture{t: t, sm: sm}
 }
 
 func requireRatEqual(t *testing.T, expected, actual *big.Rat) {

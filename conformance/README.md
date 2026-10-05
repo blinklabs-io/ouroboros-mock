@@ -53,7 +53,7 @@ if hasWithdrawalRedeemer {
 Proposals follow a strict lifecycle:
 1. **Submission** - Added to active proposals with ExpiresAfter = currentEpoch + govActionLifetime
 2. **Voting** - Votes are recorded during the epoch
-3. **Ratification** - At epoch boundary, proposals whose parent is the enacted root and that meet their stake-weighted committee, DRep and SPO thresholds are marked with RatifiedEpoch
+3. **Ratification** - At epoch boundary, proposals that meet their thresholds are marked with RatifiedEpoch. DRep and SPO votes are stake-weighted; committee votes are counted per active member. A proposal of a purpose with a root must chain from that purpose's current root, which advances as earlier proposals ratify and may not yet be enacted. Treasury withdrawals have no root. During the bootstrap phase the DRep threshold is zero
 4. **Enactment** - In the NEXT epoch, ratified proposals are enacted (roots updated)
 5. **Expiration** - Proposals past ExpiresAfter are removed
 
