@@ -29,7 +29,7 @@ import (
 
 // NewPoint returns a point suitable for mini-protocol messages.
 func NewPoint(slot uint64, hash []byte) pcommon.Point {
-	return pcommon.NewPoint(slot, hash)
+	return pcommon.NewPoint(slot, cloneBytes(hash))
 }
 
 // OriginPoint returns the chain origin point.
@@ -37,7 +37,53 @@ func OriginPoint() pcommon.Point { return pcommon.NewPointOrigin() }
 
 // NewTip returns a tip containing the supplied point and block number.
 func NewTip(point pcommon.Point, blockNumber uint64) chainsync.Tip {
-	return chainsync.Tip{Point: point, BlockNumber: blockNumber}
+	return chainsync.Tip{
+		Point:       clonePoint(point),
+		BlockNumber: blockNumber,
+	}
+}
+
+func clonePoint(point pcommon.Point) pcommon.Point {
+	point.Hash = cloneBytes(point.Hash)
+	return point
+}
+
+func cloneBytes(data []byte) []byte {
+	return append([]byte(nil), data...)
+}
+
+func cloneTip(tip chainsync.Tip) chainsync.Tip {
+	tip.Point = clonePoint(tip.Point)
+	return tip
+}
+
+func clonePoints(points []pcommon.Point) []pcommon.Point {
+	ret := make([]pcommon.Point, len(points))
+	for i, point := range points {
+		ret[i] = clonePoint(point)
+	}
+	return ret
+}
+
+func cloneTxIds(ids []txsubmission.TxId) []txsubmission.TxId {
+	ret := make([]txsubmission.TxId, len(ids))
+	copy(ret, ids)
+	return ret
+}
+
+func cloneTxIdsAndSizes(ids []txsubmission.TxIdAndSize) []txsubmission.TxIdAndSize {
+	ret := make([]txsubmission.TxIdAndSize, len(ids))
+	copy(ret, ids)
+	return ret
+}
+
+func cloneTxBodies(txs []txsubmission.TxBody) []txsubmission.TxBody {
+	ret := make([]txsubmission.TxBody, len(txs))
+	for i, tx := range txs {
+		ret[i] = tx
+		ret[i].TxBody = cloneBytes(tx.TxBody)
+	}
+	return ret
 }
 
 // ChainSyncRequestNext builds a node-to-node or node-to-client request-next
@@ -66,7 +112,12 @@ func ChainSyncRollForwardNtN(
 	header []byte,
 	tip chainsync.Tip,
 ) (ConversationEntryOutput, error) {
-	message, err := chainsync.NewMsgRollForwardNtN(era, byronType, header, tip)
+	message, err := chainsync.NewMsgRollForwardNtN(
+		era,
+		byronType,
+		header,
+		cloneTip(tip),
+	)
 	if err != nil {
 		return ConversationEntryOutput{}, err
 	}
@@ -85,7 +136,11 @@ func ChainSyncRollForwardNtC(
 	block []byte,
 	tip chainsync.Tip,
 ) (ConversationEntryOutput, error) {
-	message, err := chainsync.NewMsgRollForwardNtC(blockType, block, tip)
+	message, err := chainsync.NewMsgRollForwardNtC(
+		blockType,
+		block,
+		cloneTip(tip),
+	)
 	if err != nil {
 		return ConversationEntryOutput{}, err
 	}
@@ -121,7 +176,7 @@ func ChainSyncRollBackward(
 		ProtocolId: protocolID,
 		IsResponse: true,
 		Messages: []protocol.Message{
-			chainsync.NewMsgRollBackward(point, tip),
+			chainsync.NewMsgRollBackward(clonePoint(point), cloneTip(tip)),
 		},
 	}
 }
@@ -138,7 +193,7 @@ func ChainSyncFindIntersect(
 	}
 	return ConversationEntryInput{
 		ProtocolId:      protocolID,
-		Message:         chainsync.NewMsgFindIntersect(points),
+		Message:         chainsync.NewMsgFindIntersect(clonePoints(points)),
 		MessageType:     chainsync.MessageTypeFindIntersect,
 		MsgFromCborFunc: messageFromCbor,
 	}
@@ -166,7 +221,7 @@ func ChainSyncScenario(
 func BlockFetchRequestRange(start, end pcommon.Point) ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId:      blockfetch.ProtocolId,
-		Message:         blockfetch.NewMsgRequestRange(start, end),
+		Message:         blockfetch.NewMsgRequestRange(clonePoint(start), clonePoint(end)),
 		MessageType:     blockfetch.MessageTypeRequestRange,
 		MsgFromCborFunc: blockfetch.NewMsgFromCbor,
 	}
@@ -190,7 +245,7 @@ func BlockFetchBlock(block []byte) ConversationEntryOutput {
 		IsResponse: true,
 		Messages: []protocol.Message{
 			blockfetch.NewMsgStartBatch(),
-			blockfetch.NewMsgBlock(block),
+			blockfetch.NewMsgBlock(cloneBytes(block)),
 			blockfetch.NewMsgBatchDone(),
 		},
 	}
@@ -232,7 +287,7 @@ func TxSubmissionRequestTxs(ids []txsubmission.TxId) ConversationEntryOutput {
 		ProtocolId: txsubmission.ProtocolId,
 		IsResponse: true,
 		Messages: []protocol.Message{
-			txsubmission.NewMsgRequestTxs(ids),
+			txsubmission.NewMsgRequestTxs(cloneTxIds(ids)),
 		},
 	}
 }
@@ -248,7 +303,7 @@ func TxSubmissionReplyTxIds(
 	}
 	return ConversationEntryInput{
 		ProtocolId:      txsubmission.ProtocolId,
-		Message:         txsubmission.NewMsgReplyTxIds(ids),
+		Message:         txsubmission.NewMsgReplyTxIds(cloneTxIdsAndSizes(ids)),
 		MessageType:     txsubmission.MessageTypeReplyTxIds,
 		MsgFromCborFunc: txsubmission.NewMsgFromCbor,
 	}
@@ -262,7 +317,7 @@ func TxSubmissionReplyTxs(txs []txsubmission.TxBody) ConversationEntryInput {
 	}
 	return ConversationEntryInput{
 		ProtocolId:      txsubmission.ProtocolId,
-		Message:         txsubmission.NewMsgReplyTxs(txs),
+		Message:         txsubmission.NewMsgReplyTxs(cloneTxBodies(txs)),
 		MessageType:     txsubmission.MessageTypeReplyTxs,
 		MsgFromCborFunc: txsubmission.NewMsgFromCbor,
 	}
@@ -292,7 +347,7 @@ func LocalTxMonitorNextTx() ConversationEntryInput {
 func LocalTxMonitorHasTx(txID []byte) ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId:      localtxmonitor.ProtocolId,
-		Message:         localtxmonitor.NewMsgHasTx(txID),
+		Message:         localtxmonitor.NewMsgHasTx(cloneBytes(txID)),
 		MessageType:     localtxmonitor.MessageTypeHasTx,
 		MsgFromCborFunc: localtxmonitor.NewMsgFromCbor,
 	}
@@ -322,7 +377,7 @@ func LocalTxMonitorRelease() ConversationEntryInput {
 func LocalStateQueryAcquire(point pcommon.Point) ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId:      localstatequery.ProtocolId,
-		Message:         localstatequery.NewMsgAcquire(point),
+		Message:         localstatequery.NewMsgAcquire(clonePoint(point)),
 		MessageType:     localstatequery.MessageTypeAcquire,
 		MsgFromCborFunc: localstatequery.NewMsgFromCbor,
 	}
@@ -332,7 +387,7 @@ func LocalStateQueryAcquire(point pcommon.Point) ConversationEntryInput {
 func LocalStateQueryReAcquire(point pcommon.Point) ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId:      localstatequery.ProtocolId,
-		Message:         localstatequery.NewMsgReAcquire(point),
+		Message:         localstatequery.NewMsgReAcquire(clonePoint(point)),
 		MessageType:     localstatequery.MessageTypeReacquire,
 		MsgFromCborFunc: localstatequery.NewMsgFromCbor,
 	}

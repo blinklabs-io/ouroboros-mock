@@ -16,6 +16,7 @@ package ouroboros_mock
 
 import (
 	"errors"
+	"net"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/protocol"
@@ -59,13 +60,16 @@ func ChainSyncIntersectFound(
 	tip chainsync.Tip,
 ) ConversationEntryOutput {
 	id, _ := chainSyncMode(nodeToClient)
-	return protocolOutput(id, chainsync.NewMsgIntersectFound(point, tip))
+	return protocolOutput(
+		id,
+		chainsync.NewMsgIntersectFound(clonePoint(point), cloneTip(tip)),
+	)
 }
 
 // ChainSyncIntersectNotFound builds an unsuccessful intersection response.
 func ChainSyncIntersectNotFound(nodeToClient bool, tip chainsync.Tip) ConversationEntryOutput {
 	id, _ := chainSyncMode(nodeToClient)
-	return protocolOutput(id, chainsync.NewMsgIntersectNotFound(tip))
+	return protocolOutput(id, chainsync.NewMsgIntersectNotFound(cloneTip(tip)))
 }
 
 // ChainSyncDone builds a client termination entry for the negotiated mode.
@@ -123,7 +127,10 @@ func LocalTxMonitorAcquired(slot uint64) ConversationEntryOutput {
 
 // LocalTxMonitorReplyNextTx builds a next-transaction response; a nil transaction means none remain.
 func LocalTxMonitorReplyNextTx(era uint8, tx []byte) ConversationEntryOutput {
-	return protocolOutput(localtxmonitor.ProtocolId, localtxmonitor.NewMsgReplyNextTx(era, tx))
+	return protocolOutput(
+		localtxmonitor.ProtocolId,
+		localtxmonitor.NewMsgReplyNextTx(era, cloneBytes(tx)),
+	)
 }
 
 // LocalTxMonitorReplyHasTx builds a transaction-presence response.
@@ -251,5 +258,14 @@ func LocalStateQueryResult(result any) (ConversationEntryOutput, error) {
 
 // PeerSharingPeers builds a peer-address response. A nil slice describes no peers.
 func PeerSharingPeers(peers []peersharing.PeerAddress) ConversationEntryOutput {
-	return protocolOutput(peersharing.ProtocolId, peersharing.NewMsgSharePeers(peers))
+	return protocolOutput(peersharing.ProtocolId, peersharing.NewMsgSharePeers(clonePeers(peers)))
+}
+
+func clonePeers(peers []peersharing.PeerAddress) []peersharing.PeerAddress {
+	ret := make([]peersharing.PeerAddress, len(peers))
+	for i, peer := range peers {
+		ret[i] = peer
+		ret[i].IP = append(net.IP(nil), peer.IP...)
+	}
+	return ret
 }
