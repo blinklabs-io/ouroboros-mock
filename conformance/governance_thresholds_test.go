@@ -320,9 +320,10 @@ func TestRatificationParameterChangeUsesTouchedGroupThresholds(t *testing.T) {
 			PoolDeposit: new(uint),
 			MaxEpoch:    new(uint),
 		}, false},
-		{"max collateral inputs is technical", &conway.ConwayProtocolParameterUpdate{
+		// The network threshold is zero here, so a network-group change passes.
+		{"max collateral inputs is network", &conway.ConwayProtocolParameterUpdate{
 			MaxCollateralInputs: new(uint),
-		}, false},
+		}, true},
 		// The security group adds the pool vote, and no pool voted yes.
 		{"security group needs pools", securityAndEconomic, false},
 	} {

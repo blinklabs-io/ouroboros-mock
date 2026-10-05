@@ -2017,6 +2017,11 @@ func decodeWithdrawals(raw any) map[mockledger.RewardAccountKey]uint64 {
 	result := make(map[mockledger.RewardAccountKey]uint64, len(withdrawals))
 	for account, amount := range withdrawals {
 		if key := extractRewardAccountKey(account); key != nil {
+			// Distinct accounts can share a stake credential; a wrapped
+			// sum would understate the withdrawal against the treasury.
+			if amount > math.MaxUint64-result[*key] {
+				return nil
+			}
 			result[*key] += amount
 		}
 	}

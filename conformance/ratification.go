@@ -328,7 +328,8 @@ func parameterGroupThresholds(
 	var rats []cbor.Rat
 	if u.MaxBlockBodySize != nil || u.MaxTxSize != nil ||
 		u.MaxBlockHeaderSize != nil || u.MaxValueSize != nil ||
-		u.MaxTxExUnits != nil || u.MaxBlockExUnits != nil {
+		u.MaxTxExUnits != nil || u.MaxBlockExUnits != nil ||
+		u.MaxCollateralInputs != nil {
 		rats = append(rats, t.PpNetworkGroup)
 	}
 	if u.MinFeeA != nil || u.MinFeeB != nil || u.KeyDeposit != nil ||
@@ -338,8 +339,7 @@ func parameterGroupThresholds(
 		rats = append(rats, t.PpEconomicGroup)
 	}
 	if u.MaxEpoch != nil || u.NOpt != nil || u.A0 != nil ||
-		u.CostModels != nil || u.CollateralPercentage != nil ||
-		u.MaxCollateralInputs != nil {
+		u.CostModels != nil || u.CollateralPercentage != nil {
 		rats = append(rats, t.PpTechnicalGroup)
 	}
 	if u.PoolVotingThresholds != nil || u.DRepVotingThresholds != nil ||
