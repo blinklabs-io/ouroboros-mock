@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"testing"
 
@@ -273,10 +272,6 @@ func executeBlockFixture(
 	fixture Fixture,
 	fixtureMap map[string]Fixture,
 ) (int, error) {
-	if fixture.Repo == RepoOuroborosConsensus && fixture.Era == "dijkstra" {
-		return executeDijkstraConsensusBlockFixture(fixture, fixtureMap)
-	}
-
 	block, err := fixture.DecodeLedgerBlock()
 	if err != nil {
 		return 0, fmt.Errorf(
@@ -402,10 +397,6 @@ func executeHeaderFixture(
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindBlock); ok {
-		if counterpart.Repo == RepoOuroborosConsensus &&
-			counterpart.Era == "dijkstra" {
-			return 1, nil
-		}
 		block, err := counterpart.DecodeLedgerBlock()
 		if err != nil {
 			return 0, fmt.Errorf(
@@ -444,10 +435,6 @@ func executeTransactionFixture(
 	fixture Fixture,
 	fixtureMap map[string]Fixture,
 ) (int, error) {
-	if fixture.Repo == RepoOuroborosConsensus && fixture.Era == "dijkstra" {
-		return executeDijkstraConsensusTransactionFixture(fixture, fixtureMap)
-	}
-
 	tx, err := fixture.DecodeLedgerTransaction()
 	if err != nil {
 		return 0, fmt.Errorf(
@@ -511,10 +498,6 @@ func executeTransactionIDFixture(
 	fixture Fixture,
 	fixtureMap map[string]Fixture,
 ) (int, error) {
-	if fixture.Repo == RepoOuroborosConsensus && fixture.Era == "dijkstra" {
-		return executeDijkstraConsensusTransactionIDFixture(fixture, fixtureMap)
-	}
-
 	txIDBytes, err := fixture.LedgerTransactionIDBytes()
 	if err != nil {
 		return 0, fmt.Errorf(
@@ -775,278 +758,6 @@ func executeTranslationFixture(fixture Fixture) (int, error) {
 	}
 
 	return len(cases), nil
-}
-
-func executeDijkstraConsensusBlockFixture(
-	fixture Fixture,
-	fixtureMap map[string]Fixture,
-) (int, error) {
-	wrappedBytes, err := fixture.ConsensusBlockBytes()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to extract consensus block wrapper %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	dec, err := cbor.NewStreamDecoder(wrappedBytes)
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to create consensus block stream decoder %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	arrayLen, _, _, err := dec.DecodeArrayHeader()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode Dijkstra block wrapper header %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	if arrayLen != 2 {
-		return 0, fmt.Errorf(
-			"unexpected Dijkstra block wrapper width for %s: got %d want 2",
-			fixture.RelPath,
-			arrayLen,
-		)
-	}
-	var era uint
-	if _, _, err := dec.Decode(&era); err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode Dijkstra block era %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	expectedType, err := fixture.LedgerBlockType()
-	if err != nil {
-		return 0, err
-	}
-	if era != expectedType {
-		return 0, fmt.Errorf(
-			"unexpected one-era block identifier for %s: got %d want %d",
-			fixture.RelPath,
-			era,
-			expectedType,
-		)
-	}
-	if dec.EOF() {
-		return 0, fmt.Errorf(
-			"decoded Dijkstra block payload is empty: %s",
-			fixture.RelPath,
-		)
-	}
-	if _, _, err := dec.Skip(); err != nil {
-		// The streaming decoder can report io.ErrUnexpectedEOF on valid CBOR
-		// payloads that the non-streaming decoder accepts; tolerate it here.
-		if !errors.Is(err, io.ErrUnexpectedEOF) {
-			return 0, fmt.Errorf(
-				"failed to validate Dijkstra block payload %s: %w",
-				fixture.RelPath,
-				err,
-			)
-		}
-	} else if !dec.EOF() {
-		return 0, fmt.Errorf(
-			"unexpected trailing data in Dijkstra block wrapper %s",
-			fixture.RelPath,
-		)
-	}
-
-	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindHeader); ok {
-		header, err := counterpart.DecodeLedgerHeader()
-		if err != nil {
-			return 0, fmt.Errorf(
-				"failed to decode related header fixture %s: %w",
-				counterpart.RelPath,
-				err,
-			)
-		}
-		if len(header.Cbor()) == 0 {
-			return 0, fmt.Errorf(
-				"decoded related header has empty CBOR: %s",
-				counterpart.RelPath,
-			)
-		}
-	}
-
-	return 1, nil
-}
-
-func executeDijkstraConsensusTransactionFixture(
-	fixture Fixture,
-	fixtureMap map[string]Fixture,
-) (int, error) {
-	envelope, err := fixture.ConsensusEnvelope()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode consensus transaction envelope %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	expectedType, err := fixture.LedgerTransactionType()
-	if err != nil {
-		return 0, err
-	}
-	if envelope.Era != expectedType {
-		return 0, fmt.Errorf(
-			"unexpected consensus transaction era for %s: got %d want %d",
-			fixture.RelPath,
-			envelope.Era,
-			expectedType,
-		)
-	}
-
-	payloadBytes, err := envelope.BytesPayload()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to extract Dijkstra transaction payload %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	bodyHash, err := dijkstraConsensusTransactionBodyHash(payloadBytes)
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to validate Dijkstra transaction %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-
-	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindTransactionID); ok {
-		txIDBytes, err := counterpart.LedgerTransactionIDBytes()
-		if err != nil {
-			return 0, fmt.Errorf(
-				"failed to decode related transaction-id fixture %s: %w",
-				counterpart.RelPath,
-				err,
-			)
-		}
-		if !bytes.Equal(bodyHash, txIDBytes) {
-			return 0, fmt.Errorf(
-				"transaction/txid mismatch between %s and %s",
-				fixture.RelPath,
-				counterpart.RelPath,
-			)
-		}
-	}
-
-	return 1, nil
-}
-
-func executeDijkstraConsensusTransactionIDFixture(
-	fixture Fixture,
-	fixtureMap map[string]Fixture,
-) (int, error) {
-	txIDBytes, err := fixture.LedgerTransactionIDBytes()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode transaction-id fixture %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	if len(txIDBytes) != 32 {
-		return 0, fmt.Errorf(
-			"unexpected transaction-id length for %s: got %d",
-			fixture.RelPath,
-			len(txIDBytes),
-		)
-	}
-
-	envelope, err := fixture.ConsensusEnvelope()
-	if err != nil {
-		return 0, fmt.Errorf(
-			"failed to decode consensus transaction-id envelope %s: %w",
-			fixture.RelPath,
-			err,
-		)
-	}
-	expectedType, err := ledgerTransactionTypeForEra(fixture.Era)
-	if err != nil {
-		return 0, err
-	}
-	if envelope.Era != expectedType {
-		return 0, fmt.Errorf(
-			"unexpected consensus transaction-id era for %s: got %d want %d",
-			fixture.RelPath,
-			envelope.Era,
-			expectedType,
-		)
-	}
-
-	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindTransaction); ok {
-		consensusTx, err := counterpart.ConsensusEnvelope()
-		if err != nil {
-			return 0, fmt.Errorf(
-				"failed to decode related transaction fixture %s: %w",
-				counterpart.RelPath,
-				err,
-			)
-		}
-		payloadBytes, err := consensusTx.BytesPayload()
-		if err != nil {
-			return 0, fmt.Errorf(
-				"failed to extract related Dijkstra transaction payload %s: %w",
-				counterpart.RelPath,
-				err,
-			)
-		}
-		bodyHash, err := dijkstraConsensusTransactionBodyHash(payloadBytes)
-		if err != nil {
-			return 0, fmt.Errorf(
-				"failed to validate related Dijkstra transaction %s: %w",
-				counterpart.RelPath,
-				err,
-			)
-		}
-		if !bytes.Equal(bodyHash, txIDBytes) {
-			return 0, fmt.Errorf(
-				"transaction-id/transaction mismatch between %s and %s",
-				fixture.RelPath,
-				counterpart.RelPath,
-			)
-		}
-	}
-
-	return 1, nil
-}
-
-func dijkstraConsensusTransactionBodyHash(payload []byte) ([]byte, error) {
-	var items []cbor.RawMessage
-	if _, err := cbor.Decode(payload, &items); err != nil {
-		return nil, fmt.Errorf(
-			"failed to decode Dijkstra transaction payload: %w",
-			err,
-		)
-	}
-	if len(items) != 3 {
-		return nil, fmt.Errorf(
-			"unexpected Dijkstra transaction payload width: got %d want 3",
-			len(items),
-		)
-	}
-	for idx, item := range items {
-		if len(item) == 0 {
-			return nil, fmt.Errorf(
-				"empty Dijkstra transaction payload item %d",
-				idx,
-			)
-		}
-		if err := validateArbitraryCbor(item, fmt.Sprintf("Dijkstra transaction payload item %d", idx)); err != nil {
-			return nil, fmt.Errorf(
-				"failed to decode Dijkstra transaction payload item %d: %w",
-				idx,
-				err,
-			)
-		}
-	}
-	hash := gcommon.Blake2b256Hash(items[0])
-	return hash.Bytes(), nil
 }
 
 type translationProtocolVersion struct {
