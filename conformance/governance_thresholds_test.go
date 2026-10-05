@@ -70,6 +70,12 @@ func newGovFixture(t *testing.T) *govFixture {
 	return &govFixture{t: t, sm: sm, votes: map[string]uint8{}}
 }
 
+func requireRatEqual(t *testing.T, expected, actual *big.Rat) {
+	t.Helper()
+	require.NotNil(t, actual)
+	require.Zero(t, actual.Cmp(expected))
+}
+
 func (f *govFixture) params() *conway.ConwayProtocolParameters {
 	return f.sm.protocolParams.(*conway.ConwayProtocolParameters)
 }
@@ -521,15 +527,15 @@ func TestRatificationUpdatesCommitteeThresholdOnEnactment(t *testing.T) {
 		Votes:             yes(drep),
 	})
 	proposedThreshold.SetInt64(0)
-	require.Equal(
-		t,
-		0,
-		f.sm.govState.Proposals["update#0"].ProposedThreshold.Cmp(big.NewRat(3, 4)),
+	storedProposal := f.sm.govState.Proposals["update#0"]
+	require.NotNil(t, storedProposal)
+	requireRatEqual(
+		t, big.NewRat(3, 4), storedProposal.ProposedThreshold,
 	)
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
 	require.True(t, f.ratified("update#0"))
 	require.NoError(t, f.sm.ProcessEpochBoundary(2))
-	require.Equal(t, 0, f.sm.govState.CommitteeThreshold.Cmp(big.NewRat(3, 4)))
+	requireRatEqual(t, big.NewRat(3, 4), f.sm.govState.CommitteeThreshold)
 
 	f.propose("noconfidence#0", GovActionInfo{
 		ActionType:     common.GovActionTypeNoConfidence,
@@ -559,20 +565,21 @@ func TestGovernanceRationalStateOwnsCopies(t *testing.T) {
 	})
 	initialThreshold.SetInt64(0)
 	proposalThreshold.SetInt64(0)
-	require.Zero(t, state.CommitteeThreshold.Cmp(big.NewRat(2, 3)))
-	require.Zero(
-		t,
-		state.Proposals["update#0"].ProposedThreshold.Cmp(big.NewRat(3, 4)),
-	)
+	requireRatEqual(t, big.NewRat(2, 3), state.CommitteeThreshold)
+	storedProposal := state.Proposals["update#0"]
+	require.NotNil(t, storedProposal)
+	requireRatEqual(t, big.NewRat(3, 4), storedProposal.ProposedThreshold)
 
 	cloned := cloneGovernanceState(state)
+	require.NotNil(t, cloned)
+	require.NotNil(t, cloned.CommitteeThreshold)
 	cloned.CommitteeThreshold.SetInt64(0)
-	cloned.Proposals["update#0"].ProposedThreshold.SetInt64(0)
-	require.Zero(t, state.CommitteeThreshold.Cmp(big.NewRat(2, 3)))
-	require.Zero(
-		t,
-		state.Proposals["update#0"].ProposedThreshold.Cmp(big.NewRat(3, 4)),
-	)
+	clonedProposal := cloned.Proposals["update#0"]
+	require.NotNil(t, clonedProposal)
+	require.NotNil(t, clonedProposal.ProposedThreshold)
+	clonedProposal.ProposedThreshold.SetInt64(0)
+	requireRatEqual(t, big.NewRat(2, 3), state.CommitteeThreshold)
+	requireRatEqual(t, big.NewRat(3, 4), storedProposal.ProposedThreshold)
 
 	manager := NewMockStateManager()
 	enactedThreshold := big.NewRat(4, 5)
@@ -583,7 +590,7 @@ func TestGovernanceRationalStateOwnsCopies(t *testing.T) {
 		},
 	}))
 	enactedThreshold.SetInt64(0)
-	require.Zero(t, manager.govState.CommitteeThreshold.Cmp(big.NewRat(4, 5)))
+	requireRatEqual(t, big.NewRat(4, 5), manager.govState.CommitteeThreshold)
 }
 
 func TestRatificationTreasuryWithdrawalRespectsTreasury(t *testing.T) {
