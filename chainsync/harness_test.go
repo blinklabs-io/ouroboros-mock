@@ -232,14 +232,14 @@ func TestFindIntersectOversizedPayload(t *testing.T) {
 	require.Equal(t, numPoints, <-gotCount)
 }
 
-// Concurrent driver calls, each sending a multi-segment message, must not
-// interleave their fragments on the wire: every message the server decodes
-// must carry the full point set, and no CBOR-decode error may surface.
-func TestConcurrentOversizedSends(t *testing.T) {
+// Repeated multi-segment sends must each reach the server whole, with no
+// CBOR-decode error. The server rejects a FindIntersect sent while it still
+// has agency, so each send waits for the previous response.
+func TestRepeatedOversizedSends(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	const numPoints = 2000
-	const senders = 4
+	const sends = 4
 	points := make([]pcommon.Point, numPoints)
 	for i := range points {
 		hash := make([]byte, 32)
@@ -247,7 +247,7 @@ func TestConcurrentOversizedSends(t *testing.T) {
 		points[i] = pcommon.NewPoint(uint64(i), hash)
 	}
 
-	gotCounts := make(chan int, senders)
+	gotCounts := make(chan int, sends)
 	r := &responder{
 		findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
 			gotCounts <- len(p)
@@ -257,17 +257,9 @@ func TestConcurrentOversizedSends(t *testing.T) {
 	h := newHarness(t, csmock.ModeNtC, r)
 	defer h.Close()
 
-	sendErrs := make(chan error, senders)
-	for range senders {
-		go func() { sendErrs <- h.FindIntersect(points) }()
-	}
-	for range senders {
-		require.NoError(t, <-sendErrs)
-	}
+	for range sends {
+		require.NoError(t, h.FindIntersect(points))
 
-	// Every response must be a well-formed IntersectFound whose request
-	// carried all the points; interleaved fragments would corrupt decoding.
-	for range senders {
 		msg := observe(t, h)
 		require.True(t, msg.IsIntersectFound(), "expected IntersectFound")
 		require.Equal(t, numPoints, <-gotCounts)
