@@ -25,6 +25,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type noCborTransaction struct {
+	ledger.Transaction
+}
+
+func (noCborTransaction) Cbor() []byte { return nil }
+
+type transactionOverrideBlock struct {
+	ledger.Block
+	txs []ledger.Transaction
+}
+
+func (b transactionOverrideBlock) Transactions() []ledger.Transaction {
+	return b.txs
+}
+
 func fixtureTxs(t *testing.T, count int) []peer.Tx {
 	t.Helper()
 	blocks, err := fixtures.GenerateConwayChainWithTransactions(
@@ -131,4 +146,24 @@ func TestTxsFromBlocksReportsTheTransactionEra(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, txs, 1)
 	require.Equal(t, uint16(ledger.TxTypeBabbage), txs[0].EraId)
+}
+
+func TestTxsFromBlocksRejectsTransactionWithoutCbor(t *testing.T) {
+	t.Parallel()
+	blocks, err := fixtures.GenerateConwayChainWithTransactions(
+		1, common.Blake2b256{}, 100, 10, 1,
+	)
+	require.NoError(t, err)
+	require.Len(t, blocks[0].Transactions(), 1)
+	block := transactionOverrideBlock{
+		Block: blocks[0],
+		txs: []ledger.Transaction{
+			noCborTransaction{Transaction: blocks[0].Transactions()[0]},
+		},
+	}
+
+	txs, err := peer.TxsFromBlocks([]ledger.Block{block})
+
+	require.ErrorContains(t, err, "has no CBOR")
+	require.Nil(t, txs)
 }

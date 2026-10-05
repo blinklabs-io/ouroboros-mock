@@ -355,8 +355,7 @@ func TestChainSwitchFork(t *testing.T) {
 func TestUpstreamAcceptServesListenerUntilClose(t *testing.T) {
 	t.Parallel()
 	chain := buildChain(t, 2, common.Blake2b256{}, 1, 100)
-	up, err := peer.NewUpstream(peer.UpstreamConfig{Blocks: chain})
-	require.NoError(t, err)
+	up := newUpstream(t, chain)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	require.NoError(t, up.Accept(l))
