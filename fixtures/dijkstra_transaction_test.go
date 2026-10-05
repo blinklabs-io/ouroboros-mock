@@ -405,6 +405,47 @@ func TestDijkstraTransactionBuilderEncodesAccountBalanceIntervals(t *testing.T) 
 	require.Contains(t, body, uint64(26))
 }
 
+func TestDijkstraTransactionBuilderAccountSettersOwnMapChanges(t *testing.T) {
+	t.Parallel()
+	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
+	firstBytes, err := first.Bytes()
+	require.NoError(t, err)
+	firstCredential, err := first.RewardAccountCredential()
+	require.NoError(t, err)
+	exact := uint64(10)
+	body := dijkstra.DijkstraTransactionBody{
+		TxDirectDeposits: map[cbor.ByteString]uint64{
+			cbor.NewByteString(firstBytes): 5,
+		},
+		TxBalanceIntervals: dijkstra.DijkstraAccountBalanceIntervals{
+			&firstCredential: {Exact: &exact},
+		},
+	}
+	builder := fixtures.NewDijkstraTransactionBuilder().
+		WithBody(body).
+		WithDirectDeposit(second, 7).
+		WithAccountBalanceInterval(
+			second,
+			dijkstra.DijkstraAccountBalanceInterval{Exact: new(uint64)},
+		)
+
+	require.Len(t, body.TxDirectDeposits, 1)
+	require.Len(t, body.TxBalanceIntervals, 1)
+	body.TxDirectDeposits[cbor.NewByteString(firstBytes)] = 99
+	exact = 99
+	tx, err := builder.Build()
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), tx.Body.TxDirectDeposits[cbor.NewByteString(firstBytes)])
+	for credential, interval := range tx.Body.TxBalanceIntervals {
+		if credential.CredType == firstCredential.CredType &&
+			credential.Credential == firstCredential.Credential {
+			require.Equal(t, uint64(10), *interval.Exact)
+			return
+		}
+	}
+	t.Fatal("built transaction lost the original balance interval")
+}
+
 func TestDijkstraTransactionBuilderRejectsInvalidAccountFields(t *testing.T) {
 	t.Parallel()
 	enterprise, err := address.RandomEnterprise(address.Testnet)
@@ -431,6 +472,27 @@ func TestDijkstraTransactionBuilderRejectsInvalidAccountFields(t *testing.T) {
 		).
 		Build()
 	require.ErrorContains(t, err, "requires a lower or upper bound")
+}
+
+func TestDijkstraTransactionBuilderRejectsNilBalanceIntervalCredential(
+	t *testing.T,
+) {
+	t.Parallel()
+	exact := uint64(10)
+	body := dijkstra.DijkstraTransactionBody{
+		TxBalanceIntervals: dijkstra.DijkstraAccountBalanceIntervals{
+			nil: {Exact: &exact},
+		},
+	}
+
+	_, err := fixtures.NewDijkstraTransactionBuilder().
+		WithBody(body).
+		WithAccountBalanceInterval(
+			testAccountAddress(t, 1),
+			dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+		).
+		Build()
+	require.ErrorContains(t, err, "contains a nil credential")
 }
 
 // A decoded body keeps its original bytes, so each account setter must drop

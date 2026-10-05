@@ -1046,6 +1046,7 @@ func cloneGovernanceState(state *GovernanceState) *GovernanceState {
 		return nil
 	}
 	cloned := *state
+	cloned.CommitteeThreshold = cloneBigRat(state.CommitteeThreshold)
 
 	memberCopies := make(map[*CommitteeMemberInfo]*CommitteeMemberInfo)
 	cloneMember := func(member *CommitteeMemberInfo) *CommitteeMemberInfo {
@@ -1123,6 +1124,7 @@ func cloneProposalState(proposal *ProposalState) *ProposalState {
 		return nil
 	}
 	cloned := *proposal
+	cloned.ProposedThreshold = cloneBigRat(proposal.ProposedThreshold)
 	cloned.Votes = maps.Clone(proposal.Votes)
 	cloned.RemovedMembers = maps.Clone(proposal.RemovedMembers)
 	cloned.ProposedMembers = maps.Clone(proposal.ProposedMembers)
@@ -1261,7 +1263,9 @@ func (m *MockStateManager) enactProposal(
 		clear(m.committeeResignations)
 	case common.GovActionTypeUpdateCommittee:
 		if proposal.ProposedThreshold != nil {
-			m.govState.CommitteeThreshold = proposal.ProposedThreshold
+			m.govState.CommitteeThreshold = cloneBigRat(
+				proposal.ProposedThreshold,
+			)
 		}
 		for coldKey := range proposal.RemovedMembers {
 			delete(m.govState.CommitteeMembersByCredential, coldKey)

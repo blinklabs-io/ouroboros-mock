@@ -314,6 +314,9 @@ func TestRatificationParameterChangeUsesTouchedGroupThresholds(t *testing.T) {
 			PoolDeposit: new(uint),
 			MaxEpoch:    new(uint),
 		}, false},
+		{"max collateral inputs is technical", &conway.ConwayProtocolParameterUpdate{
+			MaxCollateralInputs: new(uint),
+		}, false},
 		// The security group adds the pool vote, and no pool voted yes.
 		{"security group needs pools", securityAndEconomic, false},
 	} {
@@ -511,11 +514,18 @@ func TestRatificationUpdatesCommitteeThresholdOnEnactment(t *testing.T) {
 	drep := f.drep(100)
 	f.ccMember(10, true)
 	f.committeeThreshold(1, 2)
+	proposedThreshold := big.NewRat(3, 4)
 	f.propose("update#0", GovActionInfo{
 		ActionType:        common.GovActionTypeUpdateCommittee,
-		ProposedThreshold: big.NewRat(3, 4),
+		ProposedThreshold: proposedThreshold,
 		Votes:             yes(drep),
 	})
+	proposedThreshold.SetInt64(0)
+	require.Equal(
+		t,
+		0,
+		f.sm.govState.Proposals["update#0"].ProposedThreshold.Cmp(big.NewRat(3, 4)),
+	)
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
 	require.True(t, f.ratified("update#0"))
 	require.NoError(t, f.sm.ProcessEpochBoundary(2))
@@ -531,6 +541,49 @@ func TestRatificationUpdatesCommitteeThresholdOnEnactment(t *testing.T) {
 	require.NoError(t, f.sm.ProcessEpochBoundary(4))
 	assert.Nil(t, f.sm.govState.CommitteeThreshold,
 		"no-confidence removes the committee and its threshold")
+}
+
+func TestGovernanceRationalStateOwnsCopies(t *testing.T) {
+	t.Parallel()
+	initialThreshold := big.NewRat(2, 3)
+	proposalThreshold := big.NewRat(3, 4)
+	state := NewGovernanceState()
+	state.LoadFromParsedState(&ParsedInitialState{
+		CommitteeThreshold: initialThreshold,
+		Proposals: map[string]GovActionInfo{
+			"update#0": {
+				ActionType:        common.GovActionTypeUpdateCommittee,
+				ProposedThreshold: proposalThreshold,
+			},
+		},
+	})
+	initialThreshold.SetInt64(0)
+	proposalThreshold.SetInt64(0)
+	require.Zero(t, state.CommitteeThreshold.Cmp(big.NewRat(2, 3)))
+	require.Zero(
+		t,
+		state.Proposals["update#0"].ProposedThreshold.Cmp(big.NewRat(3, 4)),
+	)
+
+	cloned := cloneGovernanceState(state)
+	cloned.CommitteeThreshold.SetInt64(0)
+	cloned.Proposals["update#0"].ProposedThreshold.SetInt64(0)
+	require.Zero(t, state.CommitteeThreshold.Cmp(big.NewRat(2, 3)))
+	require.Zero(
+		t,
+		state.Proposals["update#0"].ProposedThreshold.Cmp(big.NewRat(3, 4)),
+	)
+
+	manager := NewMockStateManager()
+	enactedThreshold := big.NewRat(4, 5)
+	require.NoError(t, manager.enactProposal("update#1", &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType:        common.GovActionTypeUpdateCommittee,
+			ProposedThreshold: enactedThreshold,
+		},
+	}))
+	enactedThreshold.SetInt64(0)
+	require.Zero(t, manager.govState.CommitteeThreshold.Cmp(big.NewRat(4, 5)))
 }
 
 func TestRatificationTreasuryWithdrawalRespectsTreasury(t *testing.T) {
@@ -819,6 +872,7 @@ func TestApplyTransactionRecordsQuorumAndWithdrawals(t *testing.T) {
 		}
 	}
 	require.NotNil(t, gotQuorum)
+	update.Quorum.Rat.SetInt64(0)
 	assert.Equal(t, 0, gotQuorum.Cmp(big.NewRat(2, 3)))
 	assert.Equal(t, map[ledger.RewardAccountKey]uint64{
 		keyCredential(filledBlake2b224(0x31)): 77,
@@ -926,6 +980,26 @@ func TestRatificationRejectsUpdateCommitteeBeyondTermLimit(t *testing.T) {
 			assert.Equal(t, test.ratified, f.ratified("update#0"))
 		})
 	}
+}
+
+func TestCommitteeTermLimitComparisonDoesNotOverflow(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	f.params().CommitteeTermLimit = 5
+	proposal := &ProposalState{
+		GovActionInfo: GovActionInfo{
+			ActionType: common.GovActionTypeUpdateCommittee,
+			ProposedMembersByCredential: map[ledger.RewardAccountKey]uint64{
+				keyCredential(common.Blake2b224{0x55}): ^uint64(0),
+			},
+		},
+	}
+
+	assert.True(
+		t,
+		f.sm.withinCommitteeTermLimit(proposal, ^uint64(0)-2),
+		"an expiry two epochs away is within a five-epoch term limit",
+	)
 }
 
 func TestRatificationNeverRatifiesInfoAction(t *testing.T) {

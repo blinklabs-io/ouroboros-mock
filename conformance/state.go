@@ -210,8 +210,7 @@ type GovernanceState struct {
 	Constitution *ConstitutionInfo
 
 	// CommitteeThreshold is the fraction of committee votes an action needs.
-	// It is nil when the committee is absent. The value is never mutated in
-	// place, so clones may share it.
+	// It is nil when the committee is absent.
 	CommitteeThreshold *big.Rat
 
 	// Treasury is the treasury balance in lovelace.
@@ -335,7 +334,7 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 	g.EnactedProposals = make(map[string]bool)
 	g.Roots = ProposalRoots{}
 	g.Constitution = nil
-	g.CommitteeThreshold = state.CommitteeThreshold
+	g.CommitteeThreshold = cloneBigRat(state.CommitteeThreshold)
 	g.Treasury = state.Treasury
 
 	// Load committee members
@@ -468,6 +467,7 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 
 	// Load proposals (preserve RatifiedEpoch from parsed state)
 	for id, info := range state.Proposals {
+		info.ProposedThreshold = cloneBigRat(info.ProposedThreshold)
 		g.Proposals[id] = &ProposalState{
 			GovActionInfo: info,
 			RatifiedEpoch: info.RatifiedEpoch,
@@ -479,6 +479,13 @@ func (g *GovernanceState) LoadFromParsedState(state *ParsedInitialState) {
 
 	// Load constitution
 	g.Constitution = state.Constitution
+}
+
+func cloneBigRat(value *big.Rat) *big.Rat {
+	if value == nil {
+		return nil
+	}
+	return new(big.Rat).Set(value)
 }
 
 // IsStakeRegistered checks if a stake credential is registered.
@@ -1194,6 +1201,7 @@ func (g *GovernanceState) syncLegacyHotKeyAuthorizations() {
 
 // AddProposal adds a new governance proposal.
 func (g *GovernanceState) AddProposal(govActionId string, info GovActionInfo) {
+	info.ProposedThreshold = cloneBigRat(info.ProposedThreshold)
 	g.Proposals[govActionId] = &ProposalState{
 		GovActionInfo: info,
 	}

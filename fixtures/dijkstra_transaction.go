@@ -103,10 +103,12 @@ func (b *DijkstraTransactionBuilder) WithDirectDeposit(
 		b.err = errors.Join(b.err, fmt.Errorf("direct deposit: %w", err))
 		return b
 	}
-	if b.tx.Body.TxDirectDeposits == nil {
-		b.tx.Body.TxDirectDeposits = map[cbor.ByteString]uint64{}
+	deposits := maps.Clone(b.tx.Body.TxDirectDeposits)
+	if deposits == nil {
+		deposits = map[cbor.ByteString]uint64{}
 	}
-	b.tx.Body.TxDirectDeposits[cbor.NewByteString(raw)] = coin
+	deposits[cbor.NewByteString(raw)] = coin
+	b.tx.Body.TxDirectDeposits = deposits
 	b.tx.Body.SetCbor(nil)
 	return b
 }
@@ -123,21 +125,64 @@ func (b *DijkstraTransactionBuilder) WithAccountBalanceInterval(
 		b.err = errors.Join(b.err, fmt.Errorf("balance interval: %w", err))
 		return b
 	}
-	intervals := b.tx.Body.TxBalanceIntervals
+	intervals := cloneDijkstraAccountBalanceIntervals(
+		b.tx.Body.TxBalanceIntervals,
+	)
 	if intervals == nil {
 		intervals = dijkstra.DijkstraAccountBalanceIntervals{}
 		b.tx.Body.TxBalanceIntervals = intervals
 	}
 	// Credential is keyed by pointer, so replace by value.
 	for existing := range intervals {
-		if existing.CredType == credential.CredType &&
+		if existing != nil &&
+			existing.CredType == credential.CredType &&
 			existing.Credential == credential.Credential {
 			delete(intervals, existing)
 		}
 	}
-	intervals[&credential] = &interval
+	intervals[&credential] = cloneDijkstraAccountBalanceInterval(&interval)
+	b.tx.Body.TxBalanceIntervals = intervals
 	b.tx.Body.SetCbor(nil)
 	return b
+}
+
+func cloneDijkstraAccountBalanceIntervals(
+	intervals dijkstra.DijkstraAccountBalanceIntervals,
+) dijkstra.DijkstraAccountBalanceIntervals {
+	if intervals == nil {
+		return nil
+	}
+	cloned := make(dijkstra.DijkstraAccountBalanceIntervals, len(intervals))
+	for credential, interval := range intervals {
+		var clonedCredential *common.Credential
+		if credential != nil {
+			value := *credential
+			value.SetCbor(credential.Cbor())
+			clonedCredential = &value
+		}
+		cloned[clonedCredential] = cloneDijkstraAccountBalanceInterval(interval)
+	}
+	return cloned
+}
+
+func cloneDijkstraAccountBalanceInterval(
+	interval *dijkstra.DijkstraAccountBalanceInterval,
+) *dijkstra.DijkstraAccountBalanceInterval {
+	if interval == nil {
+		return nil
+	}
+	cloned := *interval
+	cloneBound := func(value *uint64) *uint64 {
+		if value == nil {
+			return nil
+		}
+		bound := *value
+		return &bound
+	}
+	cloned.Exact = cloneBound(interval.Exact)
+	cloned.LowerBound = cloneBound(interval.LowerBound)
+	cloned.UpperBound = cloneBound(interval.UpperBound)
+	return &cloned
 }
 
 // WithWitnessSet replaces the transaction witness set.
