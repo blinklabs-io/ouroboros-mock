@@ -34,6 +34,9 @@ func fixtureTxs(t *testing.T, count int) []peer.Tx {
 	txs, err := peer.TxsFromBlocks(blocks)
 	require.NoError(t, err)
 	require.Len(t, txs, count)
+	if txs == nil {
+		t.Fatal("fixture transactions are missing")
+	}
 	return txs
 }
 

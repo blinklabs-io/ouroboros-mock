@@ -58,7 +58,9 @@ func TestFollowerRecordsHeadersAndBlocks(t *testing.T) {
 	require.Len(t, f.Headers(), len(chain))
 	for _, b := range chain {
 		got, ok := f.Block(csmock.PointOf(b))
-		require.True(t, ok)
+		if !ok || got == nil {
+			t.Fatal("fetched block is missing")
+		}
 		require.Equal(t, b.Cbor(), got.Cbor())
 	}
 	require.Empty(t, f.Rollbacks())
