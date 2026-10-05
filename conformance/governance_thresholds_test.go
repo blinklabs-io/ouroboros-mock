@@ -565,6 +565,73 @@ func TestRatificationTreasuryWithdrawalRespectsTreasury(t *testing.T) {
 	}
 }
 
+func TestRatificationRejectsOverflowingTreasuryWithdrawal(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	f.sm.govState.Treasury = 1
+	drep := f.drep(100)
+	cc := f.ccMember(10, true)
+	f.committeeThreshold(1, 2)
+	f.propose("withdraw#0", GovActionInfo{
+		ActionType: common.GovActionTypeTreasuryWithdrawal,
+		Withdrawals: map[ledger.RewardAccountKey]uint64{
+			keyCredential(common.Blake2b224{0x77}): ^uint64(0) - 5,
+			keyCredential(common.Blake2b224{0x78}): 7,
+		},
+		Votes: yes(drep, cc),
+	})
+
+	require.NoError(t, f.sm.ProcessEpochBoundary(1))
+	assert.False(t, f.ratified("withdraw#0"))
+}
+
+func TestRatificationAcceptsMaximumTreasuryWithdrawal(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	f.sm.govState.Treasury = ^uint64(0)
+	drep := f.drep(100)
+	cc := f.ccMember(10, true)
+	f.committeeThreshold(1, 2)
+	f.propose("withdraw#0", GovActionInfo{
+		ActionType: common.GovActionTypeTreasuryWithdrawal,
+		Withdrawals: map[ledger.RewardAccountKey]uint64{
+			keyCredential(common.Blake2b224{0x77}): ^uint64(0) - 1,
+			keyCredential(common.Blake2b224{0x78}): 1,
+		},
+		Votes: yes(drep, cc),
+	})
+
+	require.NoError(t, f.sm.ProcessEpochBoundary(1))
+	assert.True(t, f.ratified("withdraw#0"))
+}
+
+func TestEnactmentRejectsOverflowingTreasuryWithdrawalAtomically(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	f.sm.govState.Treasury = 10
+	first := f.delegator(1)
+	second := f.delegator(2)
+	ratifiedEpoch := uint64(1)
+	f.propose("withdraw#0", GovActionInfo{
+		ActionType: common.GovActionTypeTreasuryWithdrawal,
+		Withdrawals: map[ledger.RewardAccountKey]uint64{
+			first:  ^uint64(0) - 5,
+			second: 7,
+		},
+	})
+	proposal := f.sm.govState.Proposals["withdraw#0"]
+	require.NotNil(t, proposal)
+	proposal.RatifiedEpoch = &ratifiedEpoch
+
+	err := f.sm.ProcessEpochBoundary(2)
+	require.ErrorContains(t, err, "treasury withdrawal exceeds available treasury")
+	assert.Equal(t, uint64(10), f.sm.govState.Treasury)
+	assert.Equal(t, uint64(1), f.sm.rewardAccounts[first])
+	assert.Equal(t, uint64(2), f.sm.rewardAccounts[second])
+	assert.Contains(t, f.sm.govState.Proposals, "withdraw#0")
+	assert.NotContains(t, f.sm.govState.EnactedProposals, "withdraw#0")
+}
+
 func TestEnactmentMovesTreasuryToRegisteredAccounts(t *testing.T) {
 	t.Parallel()
 	f := newGovFixture(t)

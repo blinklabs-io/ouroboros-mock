@@ -137,12 +137,24 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 			currentEpoch > p.SubmittedEpoch
 	})
 	slices.SortFunc(candidates, func(a, b string) int {
+		aProposal := m.govState.Proposals[a]
+		bProposal := m.govState.Proposals[b]
+		if aProposal == nil {
+			return -1
+		}
+		if bProposal == nil {
+			return 1
+		}
 		return compareProposals(
-			a, b, m.govState.Proposals[a], m.govState.Proposals[b],
+			a, b, aProposal, bProposal,
 		)
 	})
 	for _, id := range candidates {
 		proposal := m.govState.Proposals[id]
+		if proposal == nil {
+			return fmt.Errorf("ratify proposal %s: proposal is missing", id)
+		}
+		withdrawalTotal, withdrawalsFit := proposal.withdrawalTotalWithin(treasury)
 		if stake == nil {
 			stake = m.credentialVotingStake(currentEpoch)
 		}
@@ -154,13 +166,13 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 		if !accepted ||
 			rootSlot != nil && !parentMatchesRoot(proposal, *rootSlot) ||
 			!m.withinCommitteeTermLimit(proposal, currentEpoch) ||
-			proposal.withdrawalTotal() > treasury {
+			!withdrawalsFit {
 			continue
 		}
 		if rootSlot != nil {
 			*rootSlot = &id
 		}
-		treasury -= proposal.withdrawalTotal()
+		treasury -= withdrawalTotal
 		toRatify = append(toRatify, id)
 		if delaysRatification(proposal.ActionType) {
 			break
@@ -171,8 +183,12 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 	// keeps an action-specific parameter error from leaving partial ratification
 	// state behind.
 	for _, id := range toRatify {
+		proposal := m.govState.Proposals[id]
+		if proposal == nil {
+			return fmt.Errorf("ratify proposal %s: proposal is missing", id)
+		}
 		epoch := currentEpoch
-		m.govState.Proposals[id].RatifiedEpoch = &epoch
+		proposal.RatifiedEpoch = &epoch
 	}
 	return nil
 }
@@ -201,12 +217,15 @@ func (m *MockStateManager) withinCommitteeTermLimit(
 	return true
 }
 
-func (p *ProposalState) withdrawalTotal() uint64 {
+func (p *ProposalState) withdrawalTotalWithin(limit uint64) (uint64, bool) {
 	var total uint64
 	for _, amount := range p.Withdrawals {
+		if amount > limit-total {
+			return 0, false
+		}
 		total += amount
 	}
-	return total
+	return total, true
 }
 
 // proposalAccepted applies the committee, DRep and SPO acceptance rules.

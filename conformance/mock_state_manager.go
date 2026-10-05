@@ -886,13 +886,18 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 			p.ActionType != common.GovActionTypeInfo
 	})
 	slices.Sort(pending)
-	enact := func(id string) {
+	enact := func(id string) error {
 		proposal := m.govState.Proposals[id]
+		if proposal == nil {
+			return errors.New("proposal is missing")
+		}
 		slot := m.govState.Roots.forAction(proposal.ActionType)
 		chained := slot != nil && parentMatchesRoot(proposal, *slot)
-		m.enactProposal(id, proposal)
+		if err := m.enactProposal(id, proposal); err != nil {
+			return err
+		}
 		if !chained {
-			return
+			return nil
 		}
 		// Siblings chained off the same parent can no longer be enacted.
 		var siblings []string
@@ -904,21 +909,29 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 			}
 		}
 		m.removeWithDescendants(siblings)
+		return nil
 	}
 	for len(pending) > 0 {
 		var waiting []string
 		for _, id := range pending {
 			proposal := m.govState.Proposals[id]
+			if proposal == nil {
+				return fmt.Errorf("enact proposal %s: proposal is missing", id)
+			}
 			slot := m.govState.Roots.forAction(proposal.ActionType)
 			if slot == nil || parentMatchesRoot(proposal, *slot) {
-				enact(id)
+				if err := enact(id); err != nil {
+					return fmt.Errorf("enact proposal %s: %w", id, err)
+				}
 			} else {
 				waiting = append(waiting, id)
 			}
 		}
 		if len(waiting) == len(pending) {
 			for _, id := range waiting {
-				enact(id)
+				if err := enact(id); err != nil {
+					return fmt.Errorf("enact proposal %s: %w", id, err)
+				}
 			}
 			break
 		}
@@ -1182,7 +1195,15 @@ func cloneConstitutionInfo(constitution *ConstitutionInfo) *ConstitutionInfo {
 }
 
 // enactProposal processes a ratified proposal by updating the appropriate root.
-func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
+func (m *MockStateManager) enactProposal(
+	id string,
+	proposal *ProposalState,
+) error {
+	if proposal.ActionType == common.GovActionTypeTreasuryWithdrawal {
+		if _, ok := proposal.withdrawalTotalWithin(m.govState.Treasury); !ok {
+			return errors.New("treasury withdrawal exceeds available treasury")
+		}
+	}
 	if slot := m.govState.Roots.forAction(proposal.ActionType); slot != nil {
 		*slot = &id
 	}
@@ -1292,6 +1313,7 @@ func (m *MockStateManager) enactProposal(id string, proposal *ProposalState) {
 	// Mark as enacted and remove from active proposals
 	m.govState.EnactedProposals[id] = true
 	m.removeProposal(id)
+	return nil
 }
 
 // applyParameterUpdate applies a parameter update to protocol parameters.
