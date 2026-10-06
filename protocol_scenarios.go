@@ -128,7 +128,8 @@ func BlockFetchScenario(
 }
 
 // TxSubmissionScenario builds an ID exchange, body exchange, acknowledgement, and client Done.
-// IDs and bodies describe matching transactions in the same order. The final blocking ID request permits Done.
+// IDs and bodies describe matching transactions in the same order. Both ID requests block because no
+// transaction IDs are outstanding when they are sent; the final request permits Done.
 func TxSubmissionScenario(
 	ids []txsubmission.TxIdAndSize,
 	txs []txsubmission.TxBody,
@@ -154,7 +155,7 @@ func TxSubmissionScenario(
 		}
 		entries = append(
 			entries,
-			TxSubmissionRequestTxIds(false, 0, requestCount),
+			TxSubmissionRequestTxIds(true, 0, requestCount),
 			TxSubmissionReplyTxIds(ids),
 			TxSubmissionRequestTxs(requested),
 			TxSubmissionReplyTxs(txs),

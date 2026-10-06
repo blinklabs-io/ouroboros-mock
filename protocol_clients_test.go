@@ -175,7 +175,7 @@ func TestTxSubmissionScenarioServesGouroborosClient(t *testing.T) {
 	config := txsubmission.Config{
 		RequestTxIdsFunc: func(_ txsubmission.CallbackContext, blocking bool, ack, request uint16) ([]txsubmission.TxIdAndSize, error) {
 			requests <- idRequest{blocking, ack, request}
-			if blocking {
+			if blocking && ack > 0 {
 				return nil, txsubmission.ErrStopServerProcess
 			}
 			return ids, nil
@@ -193,7 +193,7 @@ func TestTxSubmissionScenarioServesGouroborosClient(t *testing.T) {
 	)
 	client.TxSubmission().Client.Init()
 	waitProtocolConversation(t, mock)
-	require.Equal(t, idRequest{false, 0, 1}, <-requests)
+	require.Equal(t, idRequest{true, 0, 1}, <-requests)
 	require.Equal(t, idRequest{true, 1, 1}, <-requests)
 	require.Equal(t, []txsubmission.TxId{ids[0].TxId}, <-requestedIDs)
 }

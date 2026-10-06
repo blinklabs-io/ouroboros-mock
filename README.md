@@ -91,8 +91,9 @@ do not close the connection. `ChainSyncScenario` retains its existing NtN
 behavior with a final `RequestNext` awaiting another response. Intersection
 success requires a point offered by the client. Transaction ID and body slices
 must describe matching transactions in the same order and have equal lengths;
-request counts cannot exceed the protocol's `uint16` limit. The final blocking
-transaction-ID request permits the client to send `Done`.
+request counts cannot exceed the protocol's `uint16` limit. Both
+transaction-ID requests block, because no IDs are outstanding when either is
+sent; the final one permits the client to send `Done`.
 
 Individual builders support ChainSync await/intersection responses, BlockFetch
 batch boundaries, LocalTxMonitor acquisition and replies, LocalStateQuery

@@ -451,3 +451,48 @@ func TestTxSubmissionScenarioRejectsPairedEraMismatch(t *testing.T) {
 		})
 	}
 }
+
+// TestTxSubmissionScenarioFollowsOutboundRequestRules replays scenarios through
+// the outbound side's RequestTxIds checks: a blocking request needs no
+// unacknowledged txids after its ack, and a non-blocking one needs some.
+func TestTxSubmissionScenarioFollowsOutboundRequestRules(t *testing.T) {
+	for _, count := range []int{0, 1, 3} {
+		t.Run(fmt.Sprintf("transactions_%d", count), func(t *testing.T) {
+			ids := make([]txsubmission.TxIdAndSize, count)
+			txs := make([]txsubmission.TxBody, count)
+			for i := range count {
+				ids[i] = txsubmission.TxIdAndSize{
+					TxId: txsubmission.TxId{EraId: 6, TxId: [32]byte{byte(i + 1)}},
+				}
+				txs[i] = txsubmission.TxBody{EraId: 6}
+			}
+			entries, err := TxSubmissionScenario(ids, txs)
+			require.NoError(t, err)
+			unacked := 0
+			for i, entry := range entries {
+				switch entry := entry.(type) {
+				case ConversationEntryOutput:
+					for _, message := range entry.Messages {
+						request, ok := message.(*txsubmission.MsgRequestTxIds)
+						if !ok {
+							continue
+						}
+						require.LessOrEqual(t, int(request.Ack), unacked, "entry %d acks too many", i)
+						unacked -= int(request.Ack)
+						if request.Blocking {
+							require.NotZero(t, request.Req, "entry %d requests nothing", i)
+							require.Zero(t, unacked, "entry %d blocks with outstanding txids", i)
+						} else {
+							require.False(t, request.Req == 0 && request.Ack == 0, "entry %d requests nothing", i)
+							require.NotZero(t, unacked, "entry %d is non-blocking with no outstanding txids", i)
+						}
+					}
+				case ConversationEntryInput:
+					if reply, ok := entry.Message.(*txsubmission.MsgReplyTxIds); ok {
+						unacked += len(reply.TxIds)
+					}
+				}
+			}
+		})
+	}
+}
