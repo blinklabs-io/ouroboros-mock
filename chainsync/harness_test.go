@@ -272,6 +272,85 @@ func TestRepeatedOversizedSends(t *testing.T) {
 	}
 }
 
+// Concurrent driver calls must not interleave the fragments of their
+// multi-segment messages. The server may accept a later FindIntersect after it
+// has replied to the earlier one, or reject it for lack of agency; either way
+// every message it decodes carries the full point set, and no decode error
+// surfaces. Interleaving depends on scheduling, so the scenario repeats on a
+// fresh harness each round.
+func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	const numPoints = 8000
+	const senders = 4
+	const rounds = 8
+	points := make([]pcommon.Point, numPoints)
+	for i := range points {
+		hash := make([]byte, 32)
+		binary.BigEndian.PutUint64(hash, uint64(i))
+		points[i] = pcommon.NewPoint(uint64(i), hash)
+	}
+
+	for round := range rounds {
+		t.Run(fmt.Sprintf("round%d", round), func(t *testing.T) {
+			gotCounts := make(chan int, senders)
+			r := &responder{
+				findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
+					gotCounts <- len(p)
+					return csmock.OriginPoint(), chainsync.Tip{}, nil
+				},
+			}
+			h := newHarness(t, csmock.ModeNtC, r)
+			defer h.Close()
+
+			// A send may fail once the server tears down on the agency
+			// error, so send errors are not asserted; the server's view is.
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for range senders {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					_ = h.FindIntersect(points)
+				}()
+			}
+			close(start)
+
+			timeout := time.After(5 * time.Second)
+			found := 0
+		wait:
+			for found < senders {
+				select {
+				case msg, ok := <-h.Observed():
+					if !ok {
+						break wait
+					}
+					require.True(t, msg.IsIntersectFound(), "expected IntersectFound")
+					found++
+				case err := <-h.ServerErrors():
+					require.ErrorContains(t, err, "without peer agency")
+					break wait
+				case <-timeout:
+					t.Fatal("timed out waiting for the server")
+				}
+			}
+			require.NoError(t, h.Close())
+			wg.Wait()
+
+			// gotCounts is not closed: the server's recv goroutine can still
+			// be unwinding after Close, and closing would race its send.
+			decoded := 0
+			for len(gotCounts) > 0 {
+				require.Equal(t, numPoints, <-gotCounts)
+				decoded++
+			}
+			require.GreaterOrEqual(t, decoded, 1)
+			require.GreaterOrEqual(t, decoded, found)
+		})
+	}
+}
+
 // Drive RequestNext and distinguish the roll-forward path. In NtC the full
 // block CBOR round-trips; in NtN the wrapped header and tip are observed.
 func TestRequestNextRollForward(t *testing.T) {
