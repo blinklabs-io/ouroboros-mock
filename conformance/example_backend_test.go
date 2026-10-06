@@ -51,6 +51,7 @@ package conformance_test
 // integration would replace the stub calls with actual database operations.
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -80,10 +81,6 @@ type stubBackend struct {
 // Verify the stub satisfies the interface at compile time.
 var _ ledger.StateProvider = (*stubBackend)(nil)
 
-func (s *stubBackend) EpochForSlot(slot uint64) (uint64, error) {
-	return s.getInner().(common.EpochState).EpochForSlot(slot)
-}
-
 type committeeStateProvider interface {
 	ledger.StateProvider
 	CommitteeStateAvailable() (bool, error)
@@ -96,6 +93,8 @@ type committeeStateProvider interface {
 }
 
 var _ committeeStateProvider = (*stubBackend)(nil)
+
+var _ common.EpochState = (*stubBackend)(nil)
 
 func (s *stubBackend) NetworkId() uint { return s.getInner().NetworkId() }
 
@@ -113,6 +112,16 @@ func (s *stubBackend) StakeRegistration(
 
 func (s *stubBackend) IsStakeCredentialRegistered(c common.Credential) bool {
 	return s.getInner().IsStakeCredentialRegistered(c)
+}
+
+// EpochForSlot forwards common.EpochState, which Conway committee-update
+// validation requires.
+func (s *stubBackend) EpochForSlot(slot uint64) (uint64, error) {
+	epochState, ok := s.getInner().(common.EpochState)
+	if !ok {
+		return 0, errors.New("inner state provider has no epoch state")
+	}
+	return epochState.EpochForSlot(slot)
 }
 
 func (s *stubBackend) SlotToTime(slot uint64) (time.Time, error) {
@@ -304,12 +313,6 @@ func (m *customStateManager) LoadInitialState(
 	// In a real integration: hydrate your database from state and pp.
 	// Here we just forward to the in-memory manager so the test runs.
 	return m.inner.LoadInitialState(state, pp)
-}
-
-func (m *customStateManager) ConfigureEpochMapping(
-	initialEpoch, startSlot, epochLength uint64,
-) {
-	m.inner.ConfigureEpochMapping(initialEpoch, startSlot, epochLength)
 }
 
 func (m *customStateManager) ApplyTransaction(

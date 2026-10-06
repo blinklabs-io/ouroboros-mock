@@ -47,8 +47,8 @@ func NewScriptAny(
 	return native(lcommon.NativeScriptAny{Type: 2, Scripts: scripts})
 }
 
-// NewScriptAtLeast builds script_n_of_k with a signed threshold.
-// A threshold of zero or less is always satisfied.
+// NewScriptAtLeast builds script_n_of_k. The CDDL types the threshold as
+// int64, and a threshold of zero or less is always satisfied.
 func NewScriptAtLeast(
 	required int64,
 	scripts ...lcommon.NativeScript,

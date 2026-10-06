@@ -39,6 +39,31 @@ func TestNativeScriptBuildersRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNativeScriptAtLeastKeepsSignedThreshold(t *testing.T) {
+	var key lcommon.Blake2b224
+	sig, err := NewScriptSig(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []int64{-1, 0, 2} {
+		script, err := NewScriptAtLeast(required, sig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded lcommon.NativeScript
+		if err := decoded.UnmarshalCBOR(script.RawScriptBytes()); err != nil {
+			t.Fatal(err)
+		}
+		nOfK, ok := decoded.Item().(*lcommon.NativeScriptNofK)
+		if !ok {
+			t.Fatalf("decoded %T, want *NativeScriptNofK", decoded.Item())
+		}
+		if nOfK.N != required {
+			t.Fatalf("threshold %d decoded as %d", required, nOfK.N)
+		}
+	}
+}
+
 func TestPlutusScriptBuilders(t *testing.T) {
 	for version := uint(1); version <= 3; version++ {
 		script, err := AlwaysSucceedsScript(version)

@@ -17,7 +17,6 @@ package conformance
 import (
 	"encoding/hex"
 	"fmt"
-	"math"
 	"math/big"
 	"strings"
 	"testing"
@@ -29,94 +28,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestHarnessEpochMappingPreservesCommitteeValidation(t *testing.T) {
-	t.Parallel()
-	credential := common.Credential{
-		CredType:   common.CredentialTypeAddrKeyHash,
-		Credential: common.Blake2b224{0x71},
-	}
-	address, err := common.NewAddressFromParts(
-		common.AddressTypeNoneKey, common.AddressNetworkTestnet, nil,
-		credential.Credential.Bytes(),
-	)
-	require.NoError(t, err)
-	manager := NewMockStateManager()
-	initial := &ParsedInitialState{
-		CurrentEpoch: 10,
-		StakeRegistrationsByCredential: map[ledger.RewardAccountKey]bool{
-			ledger.NewRewardAccountKey(credential): true,
-		},
-	}
-	parameters := ledger.NewMockConwayProtocolParams()
-	params := &parameters
-	require.NoError(t, manager.LoadInitialState(initial, params))
-	harness := NewHarness(manager, HarnessConfig{})
-	harness.initialState = initial
-	harness.initialProtocolParams = params
-	harness.initialEpoch = 10
-	harness.startSlot = 100
-	harness.epochLength = 100
-	harness.protocolParams = params
-	harness.validationRules = []common.UtxoValidationRuleFunc{
-		conway.UtxoValidateProposalProcedures,
-	}
-	transaction := func(expiry uint64) common.Transaction {
-		return ledger.NewTransactionBuilder().WithProposalProcedures(
-			conway.ConwayProposalProcedure{
-				PPRewardAccount: address,
-				PPGovAction: conway.ConwayGovAction{
-					Type: uint(common.GovActionTypeUpdateCommittee),
-					Action: &common.UpdateCommitteeGovAction{
-						Type:       uint(common.GovActionTypeUpdateCommittee),
-						CredEpochs: map[*common.Credential]uint64{&credential: expiry},
-					},
-				},
-			},
-		)
-	}
-	_, err = harness.executeTransaction(transaction(11), 199)
-	require.ErrorContains(t, err, "epoch mapping is not configured")
-	harness.configureEpochMapping()
-	for _, tc := range []struct {
-		slot, expiry uint64
-		valid        bool
-	}{
-		{199, 11, true}, {200, 11, false}, {200, 12, true},
-	} {
-		ok, err := harness.executeTransaction(transaction(tc.expiry), tc.slot)
-		require.Equal(t, tc.valid, ok)
-		if tc.valid {
-			require.NoError(t, err)
-		} else {
-			var expired conway.CommitteeMemberAlreadyExpiredError
-			require.ErrorAs(t, err, &expired)
-		}
-	}
-	require.NoError(t, harness.rollback(100))
-	ok, err := harness.executeTransaction(transaction(11), 199)
-	require.True(t, ok)
-	require.NoError(t, err)
-	require.NoError(t, manager.Reset())
-	_, err = manager.GetStateProvider().(common.EpochState).EpochForSlot(100)
-	require.ErrorContains(t, err, "epoch mapping is not configured")
-	require.NoError(t, manager.LoadInitialState(initial, params))
-	_, err = manager.GetStateProvider().(common.EpochState).EpochForSlot(100)
-	require.ErrorContains(t, err, "epoch mapping is not configured")
-	harness.configureEpochMapping()
-	epochState := manager.GetStateProvider().(common.EpochState)
-	epoch, err := epochState.EpochForSlot(200)
-	require.NoError(t, err)
-	require.Equal(t, uint64(11), epoch)
-	_, err = epochState.EpochForSlot(99)
-	require.ErrorContains(t, err, "precedes configured start slot")
-	manager.ConfigureEpochMapping(math.MaxUint64, 100, 100)
-	_, err = manager.GetStateProvider().(common.EpochState).EpochForSlot(200)
-	require.ErrorContains(t, err, "slot epoch exceeds uint64")
-	manager.ConfigureEpochMapping(10, 100, 0)
-	_, err = manager.GetStateProvider().(common.EpochState).EpochForSlot(100)
-	require.ErrorContains(t, err, "epoch length is zero")
-}
 
 func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
 	credential := common.Credential{

@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
+	"slices"
 	"time"
 
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -90,6 +92,71 @@ type TimeToSlotFunc func(time.Time) (uint64, error)
 // EpochForSlotFunc maps a slot to its epoch using the configured era history.
 type EpochForSlotFunc func(uint64) (uint64, error)
 
+// ProtocolParameterUpdateWindowFunc is a callback for classic PPUP epoch and
+// no-return window lookups. It returns the epoch containing the slot and the
+// first slot at which update proposals target the following epoch.
+type ProtocolParameterUpdateWindowFunc func(uint64) (uint64, uint64, error)
+
+// FixedEpochProtocolParameterUpdateWindow returns a
+// ProtocolParameterUpdateWindowFunc for a chain whose epochs all have
+// epochLength slots, starting at slot 0, with Shelley genesis security
+// parameter securityParam and active-slot coefficient activeSlotsCoeff.
+//
+// The slot of no return is the first slot of the next epoch less twice the
+// stability window ceiling(3k/f), saturating at slot 0, as in the Shelley
+// ledger's getTheSlotOfNoReturn.
+func FixedEpochProtocolParameterUpdateWindow(
+	epochLength uint64,
+	securityParam uint64,
+	activeSlotsCoeff *big.Rat,
+) ProtocolParameterUpdateWindowFunc {
+	var coeff *big.Rat
+	if activeSlotsCoeff != nil {
+		coeff = new(big.Rat).Set(activeSlotsCoeff)
+	}
+	return func(slot uint64) (uint64, uint64, error) {
+		if epochLength == 0 {
+			return 0, 0, errors.New("classic PPUP window: epoch length is zero")
+		}
+		if securityParam == 0 {
+			return 0, 0, errors.New(
+				"classic PPUP window: security parameter is zero",
+			)
+		}
+		if coeff == nil || coeff.Sign() <= 0 ||
+			coeff.Cmp(big.NewRat(1, 1)) > 0 {
+			return 0, 0, errors.New(
+				"classic PPUP window: active-slot coefficient must be in (0, 1]",
+			)
+		}
+		// ceiling(3k/f) with f = num/denom is ceiling(3k*denom/num).
+		window := new(big.Int).SetUint64(securityParam)
+		window.Mul(window, big.NewInt(3))
+		window.Mul(window, coeff.Denom())
+		window, remainder := window.QuoRem(window, coeff.Num(), new(big.Int))
+		if remainder.Sign() != 0 {
+			window.Add(window, big.NewInt(1))
+		}
+		window.Lsh(window, 1)
+		currentEpoch := slot / epochLength
+		if currentEpoch >= ^uint64(0)/epochLength {
+			return 0, 0, errors.New(
+				"classic PPUP window: next epoch start overflows",
+			)
+		}
+		firstSlotNextEpoch := new(big.Int).SetUint64(
+			(currentEpoch + 1) * epochLength,
+		)
+		if window.Cmp(firstSlotNextEpoch) >= 0 {
+			return currentEpoch, 0, nil
+		}
+		return currentEpoch, firstSlotNextEpoch.Sub(
+			firstSlotNextEpoch,
+			window,
+		).Uint64(), nil
+	}
+}
+
 // PoolCurrentStateFunc is a callback for pool state lookups
 type PoolCurrentStateFunc func(lcommon.PoolKeyHash) (*lcommon.PoolRegistrationCertificate, *uint64, error)
 
@@ -148,9 +215,15 @@ type MockLedgerState struct {
 	stakeCredentialDeposits   map[RewardAccountKey]uint64 // credential -> original deposit
 
 	// SlotState callbacks
-	SlotToTimeCallback   SlotToTimeFunc
-	TimeToSlotCallback   TimeToSlotFunc
-	EpochForSlotCallback EpochForSlotFunc
+	SlotToTimeCallback                    SlotToTimeFunc
+	TimeToSlotCallback                    TimeToSlotFunc
+	EpochForSlotCallback                  EpochForSlotFunc
+	ProtocolParameterUpdateWindowCallback ProtocolParameterUpdateWindowFunc
+
+	// Genesis delegation state: genesis key hash -> delegate key hash. A nil
+	// map means the capability is not configured.
+	genesisDelegates    map[lcommon.Blake2b224]lcommon.Blake2b224
+	genesisUpdateQuorum uint
 
 	// PoolState callbacks and state
 	PoolCurrentStateCallback PoolCurrentStateFunc
@@ -193,6 +266,67 @@ type MockLedgerState struct {
 // NetworkId returns the network identifier
 func (ls *MockLedgerState) NetworkId() uint {
 	return ls.networkId
+}
+
+// ProtocolParameterUpdateWindow returns the epoch containing slot and the
+// first slot at which classic PPUP proposals target the following epoch, from
+// the callback set with WithProtocolParameterUpdateWindow. Without one it
+// returns lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError,
+// the error the gouroboros rule reports for a state without the capability:
+// the window depends on the epoch schedule and the Shelley genesis k and f,
+// which the mock does not otherwise carry.
+func (ls *MockLedgerState) ProtocolParameterUpdateWindow(
+	slot uint64,
+) (uint64, uint64, error) {
+	if ls.ProtocolParameterUpdateWindowCallback == nil {
+		return 0, 0, lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError{}
+	}
+	return ls.ProtocolParameterUpdateWindowCallback(slot)
+}
+
+// GenesisDelegateKeyHashes returns the delegate key hashes configured with
+// WithGenesisDelegation, sorted and without duplicates. Without that
+// configuration it returns lcommon.GenesisDelegationStateUnavailableError, so
+// MIR and PPUP validation fail closed exactly as for a state without the
+// capability.
+func (ls *MockLedgerState) GenesisDelegateKeyHashes(
+	uint64,
+) ([]lcommon.Blake2b224, error) {
+	if ls.genesisDelegates == nil {
+		return nil, lcommon.GenesisDelegationStateUnavailableError{}
+	}
+	ret := make([]lcommon.Blake2b224, 0, len(ls.genesisDelegates))
+	for _, delegate := range ls.genesisDelegates {
+		ret = append(ret, delegate)
+	}
+	slices.SortFunc(ret, func(a, b lcommon.Blake2b224) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	return slices.Compact(ret), nil
+}
+
+// GenesisDelegateForGenesisKey returns the delegate configured for genesisKey
+// with WithGenesisDelegation, or false when genesisKey has none. The mock's
+// delegation map does not change with the slot.
+func (ls *MockLedgerState) GenesisDelegateForGenesisKey(
+	genesisKey lcommon.Blake2b224,
+	_ uint64,
+) (lcommon.Blake2b224, bool, error) {
+	if ls.genesisDelegates == nil {
+		return lcommon.Blake2b224{}, false,
+			lcommon.GenesisDelegationStateUnavailableError{}
+	}
+	delegate, ok := ls.genesisDelegates[genesisKey]
+	return delegate, ok, nil
+}
+
+// GenesisUpdateQuorum returns the quorum configured with
+// WithGenesisDelegation.
+func (ls *MockLedgerState) GenesisUpdateQuorum() (uint, error) {
+	if ls.genesisDelegates == nil {
+		return 0, lcommon.GenesisDelegationStateUnavailableError{}
+	}
+	return ls.genesisUpdateQuorum, nil
 }
 
 // UtxoById looks up a UTxO by transaction input
@@ -604,6 +738,31 @@ func NewLedgerStateBuilder() *LedgerStateBuilder {
 // WithNetworkId sets the network ID
 func (b *LedgerStateBuilder) WithNetworkId(networkId uint) *LedgerStateBuilder {
 	b.state.networkId = networkId
+	return b
+}
+
+// WithGenesisDelegation configures the Shelley genesis delegation map
+// (genesis key hash -> delegate key hash) and the update quorum answered by
+// the GenesisDelegationState methods. The map is copied; an empty map
+// configures a state with no delegates.
+func (b *LedgerStateBuilder) WithGenesisDelegation(
+	delegates map[lcommon.Blake2b224]lcommon.Blake2b224,
+	quorum uint,
+) *LedgerStateBuilder {
+	b.state.genesisDelegates = make(
+		map[lcommon.Blake2b224]lcommon.Blake2b224,
+		len(delegates),
+	)
+	maps.Copy(b.state.genesisDelegates, delegates)
+	b.state.genesisUpdateQuorum = quorum
+	return b
+}
+
+// WithProtocolParameterUpdateWindow sets the classic PPUP window callback.
+func (b *LedgerStateBuilder) WithProtocolParameterUpdateWindow(
+	fn ProtocolParameterUpdateWindowFunc,
+) *LedgerStateBuilder {
+	b.state.ProtocolParameterUpdateWindowCallback = fn
 	return b
 }
 

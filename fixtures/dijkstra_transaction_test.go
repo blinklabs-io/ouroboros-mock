@@ -116,9 +116,7 @@ func TestDijkstraTransactionBuilderRejectsEmptySubTransactions(t *testing.T) {
 	require.ErrorContains(t, err, "sub-transactions must not be empty")
 }
 
-func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(
-	t *testing.T,
-) {
+func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
 	bodyCBOR, err := cbor.Encode(map[uint64]any{
 		0:  []any{},
 		1:  []any{},
@@ -127,44 +125,35 @@ func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(
 	})
 	require.NoError(t, err)
 	var body dijkstra.DijkstraTransactionBody
-	_, err = cbor.Decode(
-		[]byte{0xa3, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00}, &body,
-	)
-	require.NoError(t, err)
 	body.SetCbor(bodyCBOR)
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
 	_, err = fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
 	require.ErrorContains(t, err, "sub-transactions must not be empty")
 }
 
-// A decoded body keeps its original bytes, so the builder cannot add the
-// transaction_body keys 1 (outputs) and 2 (fee) that the bytes omit.
+// A body that carries original bytes is encoded from them, so the builder
+// cannot add the transaction_body keys 1 (outputs) and 2 (fee) that the bytes
+// omit. The decoder rejects such bytes, so they are set directly.
 func TestDijkstraTransactionBuilderRejectsDecodedBodyMissingRequiredKeys(
 	t *testing.T,
 ) {
 	var body dijkstra.DijkstraTransactionBody
-	_, err := cbor.Decode(
-		[]byte{0xa3, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00}, &body,
-	)
-	require.NoError(t, err)
 	body.SetCbor([]byte{0xa1, 0x00, 0x80})
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
-	_, err = fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
+	_, err := fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
 	require.ErrorContains(t, err, "transaction body is missing required key 1")
 }
 
-func TestDijkstraTransactionBuilderRejectsDecodedSubBodyMissingOutputs(
+func TestDijkstraTransactionBuilderRejectsDecodedSubTransactionBodyMissingOutputs(
 	t *testing.T,
 ) {
 	var body dijkstra.DijkstraSubTransactionBody
-	_, err := cbor.Decode([]byte{0xa2, 0x00, 0x80, 0x01, 0x80}, &body)
-	require.NoError(t, err)
 	body.SetCbor([]byte{0xa1, 0x00, 0x80})
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
-	_, err = fixtures.NewDijkstraTransactionBuilder().
+	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{Body: body}).
 		Build()
 	require.ErrorContains(
@@ -172,22 +161,20 @@ func TestDijkstraTransactionBuilderRejectsDecodedSubBodyMissingOutputs(
 	)
 }
 
+// A witness set that carries original bytes with key 8 reaches the builder's
+// key rule. The decoder rejects such bytes, so they are set directly.
 func TestDijkstraTransactionBuilderRejectsDecodedPlutusV4WitnessScripts(
 	t *testing.T,
 ) {
 	var witnesses dijkstra.DijkstraTransactionWitnessSet
-	_, err := cbor.Decode([]byte{0xa0}, &witnesses)
-	require.NoError(t, err)
 	witnesses.SetCbor(
 		[]byte{0xa1, 0x08, 0xd9, 0x01, 0x02, 0x81, 0x41, 0x01},
 	)
 
-	_, err = fixtures.NewDijkstraTransactionBuilder().
+	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(witnesses).
 		Build()
-	require.ErrorContains(
-		t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL",
-	)
+	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
 }
 
 func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
@@ -199,9 +186,7 @@ func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 			),
 		}).
 		Build()
-	require.ErrorContains(
-		t, err, "dijkstra witness set does not support field 8",
-	)
+	require.ErrorContains(t, err, "does not support field 8")
 }
 
 func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
@@ -217,9 +202,7 @@ func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
 			},
 		}).
 		Build()
-	require.ErrorContains(
-		t, err, "dijkstra witness set does not support field 8",
-	)
+	require.ErrorContains(t, err, "does not support field 8")
 }
 
 // The Dijkstra CDDL requires transaction_body keys 0 (inputs), 1 (outputs),
