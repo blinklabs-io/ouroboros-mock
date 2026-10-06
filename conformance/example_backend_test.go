@@ -51,6 +51,7 @@ package conformance_test
 // integration would replace the stub calls with actual database operations.
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -93,6 +94,8 @@ type committeeStateProvider interface {
 
 var _ committeeStateProvider = (*stubBackend)(nil)
 
+var _ common.EpochState = (*stubBackend)(nil)
+
 func (s *stubBackend) NetworkId() uint { return s.getInner().NetworkId() }
 
 func (s *stubBackend) UtxoById(
@@ -109,6 +112,16 @@ func (s *stubBackend) StakeRegistration(
 
 func (s *stubBackend) IsStakeCredentialRegistered(c common.Credential) bool {
 	return s.getInner().IsStakeCredentialRegistered(c)
+}
+
+// EpochForSlot forwards common.EpochState, which Conway committee-update
+// validation requires.
+func (s *stubBackend) EpochForSlot(slot uint64) (uint64, error) {
+	epochState, ok := s.getInner().(common.EpochState)
+	if !ok {
+		return 0, errors.New("inner state provider has no epoch state")
+	}
+	return epochState.EpochForSlot(slot)
 }
 
 func (s *stubBackend) SlotToTime(slot uint64) (time.Time, error) {
