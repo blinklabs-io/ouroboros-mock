@@ -89,9 +89,11 @@ func (u *Upstream) Events() <-chan Event {
 	return u.events.out
 }
 
-// Chain returns the chain the peer serves.
+// Chain returns a copy of the chain the peer serves. Changing the copy does
+// not change what the peer serves; use [Upstream.Append] and
+// [Upstream.SwitchFork], which also answer waiting clients.
 func (u *Upstream) Chain() *Chain {
-	return u.chain
+	return u.chain.clone()
 }
 
 // Append extends the selected chain and answers clients waiting at the tip.

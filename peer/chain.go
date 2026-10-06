@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -125,6 +126,15 @@ func (c *Chain) SwitchFork(fork []ledger.Block) (pcommon.Point, error) {
 		c.byHash[string(b.Hash().Bytes())] = b
 	}
 	return intersection, nil
+}
+
+func (c *Chain) clone() *Chain {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return &Chain{
+		selected: append([]ledger.Block(nil), c.selected...),
+		byHash:   maps.Clone(c.byHash),
+	}
 }
 
 // Tip returns the selected chain's tip. An empty chain reports the origin.

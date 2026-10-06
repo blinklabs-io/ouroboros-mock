@@ -498,3 +498,16 @@ func TestUpstreamCloseSerializesChainChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestUpstreamChainIsSnapshot(t *testing.T) {
+	t.Parallel()
+	chain := buildChain(t, 2, common.Blake2b256{}, 1, 100)
+	up := newUpstream(t, chain)
+
+	more := buildChain(t, 1, chain[1].Hash(), 3, 120)
+	require.NoError(t, up.Chain().Append(more...))
+	_, err := up.Chain().SwitchFork(forkOf(t, chain, 0, 1))
+	require.NoError(t, err)
+
+	require.Equal(t, chain, up.Chain().Blocks())
+}
