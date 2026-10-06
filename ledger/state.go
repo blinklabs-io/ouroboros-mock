@@ -89,9 +89,6 @@ type SlotToTimeFunc func(uint64) (time.Time, error)
 // TimeToSlotFunc is a callback for converting time to slots
 type TimeToSlotFunc func(time.Time) (uint64, error)
 
-// EpochForSlotFunc maps a slot to its epoch using the configured era history.
-type EpochForSlotFunc func(uint64) (uint64, error)
-
 // ProtocolParameterUpdateWindowFunc is a callback for classic PPUP epoch and
 // no-return window lookups. It returns the epoch containing the slot and the
 // first slot at which update proposals target the following epoch.
@@ -217,7 +214,6 @@ type MockLedgerState struct {
 	// SlotState callbacks
 	SlotToTimeCallback                    SlotToTimeFunc
 	TimeToSlotCallback                    TimeToSlotFunc
-	EpochForSlotCallback                  EpochForSlotFunc
 	ProtocolParameterUpdateWindowCallback ProtocolParameterUpdateWindowFunc
 
 	// Genesis delegation state: genesis key hash -> delegate key hash. A nil
@@ -389,15 +385,6 @@ func (ls *MockLedgerState) TimeToSlot(t time.Time) (uint64, error) {
 		return ls.TimeToSlotCallback(t)
 	}
 	return 0, nil
-}
-
-// EpochForSlot returns the configured slot's epoch, or an error when no
-// epoch mapping has been supplied.
-func (ls *MockLedgerState) EpochForSlot(slot uint64) (uint64, error) {
-	if ls.EpochForSlotCallback == nil {
-		return 0, errors.New("ledger: epoch mapping is not configured")
-	}
-	return ls.EpochForSlotCallback(slot)
 }
 
 // PoolCurrentState returns the current state of a pool
@@ -834,15 +821,7 @@ func (b *LedgerStateBuilder) WithSlotToTime(
 	return b
 }
 
-// WithEpochForSlot sets the slot-to-epoch mapping used by ledger validation.
-func (b *LedgerStateBuilder) WithEpochForSlot(
-	fn EpochForSlotFunc,
-) *LedgerStateBuilder {
-	b.state.EpochForSlotCallback = fn
-	return b
-}
-
-// WithTimeToSlot sets the time to slot conversion callback.
+// WithTimeToSlot sets the time to slot conversion callback
 func (b *LedgerStateBuilder) WithTimeToSlot(
 	fn TimeToSlotFunc,
 ) *LedgerStateBuilder {
