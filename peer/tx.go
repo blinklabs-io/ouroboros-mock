@@ -83,7 +83,7 @@ func (r *relay) config() txsubmission.Config {
 // previous one, so the remote window is always empty.
 func (r *relay) run(server *txsubmission.Server) {
 	for {
-		ids, err := server.RequestTxIds(true, 16)
+		ids, err := server.RequestTxIds(true, txsubmission.MaxUnackedTxIds)
 		if err != nil {
 			return
 		}
