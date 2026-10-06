@@ -1,4 +1,6 @@
 ./cardano-api/cardano-api/test/cardano-api-golden/files/LegacyProtocolParameters.json
+./cardano-api/cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.bin
+./cardano-api/cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.txt
 ./cardano-api/cardano-api/test/cardano-api-golden/files/ShelleyGenesis.json
 ./cardano-api/cardano-api/test/cardano-api-golden/files/tx-canonical.json
 ./cardano-api/cardano-api/test/cardano-api-test/files/input/gov-anchor-data/invalid-drep-metadata.jsonld
@@ -15,6 +17,10 @@
 ./cardano-ledger/eras/babbage/impl/golden/pparams-update.json
 ./cardano-ledger/eras/babbage/impl/golden/pparams.json
 ./cardano-ledger/eras/babbage/impl/golden/translations.cbor
+./cardano-ledger/eras/byron/ledger/impl/golden/cbor/ssc/CommitmentsMap
+./cardano-ledger/eras/byron/ledger/impl/golden/cbor/ssc/OpeningsMap
+./cardano-ledger/eras/byron/ledger/impl/golden/cbor/ssc/SharesMap
+./cardano-ledger/eras/byron/ledger/impl/golden/cbor/ssc/VssCertificatesMap
 ./cardano-ledger/eras/conway/impl/golden/pparams-update.json
 ./cardano-ledger/eras/conway/impl/golden/pparams.json
 ./cardano-ledger/eras/conway/impl/golden/translations.cbor
@@ -31,7 +37,6 @@
 ./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Byron_EBB
 ./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Byron_regular
 ./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Conway
-./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Dijkstra
 ./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Mary
 ./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/Block_Shelley
 ./ouroboros-consensus/ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2/GenTxId_Allegra

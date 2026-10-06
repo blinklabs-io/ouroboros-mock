@@ -23,6 +23,7 @@ import (
 
 	"github.com/blinklabs-io/ouroboros-mock/consensus"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRecorderToVectorRoundTrip seeds a Recorder with synthetic
@@ -270,4 +271,18 @@ func mustHex(t *testing.T, s string) format.HexBytes {
 		t.Fatalf("hex decode %q: %v", s, err)
 	}
 	return b
+}
+
+func TestDecodeConversationChainPoint(t *testing.T) {
+	t.Parallel()
+	conv, err := consensus.DecodeConversation([]byte(
+		`{"name":"x","steps":[{"type":"find_intersect","points":["chain:2"]}]}`,
+	))
+	require.NoError(t, err)
+	require.Len(t, conv.Steps, 1)
+
+	_, err = consensus.DecodeConversation([]byte(
+		`{"name":"x","steps":[{"type":"find_intersect","points":["chain:0"]}]}`,
+	))
+	require.ErrorContains(t, err, "n >= 1")
 }

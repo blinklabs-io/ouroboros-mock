@@ -86,12 +86,18 @@ func NewSidecar(cfg Config, conv Conversation) *Sidecar {
 // Connect dials cardano-node over TCP, runs the gouroboros handshake,
 // and registers chainsync callbacks on the resulting connection.
 func (s *Sidecar) Connect() error {
+	return s.connect(context.Background())
+}
+
+// connect is Connect under a caller-supplied context, so a probe started
+// from a running step is cancelled with that step.
+func (s *Sidecar) connect(parent context.Context) error {
 	timeout := s.cfg.DialTimeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
 	dialer := net.Dialer{Timeout: timeout}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	raw, err := dialer.DialContext(ctx, "tcp", s.cfg.Address)
 	if err != nil {
