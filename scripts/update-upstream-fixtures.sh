@@ -120,6 +120,8 @@ consensus_files=(
 	"${consensus_prefix}/GenTxId_Byron"
 )
 
+# Upstream publishes no full Dijkstra block golden; only placeholder
+# SerialisedBlock_Dijkstra, which is not imported.
 for era in Shelley Allegra Mary Alonzo Babbage Conway Dijkstra; do
 	if [[ "${era}" != "Dijkstra" ]]; then
 		consensus_files+=("${consensus_prefix}/Block_${era}")

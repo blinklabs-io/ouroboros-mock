@@ -39,9 +39,9 @@ Intentional exclusions:
   from the pinned `cardano-blueprint` submodule; see `conformance/CORPUS.md`.
 - Plutus conformance data is managed separately in `plutigo`
 - `SerialisedBlock_*` and `SerialisedHeader_*` placeholder files from
-  `ouroboros-consensus` are not imported. The pinned revision has no full
-  `Block_Dijkstra` capture; current Dijkstra blocks are built and decoded
-  directly by the block builder tests.
+  `ouroboros-consensus` are not imported. Upstream publishes no full Dijkstra
+  block golden, so the corpus carries no Dijkstra `Block_*` fixture; current
+  Dijkstra blocks are built and decoded directly by the block builder tests.
 
 ### Curated source contracts
 

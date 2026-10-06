@@ -79,3 +79,46 @@ within a Go release, including both MIR targets. Pool reward accounts default
 to testnet; `WithNetwork` selects their network ID. `StakeLifecycle`,
 `PoolLifecycle`, and `DRepLifecycle` build related registration, delegation or
 update, and retirement or deregistration sequences.
+
+## Command line listener
+
+Run `ouroboros-mock demo.yaml` to listen for one connection and execute the
+conversation. The process exits after the conversation finishes. Interrupting
+the process cancels the listener and active conversation.
+The first complete multiplexed message must arrive within the 10-second
+node-to-node handshake proposal timeout.
+
+```yaml
+listener:
+  network: tcp
+  address: 127.0.0.1:3001
+entries:
+  - input:
+      type: handshake.propose_versions
+  - output:
+      type: handshake.accept_version
+      mode: node-to-node
+      version: 13
+      network-magic: 42
+  - input:
+      type: keepalive.request
+      cookie: 123
+  - output:
+      type: keepalive.response
+      cookie: 123
+  - close: true
+```
+
+The listener accepts `tcp` and `unix` networks. A Unix listener requires an
+unused socket path; existing files are preserved, and the socket created by
+the listener is removed when it closes.
+
+Each entry contains exactly one of `input`, `output`, `sleep` (a nonnegative Go
+duration such as `100ms`), or `close: true`. Close must be the final entry.
+Handshake proposals match the incoming message type. Handshake acceptance
+requires `mode`, `version`, and `network-magic`; the supported demo versions
+are node-to-node 13 and node-to-client 14. Keepalive requests match `cookie`
+exactly and responses send the configured cookie. Unknown fields, unsupported
+messages, multiple YAML documents, and ambiguous entries are rejected before
+opening the listener. Numeric settings require unsigned YAML integers, string
+settings require YAML strings, and close requires the literal boolean `true`.
