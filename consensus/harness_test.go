@@ -297,3 +297,40 @@ func tipsEqualForTest(a, b format.Tip) bool {
 	return a.Slot == b.Slot && a.BlockNumber == b.BlockNumber &&
 		string(a.Hash) == string(b.Hash)
 }
+
+// lastPeerStub adopts whichever peer it was fed last, a selector that
+// tracks arrival order instead of comparing chains.
+type lastPeerStub struct{ firstPeerStub }
+
+func (s *lastPeerStub) RollForward(
+	_ uint64, _ uint, _ []byte, tip format.Tip,
+) error {
+	s.have = true
+	s.tip = tip
+	return nil
+}
+
+// TestHarnessCatchesArrivalOrderSelection checks that the corpus does not
+// only feed the winner last: within_k_fork_v1 does, so lastPeerStub reaches
+// its final_tip, and within_k_fork_winner_first_v1 feeds the same chains in
+// the other order, so the stub must fail final_tip there.
+func TestHarnessCatchesArrivalOrderSelection(t *testing.T) {
+	t.Parallel()
+	vectors, err := consensus.CapturedVectors()
+	require.NoError(t, err)
+	byName := map[string]format.TestVector{}
+	for _, cv := range vectors {
+		byName[cv.Name] = cv.Vector
+	}
+	parent, ok := byName["within_k_fork_v1"]
+	require.True(t, ok)
+	reordered, ok := byName["within_k_fork_winner_first_v1"]
+	require.True(t, ok)
+
+	err = consensus.RunConsensusVector(t, parent, &lastPeerStub{})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), ": final_tip:")
+
+	err = consensus.RunConsensusVector(t, reordered, &lastPeerStub{})
+	require.ErrorContains(t, err, ": final_tip:")
+}

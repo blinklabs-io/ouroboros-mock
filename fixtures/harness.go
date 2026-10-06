@@ -15,6 +15,7 @@
 package fixtures
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,7 +150,7 @@ func (h *Harness) runMatching(
 
 // CollectFixtureFiles reads the committed manifest under root and returns the
 // filesystem paths of every listed fixture in sorted order. It returns an
-// error if any manifest entry is missing on disk.
+// error if any manifest entry is missing or does not identify a regular file.
 func CollectFixtureFiles(root string) ([]string, error) {
 	manifest, err := LoadManifest(root)
 	if err != nil {
@@ -159,12 +160,23 @@ func CollectFixtureFiles(root string) ([]string, error) {
 	paths := make([]string, 0, len(manifest))
 	for _, relPath := range manifest {
 		path := filepath.Join(root, filepath.FromSlash(relPath))
-		if _, err := os.Stat(path); err != nil {
+		file, err := openRegularFileInRoot(root, filepath.FromSlash(relPath))
+		if err != nil {
+			if errors.Is(err, errFixtureNotRegular) {
+				return nil, fmt.Errorf(
+					"manifest entry %q is not a regular file: %w",
+					relPath,
+					err,
+				)
+			}
 			return nil, fmt.Errorf(
 				"manifest entry %q missing: %w",
 				relPath,
 				err,
 			)
+		}
+		if err := file.Close(); err != nil {
+			return nil, fmt.Errorf("manifest entry %q: %w", relPath, err)
 		}
 		paths = append(paths, path)
 	}
@@ -193,16 +205,18 @@ func CollectFixtures(root string) ([]Fixture, error) {
 }
 
 // LoadManifest reads the committed manifest and returns normalized relative
-// fixture paths without the leading "./" prefix.
+// fixture paths without the leading "./" prefix. Paths must stay inside the
+// fixture root and cannot repeat after normalization.
 func LoadManifest(root string) ([]string, error) {
-	data, err := os.ReadFile(filepath.Join(root, "manifest.txt"))
+	data, err := readFileInRoot(root, "manifest.txt")
 	if err != nil {
 		return nil, err
 	}
 
 	lines := strings.Split(string(data), "\n")
 	manifest := make([]string, 0, len(lines))
-	for _, line := range lines {
+	seen := make(map[string]int, len(lines))
+	for lineIdx, line := range lines {
 		line = normalizeRelativePath(line)
 		if line == "" {
 			continue
@@ -213,6 +227,14 @@ func LoadManifest(root string) ([]string, error) {
 				line,
 			)
 		}
+		line = filepath.ToSlash(filepath.Clean(filepath.FromSlash(line)))
+		if firstLine, ok := seen[line]; ok {
+			return nil, fmt.Errorf(
+				"duplicate manifest entry %q at line %d (first at line %d)",
+				line, lineIdx+1, firstLine,
+			)
+		}
+		seen[line] = lineIdx + 1
 		manifest = append(manifest, line)
 	}
 	return manifest, nil
@@ -291,4 +313,46 @@ func normalizeRelativePath(path string) string {
 	path = strings.TrimSpace(path)
 	path = strings.TrimPrefix(path, "./")
 	return path
+}
+
+var errFixtureNotRegular = errors.New("not a regular file")
+
+func openRegularFileInRoot(root, name string) (file *os.File, err error) {
+	rootDir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rootDir.Close(); closeErr != nil {
+			if file != nil {
+				err = errors.Join(err, file.Close())
+				file = nil
+			}
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	if fixturePrecheck {
+		info, statErr := rootDir.Stat(name)
+		if statErr != nil {
+			return nil, statErr
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%q is %w", name, errFixtureNotRegular)
+		}
+	}
+	file, err = rootDir.OpenFile(name, fixtureOpenFlags, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return nil, errors.Join(err, file.Close())
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.Join(
+			fmt.Errorf("%q is %w", name, errFixtureNotRegular),
+			file.Close(),
+		)
+	}
+	return file, nil
 }
