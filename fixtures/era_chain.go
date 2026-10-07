@@ -196,13 +196,8 @@ func GenerateBabbageChainWithProtocolVersion(
 		Blocks(count)
 }
 
-// GenerateDijkstraChain builds a connected chain of empty Dijkstra blocks.
-//
-// Its headers carry the 10-field Babbage header body, which
-// ledger.DetermineBlockType classifies. NewDijkstraBlockBuilder and
-// GenerateConwayToDijkstraChain emit the 12-field header body of the pinned
-// Dijkstra CDDL instead, which DetermineBlockType rejects as an unknown header
-// body length.
+// GenerateDijkstraChain builds a connected chain of empty Dijkstra blocks
+// with the 12-field header body of the pinned Dijkstra CDDL.
 func GenerateDijkstraChain(
 	startBlockNumber uint64,
 	prevHash common.Blake2b256,

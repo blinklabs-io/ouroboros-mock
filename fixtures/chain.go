@@ -63,9 +63,17 @@ func GenerateConwayChainWithTransactions(
 	startSlot, slotIncrement uint64,
 	count int,
 ) ([]ledger.Block, error) {
-	blocks := make([]ledger.Block, 0, max(count, 0))
+	if count <= 0 {
+		return []ledger.Block{}, nil
+	}
+	if err := checkChainRange(
+		startBlockNumber, startSlot, slotIncrement, uint64(count),
+	); err != nil {
+		return nil, err
+	}
+	blocks := make([]ledger.Block, 0, count)
 	currentPrev := prevHash
-	for i := range max(count, 0) {
+	for i := range count {
 		transactionBody, err := newConwayFixtureTransactionBody(uint64(i))
 		if err != nil {
 			return nil, fmt.Errorf("build transaction %d: %w", i, err)
