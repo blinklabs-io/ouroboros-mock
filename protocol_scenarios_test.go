@@ -435,8 +435,8 @@ func TestProtocolScenariosRejectInconsistentInputs(t *testing.T) {
 
 func TestTxSubmissionScenarioRejectsPairedEraMismatch(t *testing.T) {
 	ids := []txsubmission.TxIdAndSize{
-		{TxId: txsubmission.TxId{EraId: 3}},
-		{TxId: txsubmission.TxId{EraId: 6}},
+		{TxId: txsubmission.TxId{EraId: 3}, Size: 1},
+		{TxId: txsubmission.TxId{EraId: 6}, Size: 1},
 	}
 	for _, mismatch := range []int{0, 1} {
 		t.Run(fmt.Sprintf("transaction_%d", mismatch), func(t *testing.T) {
@@ -450,6 +450,18 @@ func TestTxSubmissionScenarioRejectsPairedEraMismatch(t *testing.T) {
 			require.Nil(t, entries)
 		})
 	}
+}
+
+func TestTxSubmissionScenarioRejectsPairedSizeMismatch(t *testing.T) {
+	ids := []txsubmission.TxIdAndSize{{
+		TxId: txsubmission.TxId{EraId: 6},
+		Size: 2,
+	}}
+	bodies := []txsubmission.TxBody{{EraId: 6, TxBody: []byte{0x80}}}
+
+	entries, err := TxSubmissionScenario(ids, bodies)
+	require.ErrorContains(t, err, "advertised size")
+	require.Nil(t, entries)
 }
 
 // TestTxSubmissionScenarioFollowsOutboundRequestRules replays scenarios through
