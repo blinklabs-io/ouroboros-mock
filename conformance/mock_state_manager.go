@@ -843,6 +843,13 @@ func nonNegativeDeposit(amount int64) uint64 {
 	return uint64(amount)
 }
 
+func checkedAddCoin(balance, amount uint64) (uint64, bool) {
+	if amount > ^uint64(0)-balance {
+		return 0, false
+	}
+	return balance + amount, true
+}
+
 func drepDelegation(drep common.Drep) common.Drep {
 	return drep
 }
@@ -908,7 +915,9 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 				siblings = append(siblings, siblingID)
 			}
 		}
-		m.removeWithDescendants(siblings)
+		if err := m.removeWithDescendants(siblings); err != nil {
+			return err
+		}
 		return nil
 	}
 	for len(pending) > 0 {
@@ -944,33 +953,47 @@ func (m *MockStateManager) processEpochBoundary(newEpoch uint64) error {
 	}
 
 	// Phase 3: Expire old proposals and return their deposits.
-	m.removeWithDescendants(m.govState.proposalIDs(
+	if err := m.removeWithDescendants(m.govState.proposalIDs(
 		func(p *ProposalState) bool { return newEpoch > p.ExpiresAfter },
-	))
+	)); err != nil {
+		return err
+	}
 	m.syncRewardBalanceMirrors()
 
 	return nil
 }
 
 // removeProposal drops a proposal and returns its deposit.
-func (m *MockStateManager) removeProposal(id string) {
+func (m *MockStateManager) removeProposal(id string) error {
 	proposal := m.govState.Proposals[id]
-	delete(m.govState.Proposals, id)
 	if proposal == nil || proposal.Deposit == 0 {
-		return
+		delete(m.govState.Proposals, id)
+		return nil
 	}
 	if proposal.ReturnAccount != nil {
 		if _, registered := m.stakeRegistrations[*proposal.ReturnAccount]; registered {
-			m.rewardAccounts[*proposal.ReturnAccount] += proposal.Deposit
-			return
+			balance := m.rewardAccounts[*proposal.ReturnAccount]
+			refunded, ok := checkedAddCoin(balance, proposal.Deposit)
+			if !ok {
+				return errors.New("proposal deposit refund overflows reward account")
+			}
+			delete(m.govState.Proposals, id)
+			m.rewardAccounts[*proposal.ReturnAccount] = refunded
+			return nil
 		}
 	}
-	m.govState.Treasury += proposal.Deposit
+	refunded, ok := checkedAddCoin(m.govState.Treasury, proposal.Deposit)
+	if !ok {
+		return errors.New("proposal deposit refund overflows treasury")
+	}
+	delete(m.govState.Proposals, id)
+	m.govState.Treasury = refunded
+	return nil
 }
 
 // removeWithDescendants removes the proposals and every proposal chained off
 // them, returning each deposit.
-func (m *MockStateManager) removeWithDescendants(ids []string) {
+func (m *MockStateManager) removeWithDescendants(ids []string) error {
 	removed := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		removed[id] = true
@@ -986,8 +1009,11 @@ func (m *MockStateManager) removeWithDescendants(ids []string) {
 		}
 	}
 	for id := range removed {
-		m.removeProposal(id)
+		if err := m.removeProposal(id); err != nil {
+			return fmt.Errorf("remove proposal %s: %w", id, err)
+		}
 	}
+	return nil
 }
 
 func (m *MockStateManager) cloneForEpochBoundary() (*MockStateManager, error) {
@@ -1201,9 +1227,21 @@ func (m *MockStateManager) enactProposal(
 	id string,
 	proposal *ProposalState,
 ) error {
+	var creditedBalances map[ledger.RewardAccountKey]uint64
 	if proposal.ActionType == common.GovActionTypeTreasuryWithdrawal {
+		creditedBalances = make(map[ledger.RewardAccountKey]uint64)
 		if _, ok := proposal.withdrawalTotalWithin(m.govState.Treasury); !ok {
 			return errors.New("treasury withdrawal exceeds available treasury")
+		}
+		for account, amount := range proposal.Withdrawals {
+			if _, registered := m.stakeRegistrations[account]; !registered {
+				continue
+			}
+			credited, ok := checkedAddCoin(m.rewardAccounts[account], amount)
+			if !ok {
+				return errors.New("treasury withdrawal overflows reward account")
+			}
+			creditedBalances[account] = credited
 		}
 	}
 	if slot := m.govState.Roots.forAction(proposal.ActionType); slot != nil {
@@ -1244,9 +1282,9 @@ func (m *MockStateManager) enactProposal(
 		}
 	case common.GovActionTypeTreasuryWithdrawal:
 		for account, amount := range proposal.Withdrawals {
-			_, registered := m.stakeRegistrations[account]
-			if registered && amount <= m.govState.Treasury {
-				m.rewardAccounts[account] += amount
+			if credited, registered := creditedBalances[account]; registered &&
+				amount <= m.govState.Treasury {
+				m.rewardAccounts[account] = credited
 				m.govState.Treasury -= amount
 			}
 		}
@@ -1316,8 +1354,7 @@ func (m *MockStateManager) enactProposal(
 
 	// Mark as enacted and remove from active proposals
 	m.govState.EnactedProposals[id] = true
-	m.removeProposal(id)
-	return nil
+	return m.removeProposal(id)
 }
 
 // applyParameterUpdate applies a parameter update to protocol parameters.

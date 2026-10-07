@@ -692,6 +692,30 @@ func TestEnactmentRejectsOverflowingTreasuryWithdrawalAtomically(t *testing.T) {
 	assert.NotContains(t, f.sm.govState.EnactedProposals, "withdraw#0")
 }
 
+func TestEnactmentRejectsRewardAccountOverflowAtomically(t *testing.T) {
+	t.Parallel()
+	f := newGovFixture(t)
+	f.sm.govState.Treasury = 1
+	recipient := f.delegator(^uint64(0))
+	ratifiedEpoch := uint64(1)
+	f.propose("withdraw#0", GovActionInfo{
+		ActionType: common.GovActionTypeTreasuryWithdrawal,
+		Withdrawals: map[ledger.RewardAccountKey]uint64{
+			recipient: 1,
+		},
+	})
+	proposal := f.sm.govState.Proposals["withdraw#0"]
+	require.NotNil(t, proposal)
+	proposal.RatifiedEpoch = &ratifiedEpoch
+
+	err := f.sm.ProcessEpochBoundary(2)
+	require.ErrorContains(t, err, "treasury withdrawal overflows reward account")
+	assert.Equal(t, ^uint64(0), f.sm.rewardAccounts[recipient])
+	assert.Equal(t, uint64(1), f.sm.govState.Treasury)
+	assert.Contains(t, f.sm.govState.Proposals, "withdraw#0")
+	assert.NotContains(t, f.sm.govState.EnactedProposals, "withdraw#0")
+}
+
 func TestEnactmentMovesTreasuryToRegisteredAccounts(t *testing.T) {
 	t.Parallel()
 	f := newGovFixture(t)
@@ -743,6 +767,45 @@ func TestProposalDepositRefundedOnExpiry(t *testing.T) {
 	assert.Equal(t, uint64(55), f.sm.rewardAccounts[registered])
 	assert.Equal(t, uint64(17), f.sm.govState.Treasury,
 		"a deposit with no registered return account moves to the treasury")
+}
+
+func TestProposalDepositRefundOverflowIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("registered reward account", func(t *testing.T) {
+		t.Parallel()
+		f := newGovFixture(t)
+		account := f.delegator(^uint64(0))
+		f.sm.govState.AddProposal("expired#0", GovActionInfo{
+			ActionType:    common.GovActionTypeInfo,
+			Deposit:       1,
+			ReturnAccount: &account,
+			ExpiresAfter:  1,
+		})
+
+		err := f.sm.ProcessEpochBoundary(2)
+		require.ErrorContains(t, err, "proposal deposit refund overflows reward account")
+		assert.Equal(t, ^uint64(0), f.sm.rewardAccounts[account])
+		assert.Contains(t, f.sm.govState.Proposals, "expired#0")
+	})
+
+	t.Run("treasury", func(t *testing.T) {
+		t.Parallel()
+		f := newGovFixture(t)
+		f.sm.govState.Treasury = ^uint64(0)
+		account := keyCredential(common.Blake2b224{0x7b})
+		f.sm.govState.AddProposal("expired#0", GovActionInfo{
+			ActionType:    common.GovActionTypeInfo,
+			Deposit:       1,
+			ReturnAccount: &account,
+			ExpiresAfter:  1,
+		})
+
+		err := f.sm.ProcessEpochBoundary(2)
+		require.ErrorContains(t, err, "proposal deposit refund overflows treasury")
+		assert.Equal(t, ^uint64(0), f.sm.govState.Treasury)
+		assert.Contains(t, f.sm.govState.Proposals, "expired#0")
+	})
 }
 
 func TestEnactmentRemovesOrphanedSiblingsAndRefundsDeposits(t *testing.T) {
