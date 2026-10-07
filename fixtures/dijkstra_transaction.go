@@ -120,7 +120,11 @@ func (b *DijkstraTransactionBuilder) WithAccountBalanceInterval(
 	account common.Address,
 	interval dijkstra.DijkstraAccountBalanceInterval,
 ) *DijkstraTransactionBuilder {
-	credential, err := account.RewardAccountCredential()
+	if _, err := account.RewardAccountCredential(); err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("balance interval: %w", err))
+		return b
+	}
+	raw, err := account.Bytes()
 	if err != nil {
 		b.err = errors.Join(b.err, fmt.Errorf("balance interval: %w", err))
 		return b
@@ -132,15 +136,7 @@ func (b *DijkstraTransactionBuilder) WithAccountBalanceInterval(
 		intervals = dijkstra.DijkstraAccountBalanceIntervals{}
 		b.tx.Body.TxBalanceIntervals = intervals
 	}
-	// Credential is keyed by pointer, so replace by value.
-	for existing := range intervals {
-		if existing != nil &&
-			existing.CredType == credential.CredType &&
-			existing.Credential == credential.Credential {
-			delete(intervals, existing)
-		}
-	}
-	intervals[&credential] = cloneDijkstraAccountBalanceInterval(&interval)
+	intervals[cbor.NewByteString(raw)] = cloneDijkstraAccountBalanceInterval(&interval)
 	b.tx.Body.TxBalanceIntervals = intervals
 	b.tx.Body.SetCbor(nil)
 	return b
@@ -153,14 +149,8 @@ func cloneDijkstraAccountBalanceIntervals(
 		return nil
 	}
 	cloned := make(dijkstra.DijkstraAccountBalanceIntervals, len(intervals))
-	for credential, interval := range intervals {
-		var clonedCredential *common.Credential
-		if credential != nil {
-			value := *credential
-			value.SetCbor(credential.Cbor())
-			clonedCredential = &value
-		}
-		cloned[clonedCredential] = cloneDijkstraAccountBalanceInterval(interval)
+	for account, interval := range intervals {
+		cloned[account] = cloneDijkstraAccountBalanceInterval(interval)
 	}
 	return cloned
 }
