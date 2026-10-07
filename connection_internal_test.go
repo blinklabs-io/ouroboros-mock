@@ -15,13 +15,16 @@
 package ouroboros_mock
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/muxer"
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
 	"github.com/stretchr/testify/require"
@@ -65,6 +68,35 @@ func TestCloseClosesBothHalvesWhenTheClientHalfFails(t *testing.T) {
 func TestCloseReportsNoErrorOnAHealthyConnection(t *testing.T) {
 	conn := NewConnection(ProtocolRoleClient, nil).(*Connection)
 	require.NoError(t, conn.Close())
+}
+
+func TestPendingInputClassifiesClosedReceive(t *testing.T) {
+	done := make(chan any)
+	received := make(chan *muxer.Segment)
+	waiting := make(chan struct{})
+	result := make(chan error, 1)
+	conn := &Connection{
+		doneChan:      done,
+		muxerRecvChan: received,
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
+		onInputWait:   func() { close(waiting) },
+	}
+	entry := ConversationEntryInput{ProtocolId: keepalive.ProtocolId}
+	go func() {
+		result <- conn.processInputEntry(entry)
+	}()
+	<-waiting
+	close(done)
+	close(received)
+	require.ErrorIs(t, <-result, errConversationClosed)
+
+	remote := &Connection{
+		doneChan:      make(chan any),
+		muxerRecvChan: make(chan *muxer.Segment),
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
+	}
+	close(remote.muxerRecvChan)
+	require.ErrorIs(t, remote.processInputEntry(entry), io.ErrUnexpectedEOF)
 }
 
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {
