@@ -332,7 +332,11 @@ func (m *MockStateManager) ApplyTransaction(
 			continue
 		}
 		key := ledger.NewRewardAccountKey(credential)
-		withdrawals[key] += amount.Uint64()
+		total, ok := checkedAddCoin(withdrawals[key], amount.Uint64())
+		if !ok {
+			return errors.New("withdrawal total overflows coin range")
+		}
+		withdrawals[key] = total
 	}
 	for key, withdrawal := range withdrawals {
 		balance, exists := projected(key)
@@ -382,20 +386,11 @@ func (m *MockStateManager) ApplyTransaction(
 
 	// Process withdrawals against balances derived from initial state and
 	// previously applied events, after pre-validation above.
-	for rewardAccount, amount := range tx.Withdrawals() {
-		if rewardAccount == nil || amount == nil {
-			continue
-		}
-		credential, ok := rewardAccount.StakeCredential()
-		if !ok {
-			continue
-		}
-		key := ledger.NewRewardAccountKey(credential)
+	for key, withdrawal := range withdrawals {
 		balance, exists := m.rewardAccounts[key]
 		if !exists {
 			continue
 		}
-		withdrawal := amount.Uint64()
 		if withdrawal > balance {
 			return fmt.Errorf(
 				"withdrawal amount %d exceeds reward account balance %d",

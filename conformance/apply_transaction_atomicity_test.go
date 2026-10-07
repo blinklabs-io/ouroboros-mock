@@ -17,6 +17,7 @@ package conformance
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
@@ -24,6 +25,74 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestApplyTransactionRejectsWithdrawalAggregateOverflowAtomically(
+	t *testing.T,
+) {
+	t.Parallel()
+	stake := common.Blake2b224{0x07}
+	credential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: stake,
+	}
+	key := ledger.NewRewardAccountKey(credential)
+	firstPayment := common.Blake2b224{0x01}
+	first, err := common.NewAddressFromParts(
+		common.AddressTypeKeyKey,
+		common.AddressNetworkTestnet,
+		firstPayment[:],
+		stake[:],
+	)
+	require.NoError(t, err)
+	secondPayment := common.Blake2b224{0x02}
+	second, err := common.NewAddressFromParts(
+		common.AddressTypeKeyKey,
+		common.AddressNetworkTestnet,
+		secondPayment[:],
+		stake[:],
+	)
+	require.NoError(t, err)
+
+	manager := NewMockStateManager()
+	manager.rewardAccounts[key] = math.MaxUint64
+	manager.stakeRegistrations[key] = 0
+	input, err := ledger.NewTransactionInputBuilder().
+		WithTxId([]byte{0x07}).WithIndex(0).Build()
+	require.NoError(t, err)
+	utxoID := fmt.Sprintf("%s#0", hex.EncodeToString(input.Id().Bytes()))
+	manager.utxos[utxoID] = common.Utxo{Id: input}
+	newCredential := common.Credential{
+		CredType:   common.CredentialTypeAddrKeyHash,
+		Credential: common.Blake2b224{0x08},
+	}
+	output, err := ledger.NewTransactionOutputBuilder().
+		WithAddress(first.String()).WithLovelace(1).Build()
+	require.NoError(t, err)
+	tx, err := ledger.NewTransactionBuilder().
+		WithCertificates(&common.RegistrationCertificate{
+			CertType:        uint(common.CertificateTypeRegistration),
+			StakeCredential: newCredential,
+			Amount:          1,
+		}).
+		WithWithdrawals(map[*common.Address]uint64{
+			&first:  math.MaxUint64,
+			&second: 2,
+		}).
+		WithInputs(input).
+		WithOutputs(output).
+		Build()
+	require.NoError(t, err)
+
+	err = manager.ApplyTransaction(tx, 0)
+	require.ErrorContains(t, err, "withdrawal total overflows coin range")
+	assert.Equal(t, uint64(math.MaxUint64), manager.rewardAccounts[key])
+	assert.Contains(t, manager.utxos, utxoID)
+	assert.NotContains(
+		t,
+		manager.stakeRegistrations,
+		ledger.NewRewardAccountKey(newCredential),
+	)
+}
 
 // TestApplyTransactionRejectsWithdrawalAgainstRegistrationInSameTx covers the
 // balance a withdrawal is actually checked against. Certificates are applied
