@@ -47,10 +47,15 @@ func NewScriptAny(
 	return native(lcommon.NativeScriptAny{Type: 2, Scripts: scripts})
 }
 
+// NewScriptAtLeast builds script_n_of_k. The CDDL types the threshold as
+// int64, and a threshold of zero or less is always satisfied.
 func NewScriptAtLeast(
-	required uint,
+	required int64,
 	scripts ...lcommon.NativeScript,
 ) (lcommon.NativeScript, error) {
+	if scripts == nil {
+		scripts = []lcommon.NativeScript{}
+	}
 	return native(
 		lcommon.NativeScriptNofK{Type: 3, N: required, Scripts: scripts},
 	)

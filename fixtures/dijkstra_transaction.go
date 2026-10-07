@@ -454,9 +454,9 @@ func decodeDijkstraBodyFields(
 	return fields, nil
 }
 
-// validateDijkstraWitnessSetKeys rejects witness set keys past 7. gouroboros
-// v0.205.4 encodes WsPlutusV4Scripts as key 8, which the Dijkstra CDDL and
-// the reference decoder do not accept.
+// validateDijkstraWitnessSetKeys rejects witness set keys past 7, which the
+// Dijkstra CDDL and the reference decoder do not accept. It covers witness
+// sets that carry original bytes, which gouroboros reuses without checking.
 func validateDijkstraWitnessSetKeys(encoded []byte) error {
 	var fields map[uint64]cbor.RawMessage
 	if _, err := cbor.Decode(encoded, &fields); err != nil {

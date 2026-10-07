@@ -1368,7 +1368,24 @@ func applyParameterUpdate(
 
 // GetStateProvider implements StateManager.GetStateProvider.
 func (m *MockStateManager) GetStateProvider() StateProvider {
-	return m.buildLedgerState()
+	return epochLedgerState{
+		MockLedgerState: m.buildLedgerState(),
+		epoch:           m.currentEpoch,
+	}
+}
+
+// epochLedgerState adds common.EpochState to the harness ledger state. Conway
+// committee-update proposals are validated against the current epoch, which
+// the corpus supplies as state; transaction slots are synthetic markers and do
+// not define the vector's epoch timeline.
+type epochLedgerState struct {
+	*ledger.MockLedgerState
+	epoch uint64
+}
+
+// EpochForSlot returns the epoch carried by the current conformance state.
+func (s epochLedgerState) EpochForSlot(uint64) (uint64, error) {
+	return s.epoch, nil
 }
 
 // GetGovernanceState implements StateManager.GetGovernanceState.

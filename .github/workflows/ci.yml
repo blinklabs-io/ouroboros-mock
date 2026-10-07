@@ -26,5 +26,3 @@ jobs:
       attestations: write
       contents: write
       id-token: write
-    with:
-      pull-go-module: false

@@ -3,11 +3,12 @@ module github.com/blinklabs-io/ouroboros-mock
 go 1.26.5
 
 require (
-	github.com/blinklabs-io/gouroboros v0.205.4
-	github.com/blinklabs-io/plutigo v0.7.2
+	github.com/blinklabs-io/gouroboros v0.209.1
+	github.com/blinklabs-io/plutigo v0.8.0
 	github.com/stretchr/testify v1.12.1
 	github.com/utxorpc/go-codegen v0.19.2
 	go.uber.org/goleak v1.3.0
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.57.0
 )
 
@@ -26,7 +27,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

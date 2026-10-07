@@ -17,7 +17,12 @@ package fixtures
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/blinklabs-io/gouroboros/cbor"
 )
 
 func TestByronConsensusGenTxFixturesAreUnpaired(t *testing.T) {
@@ -142,5 +147,67 @@ func TestStrictDecodePlaceholderExecutionsAreAllOrNone(t *testing.T) {
 			rejectionCount,
 			len(strictDecodePlaceholderFixtures),
 		)
+	}
+}
+
+func TestDijkstraConsensusHeaderChecksRelatedBlock(t *testing.T) {
+	harness := NewHarness(HarnessConfig{})
+	allFixtures, err := harness.Collect()
+	if err != nil {
+		t.Fatalf("failed to collect fixtures: %v", err)
+	}
+	var header Fixture
+	for _, fixture := range allFixtures {
+		if fixture.RelPath == consensusV2FixtureRoot+"Header_Dijkstra" {
+			header = fixture
+		}
+	}
+	if header.RelPath == "" {
+		t.Fatal("missing Dijkstra consensus header fixture")
+	}
+
+	block, err := NewDijkstraBlockBuilder().Build()
+	if err != nil {
+		t.Fatalf("build Dijkstra block: %v", err)
+	}
+	blockType, err := ledgerBlockTypeForEra("dijkstra")
+	if err != nil {
+		t.Fatalf("Dijkstra block type: %v", err)
+	}
+	wrapper, err := cbor.Encode([]any{blockType, cbor.RawMessage(block.Cbor())})
+	if err != nil {
+		t.Fatalf("encode block wrapper: %v", err)
+	}
+	data, err := cbor.Encode(cbor.Tag{Number: 24, Content: wrapper})
+	if err != nil {
+		t.Fatalf("encode tag-24 block: %v", err)
+	}
+	relPath := consensusV2FixtureRoot + "Block_Dijkstra"
+	blockPath := filepath.Join(t.TempDir(), filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(blockPath), 0o755); err != nil {
+		t.Fatalf("create block directory: %v", err)
+	}
+	if err := os.WriteFile(blockPath, data, 0o600); err != nil {
+		t.Fatalf("write block fixture: %v", err)
+	}
+	blockFixture := Fixture{
+		Path:    blockPath,
+		RelPath: relPath,
+		Repo:    RepoOuroborosConsensus,
+		Kind:    KindBlock,
+		Format:  header.Format,
+		Era:     "dijkstra",
+		Name:    "Block_Dijkstra",
+	}
+	if _, err := blockFixture.DecodeLedgerBlock(); err != nil {
+		t.Fatalf("synthetic Dijkstra block must decode: %v", err)
+	}
+
+	_, err = executeHeaderFixture(header, map[string]Fixture{
+		header.RelPath: header,
+		relPath:        blockFixture,
+	})
+	if err == nil || !strings.Contains(err.Error(), "header/block hash mismatch") {
+		t.Fatalf("expected header/block hash mismatch, got %v", err)
 	}
 }

@@ -56,6 +56,18 @@ and return only active, non-resigned members. A backend without this optional
 capability fails closed for committee certificate validation; it must not
 silently fall back to hash-only lookups.
 
+Conway committee-update proposals are validated against the current epoch
+through gouroboros' `common.EpochState`, which the POOL rules also read when it
+is present. Return the epoch carried by the vector's state; transaction slots
+are synthetic markers and do not define the vector's epoch timeline:
+
+```go
+EpochForSlot(slot uint64) (uint64, error)
+```
+
+A backend without it fails committee-update proposals with
+`CommitteeExpiryEpochUnavailableError`.
+
 Add a compile-time check to catch missing methods early:
 
 ```go
