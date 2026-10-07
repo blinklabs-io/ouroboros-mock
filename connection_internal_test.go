@@ -71,24 +71,42 @@ func TestCloseReportsNoErrorOnAHealthyConnection(t *testing.T) {
 }
 
 func TestPendingInputClassifiesClosedReceive(t *testing.T) {
-	done := make(chan any)
-	received := make(chan *muxer.Segment)
-	waiting := make(chan struct{})
-	result := make(chan error, 1)
-	conn := &Connection{
-		doneChan:      done,
-		muxerRecvChan: received,
-		inputBuffers:  make(map[uint16]*bytes.Buffer),
-		onInputWait:   func() { close(waiting) },
+	tests := []struct {
+		name    string
+		segment *muxer.Segment
+	}{
+		{name: "closed receive"},
+		{
+			name: "queued segment",
+			segment: muxer.NewSegment(
+				keepalive.ProtocolId+1,
+				nil,
+				false,
+			),
+		},
 	}
 	entry := ConversationEntryInput{ProtocolId: keepalive.ProtocolId}
-	go func() {
-		result <- conn.processInputEntry(entry)
-	}()
-	<-waiting
-	close(done)
-	close(received)
-	require.ErrorIs(t, <-result, errConversationClosed)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			done := make(chan any)
+			received := make(chan *muxer.Segment, 1)
+			if test.segment != nil {
+				received <- test.segment
+			}
+			close(done)
+			close(received)
+			conn := &Connection{
+				doneChan:      done,
+				muxerRecvChan: received,
+				inputBuffers:  make(map[uint16]*bytes.Buffer),
+			}
+			require.ErrorIs(
+				t,
+				conn.processInputEntry(entry),
+				errConversationClosed,
+			)
+		})
+	}
 
 	remote := &Connection{
 		doneChan:      make(chan any),
@@ -97,6 +115,37 @@ func TestPendingInputClassifiesClosedReceive(t *testing.T) {
 	}
 	close(remote.muxerRecvChan)
 	require.ErrorIs(t, remote.processInputEntry(entry), io.ErrUnexpectedEOF)
+}
+
+func TestClosePendingInputClosesErrorChannelWithoutValue(t *testing.T) {
+	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{
+		ConversationEntryOutput{
+			ProtocolId: keepalive.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				keepalive.NewMsgKeepAliveResponse(7),
+			},
+		},
+		ConversationEntryInput{ProtocolId: keepalive.ProtocolId},
+	}).(*Connection)
+	waiting := make(chan struct{})
+	conn.onInputWait = func() { close(waiting) }
+
+	data := make([]byte, 64)
+	_, err := conn.Read(data)
+	require.NoError(t, err)
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not reach the pending input")
+	}
+	require.NoError(t, conn.Close())
+	select {
+	case err, ok := <-conn.ErrorChan():
+		require.False(t, ok, "shutdown published an input error: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("error channel did not close after connection shutdown")
+	}
 }
 
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {

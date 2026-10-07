@@ -199,6 +199,11 @@ func (c *Connection) asyncLoop() {
 		switch entry := entry.(type) {
 		case ConversationEntryInput:
 			err := c.processInputEntry(entry)
+			select {
+			case <-c.doneChan:
+				return
+			default:
+			}
 			if errors.Is(err, errConversationClosed) {
 				return
 			}
@@ -292,12 +297,12 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 			return errConversationClosed
 		case segment, ok = <-c.muxerRecvChan:
 		}
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		default:
+		}
 		if !ok {
-			select {
-			case <-c.doneChan:
-				return errConversationClosed
-			default:
-			}
 			return io.ErrUnexpectedEOF
 		}
 		if segment.GetProtocolId() != entry.ProtocolId {
