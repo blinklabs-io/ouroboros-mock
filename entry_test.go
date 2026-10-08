@@ -11,11 +11,59 @@ package ouroboros_mock_test
 import (
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/protocol"
+	"github.com/blinklabs-io/gouroboros/protocol/handshake"
 	"github.com/blinklabs-io/gouroboros/protocol/leiosfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/leiosnotify"
 	"github.com/blinklabs-io/gouroboros/protocol/leiosvotes"
 	mock "github.com/blinklabs-io/ouroboros-mock"
 )
+
+func TestNodeToNodeHandshakeConversationBuilders(t *testing.T) {
+	const version uint16 = 15
+	versionData := protocol.VersionDataNtN13andUp{
+		VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+			CborNetworkMagic: 42,
+		},
+	}
+
+	serverEntries := mock.NewConversationHandshakeNtNAsServer(version, versionData)
+	if len(serverEntries) != 2 {
+		t.Fatalf("server conversation has %d entries, want 2", len(serverEntries))
+	}
+	if _, ok := serverEntries[0].(mock.ConversationEntryInput); !ok {
+		t.Fatalf("server request entry has type %T", serverEntries[0])
+	}
+	serverResponse, ok := serverEntries[1].(mock.ConversationEntryOutput)
+	if !ok || len(serverResponse.Messages) != 1 {
+		t.Fatalf("server response entry has unexpected shape: %#v", serverEntries[1])
+	}
+	accepted, ok := serverResponse.Messages[0].(*handshake.MsgAcceptVersion)
+	if !ok || accepted.Version != version {
+		t.Fatalf("server accepted %#v, want version %d", serverResponse.Messages[0], version)
+	}
+
+	clientEntries := mock.NewConversationHandshakeNtNAsClient(version, versionData)
+	if len(clientEntries) != 2 {
+		t.Fatalf("client conversation has %d entries, want 2", len(clientEntries))
+	}
+	clientProposal, ok := clientEntries[0].(mock.ConversationEntryOutput)
+	if !ok || len(clientProposal.Messages) != 1 {
+		t.Fatalf("client proposal entry has unexpected shape: %#v", clientEntries[0])
+	}
+	proposal, ok := clientProposal.Messages[0].(*handshake.MsgProposeVersions)
+	if !ok {
+		t.Fatalf("client proposed message has type %T", clientProposal.Messages[0])
+	}
+	if _, ok := proposal.VersionMap[version]; !ok {
+		t.Fatalf("client proposal omits version %d", version)
+	}
+	clientAccept, ok := clientEntries[1].(mock.ConversationEntryInput)
+	if !ok || clientAccept.Message == nil ||
+		clientAccept.Message.Type() != handshake.MessageTypeAcceptVersion {
+		t.Fatalf("client accept entry has unexpected shape: %#v", clientEntries[1])
+	}
+}
 
 func TestLeiosConversationBuilders(t *testing.T) {
 	fetch := mock.NewConversationEntryLeiosFetchRequest(leiosfetch.NewMsgDone())
