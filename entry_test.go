@@ -9,8 +9,10 @@
 package ouroboros_mock_test
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/handshake"
 	"github.com/blinklabs-io/gouroboros/protocol/leiosfetch"
@@ -39,11 +41,22 @@ func TestNodeToNodeHandshakeConversationBuilders(t *testing.T) {
 		t.Fatalf("server response entry has unexpected shape: %#v", serverEntries[1])
 	}
 	accepted, ok := serverResponse.Messages[0].(*handshake.MsgAcceptVersion)
-	if !ok || accepted.Version != version {
+	wantServerData, err := cbor.Encode(&versionData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || accepted.Version != version || !bytes.Equal(accepted.VersionData, wantServerData) {
 		t.Fatalf("server accepted %#v, want version %d", serverResponse.Messages[0], version)
 	}
 
-	clientEntries := mock.NewConversationHandshakeNtNAsClient(version, versionData)
+	expectedServerData := protocol.VersionDataNtN13andUp{
+		VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+			CborNetworkMagic:                       7,
+			CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorAndResponder,
+			CborPeerSharing:                        protocol.PeerSharingModePeerSharingPublic,
+		},
+	}
+	clientEntries := mock.NewConversationHandshakeNtNAsClient(version, versionData, expectedServerData)
 	if len(clientEntries) != 2 {
 		t.Fatalf("client conversation has %d entries, want 2", len(clientEntries))
 	}
@@ -55,13 +68,26 @@ func TestNodeToNodeHandshakeConversationBuilders(t *testing.T) {
 	if !ok {
 		t.Fatalf("client proposed message has type %T", clientProposal.Messages[0])
 	}
-	if _, ok := proposal.VersionMap[version]; !ok {
-		t.Fatalf("client proposal omits version %d", version)
+	wantProposedData, err := cbor.Encode(&versionData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposed, ok := proposal.VersionMap[version]; !ok || !bytes.Equal(proposed, wantProposedData) {
+		t.Fatalf("client proposed version data = %#v, want %#v", proposed, versionData)
 	}
 	clientAccept, ok := clientEntries[1].(mock.ConversationEntryInput)
 	if !ok || clientAccept.Message == nil ||
 		clientAccept.Message.Type() != handshake.MessageTypeAcceptVersion {
 		t.Fatalf("client accept entry has unexpected shape: %#v", clientEntries[1])
+	}
+	acceptedClientData, ok := clientAccept.Message.(*handshake.MsgAcceptVersion)
+	wantAcceptedClientData, err := cbor.Encode(&expectedServerData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || acceptedClientData.Version != version ||
+		!bytes.Equal(acceptedClientData.VersionData, wantAcceptedClientData) {
+		t.Fatalf("client expected accept data = %#v, want version %d with %#v", clientAccept.Message, version, expectedServerData)
 	}
 }
 

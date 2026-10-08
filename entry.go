@@ -176,24 +176,26 @@ func NewConversationHandshakeNtNAsServer(
 }
 
 // NewConversationHandshakeNtNAsClient builds entries for a mock peer acting as
-// the node-to-node client and proposing the supplied protocol version.
+// the node-to-node client and proposing the supplied version data while
+// expecting the supplied server version data in response.
 func NewConversationHandshakeNtNAsClient(
 	version uint16,
-	versionData protocol.VersionData,
+	proposedVersionData protocol.VersionData,
+	expectedServerVersionData protocol.VersionData,
 ) []ConversationEntry {
 	return []ConversationEntry{
 		ConversationEntryOutput{
 			ProtocolId: handshake.ProtocolId,
 			Messages: []protocol.Message{
 				handshake.NewMsgProposeVersions(protocol.ProtocolVersionMap{
-					version: versionData,
+					version: proposedVersionData,
 				}),
 			},
 		},
 		ConversationEntryInput{
 			ProtocolId:      handshake.ProtocolId,
 			IsResponse:      true,
-			Message:         handshake.NewMsgAcceptVersion(version, versionData),
+			Message:         handshake.NewMsgAcceptVersion(version, expectedServerVersionData),
 			MsgFromCborFunc: handshake.NewMsgFromCbor,
 		},
 	}
