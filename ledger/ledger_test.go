@@ -1301,8 +1301,8 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 		t.Fatalf("Build() returned error: %v", err)
 	}
 
-	if cert.Amount != int64(deposit) {
-		t.Errorf("Expected Amount %d, got %d", deposit, cert.Amount)
+	if got := cert.DepositAmount().Uint64(); got != deposit {
+		t.Errorf("Expected Amount %d, got %d", deposit, got)
 	}
 
 	if cert.Anchor == nil {
@@ -1311,6 +1311,20 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 
 	if cert.Anchor.Url != anchorUrl {
 		t.Errorf("Expected anchor URL %s, got %s", anchorUrl, cert.Anchor.Url)
+	}
+}
+
+func TestDRepRegistrationBuilder_Build_MaxInt64Deposit(t *testing.T) {
+	deposit := uint64(1<<63 - 1)
+	cert, err := ledger.NewDRepRegistrationBuilder().
+		WithCredential(sampleKeyHash()).
+		WithDeposit(deposit).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() returned error for a valid Word64 deposit: %v", err)
+	}
+	if got := cert.DepositAmount().Uint64(); got != deposit {
+		t.Fatalf("Expected Amount %d, got %d", deposit, got)
 	}
 }
 

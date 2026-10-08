@@ -54,6 +54,30 @@ func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
 	assert.Nil(t, deposit)
 }
 
+func TestMockStateManagerTracksLargeDRepDeposit(t *testing.T) {
+	const deposit = uint64(1) << 62
+	credentialHash := []byte{0x05}
+	manager := NewMockStateManager()
+	certificate, err := ledger.NewDRepRegistrationBuilder().
+		WithCredential(credentialHash).
+		WithDeposit(deposit).
+		Build()
+	require.NoError(t, err)
+	manager.processCertificate(certificate)
+
+	got := manager.drepRegistrations[ledger.NewRewardAccountKey(
+		certificate.DrepCredential,
+	)]
+	require.NotNil(t, got)
+	assert.Equal(t, deposit, *got)
+}
+
+func TestNonNegativeDepositPreservesWord64(t *testing.T) {
+	const deposit = uint64(1) << 63
+	amount := new(big.Int).SetUint64(deposit)
+	assert.Equal(t, deposit, nonNegativeDeposit(amount))
+}
+
 func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {
 	credential := common.Credential{
 		CredType:   common.CredentialTypeAddrKeyHash,

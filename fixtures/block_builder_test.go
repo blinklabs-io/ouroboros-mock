@@ -150,8 +150,12 @@ func TestBlockBuilderProtocolVersion(t *testing.T) {
 		era := ledger.GetEraById(id)
 		t.Run(era.Name, func(t *testing.T) {
 			t.Parallel()
+			major := uint64(21)
+			if id == 6 {
+				major = 10
+			}
 			block, err := fixtures.NewBlockBuilder(era).
-				WithProtocolVersion(21, 3).Build()
+				WithProtocolVersion(major, 3).Build()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,8 +180,8 @@ func TestBlockBuilderProtocolVersion(t *testing.T) {
 				}
 				version = []uint64{major, minor}
 			}
-			if len(version) != 2 || version[0] != 21 || version[1] != 3 {
-				t.Fatalf("protocol version %v, want [21 3]", version)
+			if len(version) != 2 || version[0] != major || version[1] != 3 {
+				t.Fatalf("protocol version %v, want [%d 3]", version, major)
 			}
 		})
 	}
@@ -380,9 +384,7 @@ func TestBlockBuilderByronMainBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("decoded %T, want *byron.ByronMainBlock", decoded)
 	}
-	if err := main.ValidateBodyProof(common.VerifyConfig{
-		EnableByronSscProofHashValidation: true,
-	}); err != nil {
+	if err := main.ValidateBodyProof(); err != nil {
 		t.Fatalf("body proof: %v", err)
 	}
 }

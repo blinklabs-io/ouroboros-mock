@@ -129,10 +129,7 @@ func (b *BlockBuilder) buildByronMain() (ledger.Block, error) {
 	return b.decodeEncoded(
 		[]cbor.RawMessage{headerCbor, body, byronExtraBodyData},
 		func(data []byte) (ledger.Block, error) {
-			return byron.NewByronMainBlockFromCbor(
-				data,
-				common.VerifyConfig{EnableByronSscProofHashValidation: true},
-			)
+			return byron.NewByronMainBlockFromCbor(data)
 		},
 	)
 }

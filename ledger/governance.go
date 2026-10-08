@@ -17,8 +17,8 @@ package ledger
 import (
 	"errors"
 	"fmt"
-	"math"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 )
 
@@ -195,15 +195,6 @@ func (b *drepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 	if len(b.credential) == 0 {
 		return nil, errors.New("credential is required")
 	}
-
-	// Validate deposit doesn't overflow int64
-	if b.deposit > uint64(math.MaxInt64) {
-		return nil, fmt.Errorf(
-			"deposit %d exceeds maximum int64 value",
-			b.deposit,
-		)
-	}
-
 	// Validate dataHash length if provided (Blake2b256 is 32 bytes)
 	if len(b.dataHash) > 0 && len(b.dataHash) != 32 {
 		return nil, fmt.Errorf(
@@ -212,23 +203,29 @@ func (b *drepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 		)
 	}
 
-	cert := &lcommon.RegistrationDrepCertificate{
-		CertType: uint(lcommon.CertificateTypeRegistrationDrep),
-		DrepCredential: lcommon.Credential{
-			CredType:   lcommon.CredentialTypeAddrKeyHash,
-			Credential: lcommon.NewBlake2b224(b.credential),
-		},
-		Amount: int64(b.deposit),
+	cert := &lcommon.RegistrationDrepCertificate{}
+	credential := lcommon.Credential{
+		CredType:   lcommon.CredentialTypeAddrKeyHash,
+		Credential: lcommon.NewBlake2b224(b.credential),
 	}
+	var anchor *lcommon.GovAnchor
 
 	if b.anchorURL != "" {
-		anchor := &lcommon.GovAnchor{
+		anchor = &lcommon.GovAnchor{
 			Url: b.anchorURL,
 		}
 		if len(b.dataHash) > 0 {
 			copy(anchor.DataHash[:], b.dataHash)
 		}
-		cert.Anchor = anchor
+	}
+	certCBOR, err := cbor.Encode([]any{
+		uint(lcommon.CertificateTypeRegistrationDrep), credential, b.deposit, anchor,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode DRep registration certificate: %w", err)
+	}
+	if _, err := cbor.Decode(certCBOR, cert); err != nil {
+		return nil, fmt.Errorf("decode DRep registration certificate: %w", err)
 	}
 
 	return cert, nil

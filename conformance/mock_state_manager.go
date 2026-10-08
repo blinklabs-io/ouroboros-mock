@@ -540,7 +540,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -551,7 +551,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
@@ -563,7 +563,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -578,7 +578,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[key] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -653,10 +653,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := drepCert.DrepCredential
 			// The certificate carries the deposit the DRep paid, and
 			// that is the amount its deregistration must refund.
-			deposit := uint64(0)
-			if drepCert.Amount >= 0 {
-				deposit = uint64(drepCert.Amount)
-			}
+			deposit := nonNegativeDeposit(drepCert.DepositAmount())
 			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
@@ -822,11 +819,11 @@ func keyDepositAmount(pp common.ProtocolParameters) uint64 {
 	return provider.KeyDepositAmount().Uint64()
 }
 
-func nonNegativeDeposit(amount int64) uint64 {
-	if amount < 0 {
+func nonNegativeDeposit(amount *big.Int) uint64 {
+	if amount == nil || amount.Sign() < 0 {
 		return 0
 	}
-	return uint64(amount)
+	return amount.Uint64()
 }
 
 func drepDelegation(drep common.Drep) common.Drep {
