@@ -11,6 +11,7 @@ package certificates_test
 import (
 	"bytes"
 	"math/big"
+	"net"
 	"strings"
 	"testing"
 
@@ -171,6 +172,178 @@ func TestPoolBuildersReturnRoundTrippableCertificates(t *testing.T) {
 			Epoch:       42,
 		},
 	)
+}
+
+func TestPoolBuilderOwnsMutableInputsAndResults(t *testing.T) {
+	port := uint32(3001)
+	ipv4 := net.IP{192, 0, 2, 1}
+	builder := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).
+		WithOperator(poolHash).
+		WithVrfKeyHash(vrfHash).
+		WithRewardAccountKey(stakeHash).
+		WithOwners(stakeHash).
+		WithMargin(1, 100).
+		WithRelays(lcommon.PoolRelay{
+			Type: lcommon.PoolRelayTypeSingleHostAddress,
+			Port: &port,
+			Ipv4: &ipv4,
+		}).
+		WithMetadata("https://example.test/pool", vrfHash)
+	port = 4001
+	ipv4[0] = 0xff
+
+	first, err := builder.Build()
+	require.NoError(t, err)
+	second, err := builder.Build()
+	require.NoError(t, err)
+	require.Equal(t, uint32(3001), *first.Relays[0].Port)
+	require.Equal(t, byte(192), (*first.Relays[0].Ipv4)[0])
+
+	first.Margin.Rat.SetInt64(1)
+	first.PoolOwners[0] = lcommon.AddrKeyHash{}
+	*first.Relays[0].Port = 5001
+	(*first.Relays[0].Ipv4)[0] = 0xfe
+	first.PoolMetadata.Hash[0] = 0xfd
+	require.Equal(t, big.NewRat(1, 100), second.Margin.Rat)
+	require.Equal(t, lcommon.NewBlake2b224(stakeHash), second.PoolOwners[0])
+	require.Equal(t, uint32(3001), *second.Relays[0].Port)
+	require.Equal(t, byte(192), (*second.Relays[0].Ipv4)[0])
+	require.Equal(t, byte(0x03), second.PoolMetadata.Hash[0])
+
+	third, err := builder.Build()
+	require.NoError(t, err)
+	require.Equal(t, big.NewRat(1, 100), third.Margin.Rat)
+	require.Equal(t, uint32(3001), *third.Relays[0].Port)
+}
+
+func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
+	tests := []struct {
+		name   string
+		build  func() (lcommon.Certificate, error)
+		mutate func(lcommon.Certificate)
+		check  func(*testing.T, lcommon.Certificate)
+	}{
+		{
+			name: "DRep registration anchor",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewDRepRegistration().
+					WithCredential(stakeHash).
+					WithAnchor("https://example.test/drep", vrfHash)
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.RegistrationDrepCertificate).Anchor.DataHash[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x03), cert.(*lcommon.RegistrationDrepCertificate).Anchor.DataHash[0])
+			},
+		},
+		{
+			name: "DRep update anchor",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewDRepUpdate().
+					WithCredential(stakeHash).
+					WithAnchor("https://example.test/drep", vrfHash)
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.UpdateDrepCertificate).Anchor.DataHash[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x03), cert.(*lcommon.UpdateDrepCertificate).Anchor.DataHash[0])
+			},
+		},
+		{
+			name: "committee resignation anchor",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewResignCommitteeCold().
+					WithColdCredential(stakeHash).
+					WithAnchor("https://example.test/committee", vrfHash)
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.ResignCommitteeColdCertificate).Anchor.DataHash[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x03), cert.(*lcommon.ResignCommitteeColdCertificate).Anchor.DataHash[0])
+			},
+		},
+		{
+			name: "vote delegation DRep",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewVoteDelegation().
+					WithCredential(stakeHash).
+					WithDRepKeyHash(poolHash)
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.VoteDelegationCertificate).Drep.Credential[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x02), cert.(*lcommon.VoteDelegationCertificate).Drep.Credential[0])
+			},
+		},
+		{
+			name: "stake vote delegation DRep",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewStakeVoteDelegation().
+					WithCredential(stakeHash).
+					WithPoolKeyHash(poolHash).
+					WithDRepKeyHash(vrfHash[:28])
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.StakeVoteDelegationCertificate).Drep.Credential[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x03), cert.(*lcommon.StakeVoteDelegationCertificate).Drep.Credential[0])
+			},
+		},
+		{
+			name: "vote registration delegation DRep",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewVoteRegistrationDelegation().
+					WithCredential(stakeHash).
+					WithDRepKeyHash(poolHash)
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.VoteRegistrationDelegationCertificate).Drep.Credential[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x02), cert.(*lcommon.VoteRegistrationDelegationCertificate).Drep.Credential[0])
+			},
+		},
+		{
+			name: "stake vote registration delegation DRep",
+			build: func() func() (lcommon.Certificate, error) {
+				builder := certificates.NewStakeVoteRegistrationDelegation().
+					WithCredential(stakeHash).
+					WithPoolKeyHash(poolHash).
+					WithDRepKeyHash(vrfHash[:28])
+				return func() (lcommon.Certificate, error) { return builder.Build() }
+			}(),
+			mutate: func(cert lcommon.Certificate) {
+				cert.(*lcommon.StakeVoteRegistrationDelegationCertificate).Drep.Credential[0] = 0xff
+			},
+			check: func(t *testing.T, cert lcommon.Certificate) {
+				require.Equal(t, byte(0x03), cert.(*lcommon.StakeVoteRegistrationDelegationCertificate).Drep.Credential[0])
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first, err := tt.build()
+			require.NoError(t, err)
+			second, err := tt.build()
+			require.NoError(t, err)
+			tt.mutate(first)
+			tt.check(t, second)
+			third, err := tt.build()
+			require.NoError(t, err)
+			tt.check(t, third)
+		})
+	}
 }
 
 func TestGovernanceBuildersReturnCertificatesUsableInTransactions(

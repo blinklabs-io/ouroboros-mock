@@ -16,6 +16,8 @@ package fixtures_test
 
 import (
 	"bytes"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -292,6 +294,30 @@ func TestGenerateConwayChainWithTransactionsEmpty(t *testing.T) {
 				len(blocks),
 			)
 		}
+	}
+}
+
+func TestGenerateConwayChainWithTransactionsRejectsOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		number, slot, increment uint64
+		message                 string
+	}{
+		{"block_number", math.MaxUint64, 0, 1, "block number range overflows uint64"},
+		{"slot", 0, math.MaxUint64, 1, "slot range overflows uint64"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks, err := fixtures.GenerateConwayChainWithTransactions(
+				tc.number,
+				common.Blake2b256{},
+				tc.slot,
+				tc.increment,
+				2,
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.message) || blocks != nil {
+				t.Fatalf("overflow returned %d blocks, error=%v", len(blocks), err)
+			}
+		})
 	}
 }
 

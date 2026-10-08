@@ -53,6 +53,9 @@ func NewScriptAtLeast(
 	required int64,
 	scripts ...lcommon.NativeScript,
 ) (lcommon.NativeScript, error) {
+	if scripts == nil {
+		scripts = []lcommon.NativeScript{}
+	}
 	return native(
 		lcommon.NativeScriptNofK{Type: 3, N: required, Scripts: scripts},
 	)

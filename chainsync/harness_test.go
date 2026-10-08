@@ -232,6 +232,12 @@ func TestFindIntersectOversizedPayload(t *testing.T) {
 	require.Equal(t, numPoints, <-gotCount)
 }
 
+// Concurrent transport writes preserve complete oversized message boundaries.
+func TestConcurrentOversizedSends(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	csmock.VerifyConcurrentOversizedSends(t)
+}
+
 // Repeated multi-segment sends must each reach the server whole, with no
 // CBOR-decode error. The server rejects a FindIntersect sent while it still
 // has agency, so each send waits for the previous response.

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
@@ -34,6 +35,59 @@ func validateURL(url string) error {
 		return fmt.Errorf("URL must not exceed %d bytes", maxURLSize)
 	}
 	return nil
+}
+
+func clonePointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneIP(value *net.IP) *net.IP {
+	if value == nil {
+		return nil
+	}
+	copy := append(net.IP(nil), (*value)...)
+	return &copy
+}
+
+func clonePoolRelays(relays []lcommon.PoolRelay) []lcommon.PoolRelay {
+	copied := make([]lcommon.PoolRelay, len(relays))
+	for i, relay := range relays {
+		copied[i] = relay
+		copied[i].Port = clonePointer(relay.Port)
+		copied[i].Ipv4 = cloneIP(relay.Ipv4)
+		copied[i].Ipv6 = cloneIP(relay.Ipv6)
+		copied[i].Hostname = clonePointer(relay.Hostname)
+	}
+	return copied
+}
+
+func clonePoolMetadata(metadata *lcommon.PoolMetadata) *lcommon.PoolMetadata {
+	if metadata == nil {
+		return nil
+	}
+	copied := *metadata
+	copied.Hash = append(lcommon.PoolMetadataHash(nil), metadata.Hash...)
+	return &copied
+}
+
+func cloneRat(value cbor.Rat) cbor.Rat {
+	if value.Rat == nil {
+		return cbor.Rat{}
+	}
+	return cbor.Rat{Rat: new(big.Rat).Set(value.Rat)}
+}
+
+func cloneAnchor(anchor *lcommon.GovAnchor) *lcommon.GovAnchor {
+	return clonePointer(anchor)
+}
+
+func cloneDRep(drep lcommon.Drep) lcommon.Drep {
+	drep.Credential = append([]byte(nil), drep.Credential...)
+	return drep
 }
 
 func credential(kind uint, hash []byte) (lcommon.Credential, error) {
@@ -298,6 +352,8 @@ type PoolRegistrationBuilder struct {
 func NewPoolRegistration(network uint) *PoolRegistrationBuilder {
 	return &PoolRegistrationBuilder{
 		margin:  cbor.Rat{Rat: big.NewRat(0, 1)},
+		owners:  []lcommon.AddrKeyHash{},
+		relays:  []lcommon.PoolRelay{},
 		network: network,
 	}
 }
@@ -384,7 +440,7 @@ func (b *PoolRegistrationBuilder) WithOwners(
 func (b *PoolRegistrationBuilder) WithRelays(
 	relays ...lcommon.PoolRelay,
 ) *PoolRegistrationBuilder {
-	b.relays = append([]lcommon.PoolRelay(nil), relays...)
+	b.relays = clonePoolRelays(relays)
 	return b
 }
 
@@ -446,11 +502,11 @@ func (b *PoolRegistrationBuilder) Build() (*lcommon.PoolRegistrationCertificate,
 		VrfKeyHash:    b.vrfKeyHash,
 		Pledge:        b.pledge,
 		Cost:          b.cost,
-		Margin:        b.margin,
+		Margin:        cloneRat(b.margin),
 		RewardAccount: b.rewardAccount,
-		PoolOwners:    b.owners,
-		Relays:        b.relays,
-		PoolMetadata:  b.metadata,
+		PoolOwners:    append([]lcommon.AddrKeyHash{}, b.owners...),
+		Relays:        clonePoolRelays(b.relays),
+		PoolMetadata:  clonePoolMetadata(b.metadata),
 	}
 	if err := cert.SetRewardAccountCredential(
 		b.rewardCredential, b.network,
@@ -616,7 +672,7 @@ func (b *DRepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 		CertType:       uint(lcommon.CertificateTypeRegistrationDrep),
 		DrepCredential: b.credential,
 		Amount:         amount,
-		Anchor:         b.anchor,
+		Anchor:         cloneAnchor(b.anchor),
 	}, nil
 }
 
@@ -693,7 +749,7 @@ func (b *DRepUpdateBuilder) Build() (*lcommon.UpdateDrepCertificate, error) {
 	return &lcommon.UpdateDrepCertificate{
 		CertType:       uint(lcommon.CertificateTypeUpdateDrep),
 		DrepCredential: b.credential,
-		Anchor:         b.anchor,
+		Anchor:         cloneAnchor(b.anchor),
 	}, nil
 }
 
@@ -796,7 +852,7 @@ func (b *VoteDelegationBuilder) Build() (*lcommon.VoteDelegationCertificate, err
 	return &lcommon.VoteDelegationCertificate{
 		CertType:        uint(lcommon.CertificateTypeVoteDelegation),
 		StakeCredential: b.credential,
-		Drep:            b.drep,
+		Drep:            cloneDRep(b.drep),
 	}, nil
 }
 
@@ -870,7 +926,7 @@ func (b *StakeVoteDelegationBuilder) Build() (*lcommon.StakeVoteDelegationCertif
 		CertType:        uint(lcommon.CertificateTypeStakeVoteDelegation),
 		StakeCredential: b.credential,
 		PoolKeyHash:     b.poolKeyHash,
-		Drep:            b.drep,
+		Drep:            cloneDRep(b.drep),
 	}, nil
 }
 
@@ -1082,7 +1138,7 @@ func (b *VoteRegistrationDelegationBuilder) Build() (*lcommon.VoteRegistrationDe
 			lcommon.CertificateTypeVoteRegistrationDelegation,
 		),
 		StakeCredential: b.credential,
-		Drep:            b.drep,
+		Drep:            cloneDRep(b.drep),
 		Amount:          amount,
 	}, nil
 }
@@ -1157,7 +1213,7 @@ func (b *StakeVoteRegistrationDelegationBuilder) Build() (*lcommon.StakeVoteRegi
 		),
 		StakeCredential: b.credential,
 		PoolKeyHash:     b.poolKeyHash,
-		Drep:            b.drep,
+		Drep:            cloneDRep(b.drep),
 		Amount:          amount,
 	}, nil
 }
@@ -1279,6 +1335,6 @@ func (b *ResignCommitteeColdBuilder) Build() (*lcommon.ResignCommitteeColdCertif
 	return &lcommon.ResignCommitteeColdCertificate{
 		CertType:       uint(lcommon.CertificateTypeResignCommitteeCold),
 		ColdCredential: b.cold,
-		Anchor:         b.anchor,
+		Anchor:         cloneAnchor(b.anchor),
 	}, nil
 }

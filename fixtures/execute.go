@@ -320,7 +320,7 @@ func executeBlockFixture(
 	}
 
 	if counterpart, ok := relatedFixture(fixtureMap, fixture, KindHeader); ok {
-		header, err := counterpart.DecodeLedgerHeader()
+		header, err := decodeExecutionHeader(counterpart)
 		if err != nil {
 			return 0, fmt.Errorf(
 				"failed to decode related header fixture %s: %w",
@@ -354,11 +354,25 @@ func executeBlockFixture(
 	return 1, nil
 }
 
+// examplesDijkstra uses fromShelleyLedgerExamplesPraos, whose HeaderBody
+// contains ten fields. Its curated consensus example uses the Praos codec.
+func decodeExecutionHeader(fixture Fixture) (gcommon.BlockHeader, error) {
+	if fixture.Repo == RepoOuroborosConsensus &&
+		fixture.RelPath == consensusV2FixtureRoot+"Header_Dijkstra" {
+		raw, err := fixture.ConsensusHeaderBytes()
+		if err != nil {
+			return nil, err
+		}
+		return babbage.NewBabbageBlockHeaderFromCbor(raw)
+	}
+	return fixture.DecodeLedgerHeader()
+}
+
 func executeHeaderFixture(
 	fixture Fixture,
 	fixtureMap map[string]Fixture,
 ) (int, error) {
-	header, err := fixture.DecodeLedgerHeader()
+	header, err := decodeExecutionHeader(fixture)
 	if err != nil {
 		return 0, fmt.Errorf(
 			"failed to decode header fixture %s: %w",

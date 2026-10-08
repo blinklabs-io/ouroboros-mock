@@ -81,6 +81,22 @@ mini-protocols instead of a scripted conversation:
 Each peer publishes events on a channel, so tests wait on the event they expect
 rather than sleeping.
 
+### Certificate Fixtures
+
+The `certificates` package builds every certificate type through Conway.
+`NewMoveInstantaneousRewards(source)` uses the Shelley wire pot IDs: 0 for
+reserves and 1 for treasury. Select a signed credential reward map with
+`WithRewards`, `WithRewardKey`, or `WithRewardScript`, or a coin transfer with
+`WithOtherPot`. Reward maps and opposite-pot transfers are mutually exclusive;
+empty maps and zero transfers remain distinct. The MIR builder copies its
+inputs and returns independent certificate values.
+
+`NewGenerator(seed)` draws certificate types and inputs deterministically
+within a Go release, including both MIR targets. Pool reward accounts default
+to testnet; `WithNetwork` selects their network ID. `StakeLifecycle`,
+`PoolLifecycle`, and `DRepLifecycle` build related registration, delegation or
+update, and retirement or deregistration sequences.
+
 ## Command line listener
 
 Run `ouroboros-mock demo.yaml` to listen for one connection and execute the
