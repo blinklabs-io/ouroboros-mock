@@ -157,6 +157,50 @@ var ConversationEntryHandshakeNtNResponseInput = ConversationEntryInput{
 	MsgFromCborFunc: handshake.NewMsgFromCbor,
 }
 
+// NewConversationHandshakeNtNAsServer builds entries for a mock peer acting as
+// the node-to-node server and accepting the supplied protocol version.
+func NewConversationHandshakeNtNAsServer(
+	version uint16,
+	versionData protocol.VersionData,
+) []ConversationEntry {
+	return []ConversationEntry{
+		ConversationEntryHandshakeRequestGeneric,
+		ConversationEntryOutput{
+			ProtocolId: handshake.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				handshake.NewMsgAcceptVersion(version, versionData),
+			},
+		},
+	}
+}
+
+// NewConversationHandshakeNtNAsClient builds entries for a mock peer acting as
+// the node-to-node client and proposing the supplied version data while
+// expecting the supplied server version data in response.
+func NewConversationHandshakeNtNAsClient(
+	version uint16,
+	proposedVersionData protocol.VersionData,
+	expectedServerVersionData protocol.VersionData,
+) []ConversationEntry {
+	return []ConversationEntry{
+		ConversationEntryOutput{
+			ProtocolId: handshake.ProtocolId,
+			Messages: []protocol.Message{
+				handshake.NewMsgProposeVersions(protocol.ProtocolVersionMap{
+					version: proposedVersionData,
+				}),
+			},
+		},
+		ConversationEntryInput{
+			ProtocolId:      handshake.ProtocolId,
+			IsResponse:      true,
+			Message:         handshake.NewMsgAcceptVersion(version, expectedServerVersionData),
+			MsgFromCborFunc: handshake.NewMsgFromCbor,
+		},
+	}
+}
+
 // ConversationEntryKeepAliveRequest is a pre-defined conversation entry for a keep-alive request
 var ConversationEntryKeepAliveRequest = ConversationEntryInput{
 	ProtocolId:      keepalive.ProtocolId,
@@ -271,24 +315,51 @@ func NewConversationEntryLeiosVotesResponse(
 
 // ConversationLeiosFetch is a minimal Leios fetch conversation that performs
 // the handshake, then completes the protocol from the client with Done.
-var ConversationLeiosFetch = []ConversationEntry{
-	ConversationEntryHandshakeRequestGeneric,
-	ConversationEntryHandshakeNtNResponse,
+var ConversationLeiosFetch = append(
+	NewConversationHandshakeNtNAsServer(
+		MockProtocolVersionNtN,
+		protocol.VersionDataNtN13andUp{
+			VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+				CborNetworkMagic:                       MockNetworkMagic,
+				CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorOnly,
+				CborPeerSharing:                        protocol.PeerSharingModeNoPeerSharing,
+				CborQuery:                              protocol.QueryModeDisabled,
+			},
+		},
+	),
 	NewConversationEntryLeiosFetchRequest(leiosfetch.NewMsgDone()),
-}
+)
 
 // ConversationLeiosNotify is a minimal Leios notify conversation that performs
 // the handshake, then completes the protocol from the client with Done.
-var ConversationLeiosNotify = []ConversationEntry{
-	ConversationEntryHandshakeRequestGeneric,
-	ConversationEntryHandshakeNtNResponse,
+var ConversationLeiosNotify = append(
+	NewConversationHandshakeNtNAsServer(
+		MockProtocolVersionNtN,
+		protocol.VersionDataNtN13andUp{
+			VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+				CborNetworkMagic:                       MockNetworkMagic,
+				CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorOnly,
+				CborPeerSharing:                        protocol.PeerSharingModeNoPeerSharing,
+				CborQuery:                              protocol.QueryModeDisabled,
+			},
+		},
+	),
 	NewConversationEntryLeiosNotifyRequest(leiosnotify.NewMsgDone()),
-}
+)
 
 // ConversationLeiosVotes is a minimal Leios votes conversation that performs
 // the handshake, then completes the protocol from the client with Done.
-var ConversationLeiosVotes = []ConversationEntry{
-	ConversationEntryHandshakeRequestGeneric,
-	ConversationEntryHandshakeNtNResponse,
+var ConversationLeiosVotes = append(
+	NewConversationHandshakeNtNAsServer(
+		MockProtocolVersionNtN,
+		protocol.VersionDataNtN13andUp{
+			VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+				CborNetworkMagic:                       MockNetworkMagic,
+				CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorOnly,
+				CborPeerSharing:                        protocol.PeerSharingModeNoPeerSharing,
+				CborQuery:                              protocol.QueryModeDisabled,
+			},
+		},
+	),
 	NewConversationEntryLeiosVotesRequest(leiosvotes.NewMsgDone()),
-}
+)
