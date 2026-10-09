@@ -17,11 +17,10 @@ package ledger
 import (
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
-	utxorpc "github.com/utxorpc/go-codegen/utxorpc/v1alpha/cardano"
+	"github.com/blinklabs-io/ouroboros-mock/certificates"
 )
 
 // CommitteeMemberBuilder defines an interface for building mock committee member state
@@ -155,53 +154,7 @@ type DRepRegistrationBuilder interface {
 
 // DRepRegistrationCertificate retains the unsigned deposit alongside the
 // upstream ledger certificate fields.
-type DRepRegistrationCertificate struct {
-	*lcommon.RegistrationDrepCertificate
-	Amount uint64
-}
-
-var _ lcommon.Certificate = (*DRepRegistrationCertificate)(nil)
-
-// DepositAmount returns the full unsigned deposit amount.
-func (c *DRepRegistrationCertificate) DepositAmount() *big.Int {
-	if c == nil {
-		return nil
-	}
-	return new(big.Int).SetUint64(c.Amount)
-}
-
-// Utxorpc returns the certificate with its full unsigned deposit amount.
-func (c *DRepRegistrationCertificate) Utxorpc() (*utxorpc.Certificate, error) {
-	if c == nil || c.RegistrationDrepCertificate == nil {
-		return nil, errors.New("DRep registration certificate is nil")
-	}
-	result, err := c.RegistrationDrepCertificate.Utxorpc()
-	if err != nil {
-		return nil, err
-	}
-	regCert := result.GetRegDrepCert()
-	if regCert == nil {
-		return nil, errors.New("UTxORPC certificate is not a DRep registration")
-	}
-	regCert.Coin = lcommon.BigIntToUtxorpcBigInt(c.DepositAmount())
-	return result, nil
-}
-
-// MarshalCBOR returns the encoded certificate, preserving the unsigned amount.
-func (c *DRepRegistrationCertificate) MarshalCBOR() ([]byte, error) {
-	if c == nil || c.RegistrationDrepCertificate == nil {
-		return nil, errors.New("DRep registration certificate is nil")
-	}
-	if encoded := c.Cbor(); len(encoded) > 0 {
-		return encoded, nil
-	}
-	return cbor.Encode([]any{
-		c.CertType,
-		c.DrepCredential,
-		c.Amount,
-		c.Anchor,
-	})
-}
+type DRepRegistrationCertificate = certificates.DRepRegistrationCertificate
 
 // drepRegistrationBuilder implements DRepRegistrationBuilder
 type drepRegistrationBuilder struct {
