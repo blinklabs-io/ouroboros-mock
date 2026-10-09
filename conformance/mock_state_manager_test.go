@@ -73,9 +73,23 @@ func TestMockStateManagerTracksLargeDRepDeposit(t *testing.T) {
 }
 
 func TestNonNegativeDepositPreservesWord64(t *testing.T) {
-	const deposit = uint64(1) << 63
-	amount := new(big.Int).SetUint64(deposit)
-	assert.Equal(t, deposit, nonNegativeDeposit(amount))
+	for _, deposit := range []uint64{uint64(1) << 63, ^uint64(0)} {
+		amount := new(big.Int).SetUint64(deposit)
+		assert.Equal(t, deposit, nonNegativeDeposit(amount))
+	}
+}
+
+func TestNonNegativeDepositRejectsOutOfRangeAmounts(t *testing.T) {
+	for _, amount := range []*big.Int{
+		new(big.Int).Add(
+			new(big.Int).Lsh(big.NewInt(1), 64),
+			big.NewInt(1),
+		),
+		big.NewInt(-1),
+		nil,
+	} {
+		assert.Zero(t, nonNegativeDeposit(amount))
+	}
 }
 
 func TestMockStateManagerTracksKeyStakeRegistrationDeposit(t *testing.T) {

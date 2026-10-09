@@ -1315,13 +1315,13 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 }
 
 func TestDRepRegistrationBuilder_Build_MaxInt64Deposit(t *testing.T) {
-	deposit := uint64(1<<63 - 1)
+	const deposit = uint64(1<<63 - 1)
 	cert, err := ledger.NewDRepRegistrationBuilder().
 		WithCredential(sampleKeyHash()).
 		WithDeposit(deposit).
 		Build()
 	if err != nil {
-		t.Fatalf("Build() returned error for a valid Word64 deposit: %v", err)
+		t.Fatalf("Build() returned error for a valid int64 deposit: %v", err)
 	}
 	if got := cert.DepositAmount().Uint64(); got != deposit {
 		t.Fatalf("Expected Amount %d, got %d", deposit, got)

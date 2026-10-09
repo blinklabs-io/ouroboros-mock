@@ -820,7 +820,7 @@ func keyDepositAmount(pp common.ProtocolParameters) uint64 {
 }
 
 func nonNegativeDeposit(amount *big.Int) uint64 {
-	if amount == nil || amount.Sign() < 0 {
+	if amount == nil || amount.Sign() < 0 || !amount.IsUint64() {
 		return 0
 	}
 	return amount.Uint64()
