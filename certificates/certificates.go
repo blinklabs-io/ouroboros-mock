@@ -699,6 +699,54 @@ func (c *DRepRegistrationCertificate) MarshalCBOR() ([]byte, error) {
 	})
 }
 
+// DRepDeregistrationCertificate retains the unsigned refund alongside the
+// upstream ledger certificate fields.
+type DRepDeregistrationCertificate struct {
+	*lcommon.DeregistrationDrepCertificate
+	Amount uint64
+}
+
+var _ lcommon.Certificate = (*DRepDeregistrationCertificate)(nil)
+
+// DepositAmount returns the full unsigned refund amount.
+func (c *DRepDeregistrationCertificate) DepositAmount() *big.Int {
+	if c == nil {
+		return nil
+	}
+	return new(big.Int).SetUint64(c.Amount)
+}
+
+// Utxorpc returns the certificate with its full unsigned refund amount.
+func (c *DRepDeregistrationCertificate) Utxorpc() (*utxorpc.Certificate, error) {
+	if c == nil || c.DeregistrationDrepCertificate == nil {
+		return nil, errors.New("DRep deregistration certificate is nil")
+	}
+	result, err := c.DeregistrationDrepCertificate.Utxorpc()
+	if err != nil {
+		return nil, err
+	}
+	unregCert := result.GetUnregDrepCert()
+	if unregCert == nil {
+		return nil, errors.New("UTxORPC certificate is not a DRep deregistration")
+	}
+	unregCert.Coin = lcommon.BigIntToUtxorpcBigInt(c.DepositAmount())
+	return result, nil
+}
+
+// MarshalCBOR returns the encoded certificate, preserving the unsigned amount.
+func (c *DRepDeregistrationCertificate) MarshalCBOR() ([]byte, error) {
+	if c == nil || c.DeregistrationDrepCertificate == nil {
+		return nil, errors.New("DRep deregistration certificate is nil")
+	}
+	// The embedded certificate's amount may be signed, so encode from the
+	// wrapper's unsigned amount instead of using its cached representation.
+	return cbor.Encode([]any{
+		c.CertType,
+		c.DrepCredential,
+		c.Amount,
+	})
+}
+
 // DRepRegistrationBuilder builds a Conway DRep registration certificate.
 type DRepRegistrationBuilder struct{ conwayBuilder }
 
@@ -791,22 +839,33 @@ func (b *DRepDeregistrationBuilder) WithDeposit(
 	return b
 }
 
-func (b *DRepDeregistrationBuilder) Build() (*lcommon.DeregistrationDrepCertificate, error) {
+func (b *DRepDeregistrationBuilder) Build() (*DRepDeregistrationCertificate, error) {
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
-	amount, err := checkedAmount(b.deposit)
+	encoded, err := cbor.Encode([]any{
+		uint(lcommon.CertificateTypeDeregistrationDrep),
+		b.credential,
+		b.deposit,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode DRep deregistration certificate: %w", err)
 	}
-	return decodeCertificate(
-		[]any{
-			uint(lcommon.CertificateTypeDeregistrationDrep),
-			b.credential,
-			amount,
-		},
-		&lcommon.DeregistrationDrepCertificate{},
-	)
+	cert := &lcommon.DeregistrationDrepCertificate{
+		CertType:       uint(lcommon.CertificateTypeDeregistrationDrep),
+		DrepCredential: b.credential,
+	}
+	if b.deposit <= math.MaxInt64 {
+		if _, err := cbor.Decode(encoded, cert); err != nil {
+			return nil, err
+		}
+		cert.DrepCredential = b.credential
+	}
+	cert.SetCbor(encoded)
+	return &DRepDeregistrationCertificate{
+		DeregistrationDrepCertificate: cert,
+		Amount:                        b.deposit,
+	}, nil
 }
 
 // DRepUpdateBuilder builds a Conway DRep update certificate.

@@ -429,8 +429,7 @@ func (v *Validator) validateCertificate(
 		}
 
 	case common.CertificateTypeDeregistrationDrep:
-		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential
+		if credential, ok := drepDeregistrationCredential(cert); ok {
 			if !govState.IsDRepCredentialRegistered(credential) {
 				return fmt.Errorf(
 					"DRep credential %d:%x not registered",
@@ -575,9 +574,31 @@ func applyDRepCertificateValidationTransition(
 		govState.RegisterDRepCredentialUntil(drepCert.DrepCredential, 0)
 	case *common.RegistrationDrepCertificate:
 		govState.RegisterDRepCredentialUntil(drepCert.DrepCredential, 0)
+	case *ledger.DRepDeregistrationCertificate:
+		if drepCert != nil {
+			govState.DeregisterDRepCredential(drepCert.DrepCredential)
+		}
 	case *common.DeregistrationDrepCertificate:
-		govState.DeregisterDRepCredential(drepCert.DrepCredential)
+		if drepCert != nil {
+			govState.DeregisterDRepCredential(drepCert.DrepCredential)
+		}
 	}
+}
+
+func drepDeregistrationCredential(
+	cert common.Certificate,
+) (common.Credential, bool) {
+	switch drepCert := cert.(type) {
+	case *ledger.DRepDeregistrationCertificate:
+		if drepCert != nil {
+			return drepCert.DrepCredential, true
+		}
+	case *common.DeregistrationDrepCertificate:
+		if drepCert != nil {
+			return drepCert.DrepCredential, true
+		}
+	}
+	return common.Credential{}, false
 }
 
 // validateProposalProcedures validates proposal procedures in the transaction.

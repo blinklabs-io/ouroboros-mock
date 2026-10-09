@@ -114,12 +114,23 @@ func TestDRepLifecycleRegistersUpdatesAndRefunds(t *testing.T) {
 	require.True(t, ok, "%T", certs[0])
 	update, ok := certs[1].(*lcommon.UpdateDrepCertificate)
 	require.True(t, ok, "%T", certs[1])
-	deregistration, ok := certs[2].(*lcommon.DeregistrationDrepCertificate)
+	deregistration, ok := certs[2].(*certificates.DRepDeregistrationCertificate)
 	require.True(t, ok, "%T", certs[2])
 	require.Equal(t, uint64(500), registration.Amount)
-	require.Equal(t, registration.Amount, uint64(deregistration.Amount))
+	require.Equal(t, registration.Amount, deregistration.Amount)
 	require.Equal(t, registration.DrepCredential, update.DrepCredential)
 	require.Equal(t, registration.DrepCredential, deregistration.DrepCredential)
+}
+
+func TestDRepLifecyclePreservesWord64Deposit(t *testing.T) {
+	const deposit = uint64(1) << 63
+	certs, err := certificates.DRepLifecycle(stakeHash, deposit)
+	require.NoError(t, err)
+	require.Len(t, certs, 3)
+	registration := certs[0].(*certificates.DRepRegistrationCertificate)
+	deregistration := certs[2].(*certificates.DRepDeregistrationCertificate)
+	require.Equal(t, deposit, registration.Amount)
+	require.Equal(t, deposit, deregistration.Amount)
 }
 
 func TestPoolLifecycleRegistersAndRetires(t *testing.T) {

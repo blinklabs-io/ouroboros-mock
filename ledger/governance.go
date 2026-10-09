@@ -156,6 +156,10 @@ type DRepRegistrationBuilder interface {
 // upstream ledger certificate fields.
 type DRepRegistrationCertificate = certificates.DRepRegistrationCertificate
 
+// DRepDeregistrationCertificate retains the unsigned refund amount alongside
+// the upstream ledger certificate fields.
+type DRepDeregistrationCertificate = certificates.DRepDeregistrationCertificate
+
 // drepRegistrationBuilder implements DRepRegistrationBuilder
 type drepRegistrationBuilder struct {
 	credential []byte

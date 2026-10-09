@@ -24,6 +24,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/ouroboros-mock/certificates"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,6 +101,31 @@ func TestMockStateManagerTracksLargeDRepDepositFromBuilder(t *testing.T) {
 	)]
 	require.NotNil(t, got)
 	assert.Equal(t, deposit, *got)
+}
+
+func TestMockStateManagerAppliesWord64DRepLifecycle(t *testing.T) {
+	const deposit = uint64(1) << 63
+	certificateList, err := certificates.DRepLifecycle(
+		make([]byte, common.Blake2b224Size),
+		deposit,
+	)
+	require.NoError(t, err)
+	registration, ok := certificateList[0].(*certificates.DRepRegistrationCertificate)
+	require.True(t, ok, "%T", certificateList[0])
+	deregistration, ok := certificateList[2].(*certificates.DRepDeregistrationCertificate)
+	require.True(t, ok, "%T", certificateList[2])
+	require.Equal(t, deposit, registration.Amount)
+	require.Equal(t, deposit, deregistration.Amount)
+
+	manager := NewMockStateManager()
+	tx := ledger.NewTransactionBuilder().WithCertificates(certificateList...)
+	require.NoError(t, manager.ApplyTransaction(tx, 0))
+	require.False(
+		t,
+		manager.govState.IsDRepCredentialRegistered(
+			registration.DrepCredential,
+		),
+	)
 }
 
 func TestNonNegativeDepositPreservesWord64(t *testing.T) {

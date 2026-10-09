@@ -672,8 +672,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		}
 
 	case common.CertificateTypeDeregistrationDrep:
-		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential
+		if credential, ok := drepDeregistrationCredential(cert); ok {
 			key := ledger.NewRewardAccountKey(credential)
 			m.govState.DeregisterDRepCredential(credential)
 			if !m.govState.IsDRepCredentialRegistered(credential) {
