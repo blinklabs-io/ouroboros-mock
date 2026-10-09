@@ -309,11 +309,16 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 			h := newHarness(t, csmock.ModeNtC, r)
 			defer h.Close()
 
+			// Put one complete request on the wire before racing later calls.
+			// Otherwise the protocol state race can reject every caller before
+			// the server decodes any request, which does not exercise framing.
+			require.NoError(t, h.FindIntersect(points))
+
 			// A send may fail once the server tears down on the agency
 			// error, so send errors are not asserted; the server's view is.
 			start := make(chan struct{})
 			var wg sync.WaitGroup
-			for range senders {
+			for range senders - 1 {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()

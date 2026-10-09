@@ -153,8 +153,8 @@ Called for each `PassEpoch` event. Perform standard epoch-transition bookkeeping
 
 1. **Advance epoch**: update `GovernanceState.CurrentEpoch` to `newEpoch`.
 2. **Enact previously ratified proposals**: for any proposal whose `RatifiedEpoch < newEpoch`, call your enactment logic and update proposal roots. Enactment happens one epoch *after* ratification.
-3. **Ratify eligible proposals**: for each active proposal, check if voting thresholds are met (see `mock_state_manager.go:ratifyProposals` for the reference implementation). If ratified, set `RatifiedEpoch = newEpoch`.
-4. **Expire old proposals**: remove proposals where `ExpiresAfter < newEpoch`.
+3. **Ratify eligible proposals**: visit active proposals in priority order (NoConfidence, UpdateCommittee, NewConstitution, HardFork, ParameterChange, TreasuryWithdrawal). A proposal ratifies when, for purposes that have a root, its parent is that purpose's current root (which advances as earlier proposals ratify, so the parent need not yet be enacted), an UpdateCommittee action's new member terms end within `committeeMaxTermLength` epochs of `newEpoch`, the DRep and SPO stake-weighted thresholds and the per-member committee vote for its action type are met (the DRep threshold is zero during the bootstrap phase), a treasury withdrawal fits in the treasury, and no earlier NoConfidence, UpdateCommittee, NewConstitution or HardFork action ratified this epoch. Info actions never ratify. See `ratification.go` for the reference implementation and its documented edge cases. If ratified, set `RatifiedEpoch = newEpoch`.
+4. **Expire old proposals**: remove proposals where `ExpiresAfter < newEpoch`, together with proposals chained off them. Return each removed proposal's deposit to its return account, or to the treasury when that account is not registered.
 5. **Process pool retirements**: remove pools whose retirement epoch has arrived.
 
 **Enactment effects by action type:**
@@ -162,12 +162,12 @@ Called for each `PassEpoch` event. Perform standard epoch-transition bookkeeping
 | Action type | What to update |
 |-------------|----------------|
 | `ParameterChange` | Apply the parameter update to your stored protocol parameters. Call `GetProtocolParameters()` to get the current value; apply the update; store it. |
-| `UpdateCommittee` | Merge proposed members into the committee; remove any removed members. |
+| `UpdateCommittee` | Merge proposed members into the committee; remove any removed members; set the committee threshold. |
 | `NewConstitution` | Replace the constitution anchor and policy hash. |
-| `NoConfidence` | Record in the `ConstitutionalCommittee` root. |
-| `HardForkInitiation` | Record in the `HardFork` root (no state change beyond the root). |
-| `TreasuryWithdrawal` | Record in governance history (no in-vector treasury effect expected). |
-| `InfoAction` | Auto-ratified; no state change. |
+| `NoConfidence` | Record in the `ConstitutionalCommittee` root, clear the committee and its threshold. |
+| `HardForkInitiation` | Record in the `HardFork` root and set the protocol version. |
+| `TreasuryWithdrawal` | Credit each registered recipient's reward account and debit the treasury; funds for unregistered recipients stay in the treasury. |
+| `InfoAction` | Never ratified; removed at expiry with its deposit returned. |
 
 After enacting a `ParameterChange`, refresh your in-memory protocol parameters so `GetProtocolParameters()` reflects the update. The harness calls `GetProtocolParameters()` after each epoch boundary.
 
