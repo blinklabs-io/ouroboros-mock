@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -540,7 +541,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -551,7 +552,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
@@ -563,7 +564,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -578,7 +579,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.Amount)
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
 			m.rewardAccounts[key] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -649,14 +650,20 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		}
 
 	case common.CertificateTypeRegistrationDrep:
-		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential
+		var credential common.Credential
+		validCertificate := true
+		switch drepCert := cert.(type) {
+		case *ledger.DRepRegistrationCertificate:
+			credential = drepCert.DrepCredential
+		case *common.RegistrationDrepCertificate:
+			credential = drepCert.DrepCredential
+		default:
+			validCertificate = false
+		}
+		if validCertificate {
 			// The certificate carries the deposit the DRep paid, and
 			// that is the amount its deregistration must refund.
-			deposit := uint64(0)
-			if drepCert.Amount >= 0 {
-				deposit = uint64(drepCert.Amount)
-			}
+			deposit := nonNegativeDeposit(drepCertificateDepositAmount(cert))
 			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
@@ -665,8 +672,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		}
 
 	case common.CertificateTypeDeregistrationDrep:
-		if drepCert, ok := cert.(*common.DeregistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential
+		if credential, ok := drepDeregistrationCredential(cert); ok {
 			key := ledger.NewRewardAccountKey(credential)
 			m.govState.DeregisterDRepCredential(credential)
 			if !m.govState.IsDRepCredentialRegistered(credential) {
@@ -822,11 +828,52 @@ func keyDepositAmount(pp common.ProtocolParameters) uint64 {
 	return provider.KeyDepositAmount().Uint64()
 }
 
-func nonNegativeDeposit(amount int64) uint64 {
-	if amount < 0 {
+func nonNegativeDeposit(amount *big.Int) uint64 {
+	if amount == nil || amount.Sign() < 0 || !amount.IsUint64() {
 		return 0
 	}
-	return uint64(amount)
+	return amount.Uint64()
+}
+
+// drepCertificateDepositAmount reads the unsigned value from the mock wrapper
+// or preserved CBOR because the released accessor interprets it as int64.
+func drepCertificateDepositAmount(
+	cert common.Certificate,
+) *big.Int {
+	switch drepCert := cert.(type) {
+	case *ledger.DRepRegistrationCertificate:
+		return drepCert.DepositAmount()
+	case *common.RegistrationDrepCertificate:
+		return drepRegistrationCertificateDepositAmount(drepCert)
+	default:
+		return nil
+	}
+}
+
+func drepRegistrationCertificateDepositAmount(
+	cert *common.RegistrationDrepCertificate,
+) *big.Int {
+	if cert == nil {
+		return nil
+	}
+	certCbor := cert.Cbor()
+	if len(certCbor) == 0 {
+		return cert.DepositAmount()
+	}
+	var fields []cbor.RawMessage
+	if _, err := cbor.Decode(certCbor, &fields); err != nil || len(fields) != 4 {
+		return nil
+	}
+	var certType uint
+	if _, err := cbor.Decode(fields[0], &certType); err != nil ||
+		certType != uint(common.CertificateTypeRegistrationDrep) {
+		return nil
+	}
+	var amount uint64
+	if _, err := cbor.Decode(fields[2], &amount); err != nil {
+		return nil
+	}
+	return new(big.Int).SetUint64(amount)
 }
 
 func drepDelegation(drep common.Drep) common.Drep {
