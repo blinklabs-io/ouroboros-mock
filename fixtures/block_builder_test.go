@@ -384,10 +384,11 @@ func TestBlockBuilderByronMainBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("decoded %T, want *byron.ByronMainBlock", decoded)
 	}
-	if err := main.ValidateBodyProof(common.VerifyConfig{
-		EnableByronSscProofHashValidation: true,
-	}); err != nil {
+	if err := main.ValidateBodyProof(); err != nil {
 		t.Fatalf("body proof: %v", err)
+	}
+	if err := main.ValidateSscProof(); err != nil {
+		t.Fatalf("SSC proof: %v", err)
 	}
 }
 

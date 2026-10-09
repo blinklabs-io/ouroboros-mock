@@ -650,11 +650,20 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 		}
 
 	case common.CertificateTypeRegistrationDrep:
-		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential
+		var credential common.Credential
+		validCertificate := true
+		switch drepCert := cert.(type) {
+		case *ledger.DRepRegistrationCertificate:
+			credential = drepCert.DrepCredential
+		case *common.RegistrationDrepCertificate:
+			credential = drepCert.DrepCredential
+		default:
+			validCertificate = false
+		}
+		if validCertificate {
 			// The certificate carries the deposit the DRep paid, and
 			// that is the amount its deregistration must refund.
-			deposit := nonNegativeDeposit(drepCertificateDepositAmount(drepCert))
+			deposit := nonNegativeDeposit(drepCertificateDepositAmount(cert))
 			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
@@ -827,9 +836,22 @@ func nonNegativeDeposit(amount *big.Int) uint64 {
 	return amount.Uint64()
 }
 
-// drepCertificateDepositAmount reads the Word64 from preserved CBOR because
-// the released certificate accessor interprets it as a signed int64.
+// drepCertificateDepositAmount reads the unsigned value from the mock wrapper
+// or preserved CBOR because the released accessor interprets it as int64.
 func drepCertificateDepositAmount(
+	cert common.Certificate,
+) *big.Int {
+	switch drepCert := cert.(type) {
+	case *ledger.DRepRegistrationCertificate:
+		return drepCert.DepositAmount()
+	case *common.RegistrationDrepCertificate:
+		return drepRegistrationCertificateDepositAmount(drepCert)
+	default:
+		return nil
+	}
+}
+
+func drepRegistrationCertificateDepositAmount(
 	cert *common.RegistrationDrepCertificate,
 ) *big.Int {
 	if cert == nil {

@@ -17,9 +17,11 @@ package ledger
 import (
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
+	utxorpc "github.com/utxorpc/go-codegen/utxorpc/v1alpha/cardano"
 )
 
 // CommitteeMemberBuilder defines an interface for building mock committee member state
@@ -148,7 +150,57 @@ type DRepRegistrationBuilder interface {
 	WithCredential(cred []byte) DRepRegistrationBuilder
 	WithAnchor(url string, dataHash []byte) DRepRegistrationBuilder
 	WithDeposit(lovelace uint64) DRepRegistrationBuilder
-	Build() (*lcommon.RegistrationDrepCertificate, error)
+	Build() (*DRepRegistrationCertificate, error)
+}
+
+// DRepRegistrationCertificate retains the unsigned deposit alongside the
+// upstream ledger certificate fields.
+type DRepRegistrationCertificate struct {
+	*lcommon.RegistrationDrepCertificate
+	Amount uint64
+}
+
+var _ lcommon.Certificate = (*DRepRegistrationCertificate)(nil)
+
+// DepositAmount returns the full unsigned deposit amount.
+func (c *DRepRegistrationCertificate) DepositAmount() *big.Int {
+	if c == nil {
+		return nil
+	}
+	return new(big.Int).SetUint64(c.Amount)
+}
+
+// Utxorpc returns the certificate with its full unsigned deposit amount.
+func (c *DRepRegistrationCertificate) Utxorpc() (*utxorpc.Certificate, error) {
+	if c == nil || c.RegistrationDrepCertificate == nil {
+		return nil, errors.New("DRep registration certificate is nil")
+	}
+	result, err := c.RegistrationDrepCertificate.Utxorpc()
+	if err != nil {
+		return nil, err
+	}
+	regCert := result.GetRegDrepCert()
+	if regCert == nil {
+		return nil, errors.New("UTxORPC certificate is not a DRep registration")
+	}
+	regCert.Coin = lcommon.BigIntToUtxorpcBigInt(c.DepositAmount())
+	return result, nil
+}
+
+// MarshalCBOR returns the encoded certificate, preserving the unsigned amount.
+func (c *DRepRegistrationCertificate) MarshalCBOR() ([]byte, error) {
+	if c == nil || c.RegistrationDrepCertificate == nil {
+		return nil, errors.New("DRep registration certificate is nil")
+	}
+	if encoded := c.Cbor(); len(encoded) > 0 {
+		return encoded, nil
+	}
+	return cbor.Encode([]any{
+		c.CertType,
+		c.DrepCredential,
+		c.Amount,
+		c.Anchor,
+	})
 }
 
 // drepRegistrationBuilder implements DRepRegistrationBuilder
@@ -191,7 +243,7 @@ func (b *drepRegistrationBuilder) WithDeposit(
 }
 
 // Build constructs a RegistrationDrepCertificate from the builder state
-func (b *drepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate, error) {
+func (b *drepRegistrationBuilder) Build() (*DRepRegistrationCertificate, error) {
 	if len(b.credential) == 0 {
 		return nil, errors.New("credential is required")
 	}
@@ -228,14 +280,12 @@ func (b *drepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 		DrepCredential: credential,
 		Anchor:         anchor,
 	}
-	// The released certificate struct stores this wire Word64 in an int64.
-	// Preserve the full encoded value for consumers that read the CBOR.
-	if b.deposit <= uint64(1<<63-1) {
-		cert.Amount = int64(b.deposit)
-	}
 	cert.SetCbor(certCBOR)
 
-	return cert, nil
+	return &DRepRegistrationCertificate{
+		RegistrationDrepCertificate: cert,
+		Amount:                      b.deposit,
+	}, nil
 }
 
 // ConstitutionBuilder defines an interface for building mock constitutions

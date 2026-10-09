@@ -1327,6 +1327,12 @@ func TestDRepRegistrationBuilder_Build_Word64Deposit(t *testing.T) {
 				WithDeposit(deposit).
 				Build()
 			require.NoError(t, err)
+			assert.Equal(t, deposit, cert.Amount)
+			assert.Equal(t, new(big.Int).SetUint64(deposit), cert.DepositAmount())
+
+			encoded, err := cbor.Encode(cert)
+			require.NoError(t, err)
+			assert.Equal(t, cert.Cbor(), encoded)
 
 			var fields []cbor.RawMessage
 			if _, err := cbor.Decode(cert.Cbor(), &fields); err != nil {
@@ -1340,6 +1346,17 @@ func TestDRepRegistrationBuilder_Build_Word64Deposit(t *testing.T) {
 			if got != deposit {
 				t.Fatalf("deposit %d, want %d", got, deposit)
 			}
+
+			utxoCertificate, err := cert.Utxorpc()
+			require.NoError(t, err)
+			coin := utxoCertificate.GetRegDrepCert().GetCoin()
+			var utxoAmount big.Int
+			if bigUInt := coin.GetBigUInt(); bigUInt != nil {
+				utxoAmount.SetBytes(bigUInt)
+			} else {
+				utxoAmount.SetInt64(coin.GetInt())
+			}
+			assert.Equal(t, new(big.Int).SetUint64(deposit), &utxoAmount)
 		})
 	}
 }

@@ -409,8 +409,17 @@ func (v *Validator) validateCertificate(
 		}
 
 	case common.CertificateTypeRegistrationDrep:
-		if drepCert, ok := cert.(*common.RegistrationDrepCertificate); ok {
-			credential := drepCert.DrepCredential
+		var credential common.Credential
+		validCertificate := true
+		switch drepCert := cert.(type) {
+		case *ledger.DRepRegistrationCertificate:
+			credential = drepCert.DrepCredential
+		case *common.RegistrationDrepCertificate:
+			credential = drepCert.DrepCredential
+		default:
+			validCertificate = false
+		}
+		if validCertificate {
 			if govState.IsDRepCredentialRegistered(credential) {
 				return fmt.Errorf(
 					"DRep %x already registered",
@@ -562,6 +571,8 @@ func applyDRepCertificateValidationTransition(
 	cert common.Certificate,
 ) {
 	switch drepCert := cert.(type) {
+	case *ledger.DRepRegistrationCertificate:
+		govState.RegisterDRepCredentialUntil(drepCert.DrepCredential, 0)
 	case *common.RegistrationDrepCertificate:
 		govState.RegisterDRepCredentialUntil(drepCert.DrepCredential, 0)
 	case *common.DeregistrationDrepCertificate:
