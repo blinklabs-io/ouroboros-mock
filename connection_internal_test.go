@@ -15,13 +15,16 @@
 package ouroboros_mock
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/muxer"
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
 	"github.com/stretchr/testify/require"
@@ -65,6 +68,84 @@ func TestCloseClosesBothHalvesWhenTheClientHalfFails(t *testing.T) {
 func TestCloseReportsNoErrorOnAHealthyConnection(t *testing.T) {
 	conn := NewConnection(ProtocolRoleClient, nil).(*Connection)
 	require.NoError(t, conn.Close())
+}
+
+func TestPendingInputClassifiesClosedReceive(t *testing.T) {
+	tests := []struct {
+		name    string
+		segment *muxer.Segment
+	}{
+		{name: "closed receive"},
+		{
+			name: "queued segment",
+			segment: muxer.NewSegment(
+				keepalive.ProtocolId+1,
+				nil,
+				false,
+			),
+		},
+	}
+	entry := ConversationEntryInput{ProtocolId: keepalive.ProtocolId}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			done := make(chan any)
+			received := make(chan *muxer.Segment, 1)
+			if test.segment != nil {
+				received <- test.segment
+			}
+			close(done)
+			close(received)
+			conn := &Connection{
+				doneChan:      done,
+				muxerRecvChan: received,
+				inputBuffers:  make(map[uint16]*bytes.Buffer),
+			}
+			require.ErrorIs(
+				t,
+				conn.processInputEntry(entry),
+				errConversationClosed,
+			)
+		})
+	}
+
+	remote := &Connection{
+		doneChan:      make(chan any),
+		muxerRecvChan: make(chan *muxer.Segment),
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
+	}
+	close(remote.muxerRecvChan)
+	require.ErrorIs(t, remote.processInputEntry(entry), io.ErrUnexpectedEOF)
+}
+
+func TestClosePendingInputClosesErrorChannelWithoutValue(t *testing.T) {
+	conn := NewConnection(ProtocolRoleClient, []ConversationEntry{
+		ConversationEntryOutput{
+			ProtocolId: keepalive.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				keepalive.NewMsgKeepAliveResponse(7),
+			},
+		},
+		ConversationEntryInput{ProtocolId: keepalive.ProtocolId},
+	}).(*Connection)
+	waiting := make(chan struct{})
+	conn.onInputWait = func() { close(waiting) }
+
+	data := make([]byte, 64)
+	_, err := conn.Read(data)
+	require.NoError(t, err)
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not reach the pending input")
+	}
+	require.NoError(t, conn.Close())
+	select {
+	case err, ok := <-conn.ErrorChan():
+		require.False(t, ok, "shutdown published an input error: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("error channel did not close after connection shutdown")
+	}
 }
 
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {

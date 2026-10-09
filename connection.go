@@ -39,6 +39,8 @@ const (
 	ProtocolRoleServer ProtocolRole = 2 // Server protocol role
 )
 
+var errConversationClosed = errors.New("conversation closed")
+
 // Connection mocks an Ouroboros connection
 type Connection struct {
 	mockConn      net.Conn
@@ -50,6 +52,7 @@ type Connection struct {
 	onceClose     sync.Once
 	onceInput     sync.Once
 	inputAccepted chan struct{}
+	onInputWait   func()
 	errorChan     chan error
 	errorMu       sync.Mutex
 	errorClosed   bool
@@ -196,6 +199,14 @@ func (c *Connection) asyncLoop() {
 		switch entry := entry.(type) {
 		case ConversationEntryInput:
 			err := c.processInputEntry(entry)
+			select {
+			case <-c.doneChan:
+				return
+			default:
+			}
+			if errors.Is(err, errConversationClosed) {
+				return
+			}
 			if entry.ExpectedError != "" {
 				if err == nil {
 					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))
@@ -276,7 +287,21 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	buf := c.inputBuffers[entry.ProtocolId]
 	if buf.Len() == 0 {
 		// Wait for segment to be received from muxer
-		segment, ok := <-c.muxerRecvChan
+		if c.onInputWait != nil {
+			c.onInputWait()
+		}
+		var segment *muxer.Segment
+		var ok bool
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		case segment, ok = <-c.muxerRecvChan:
+		}
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		default:
+		}
 		if !ok {
 			return io.ErrUnexpectedEOF
 		}
