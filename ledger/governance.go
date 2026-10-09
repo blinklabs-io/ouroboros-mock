@@ -203,7 +203,6 @@ func (b *drepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 		)
 	}
 
-	cert := &lcommon.RegistrationDrepCertificate{}
 	credential := lcommon.Credential{
 		CredType:   lcommon.CredentialTypeAddrKeyHash,
 		Credential: lcommon.NewBlake2b224(b.credential),
@@ -224,9 +223,17 @@ func (b *drepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate,
 	if err != nil {
 		return nil, fmt.Errorf("encode DRep registration certificate: %w", err)
 	}
-	if _, err := cbor.Decode(certCBOR, cert); err != nil {
-		return nil, fmt.Errorf("decode DRep registration certificate: %w", err)
+	cert := &lcommon.RegistrationDrepCertificate{
+		CertType:       uint(lcommon.CertificateTypeRegistrationDrep),
+		DrepCredential: credential,
+		Anchor:         anchor,
 	}
+	// The released certificate struct stores this wire Word64 in an int64.
+	// Preserve the full encoded value for consumers that read the CBOR.
+	if b.deposit <= uint64(1<<63-1) {
+		cert.Amount = int64(b.deposit)
+	}
+	cert.SetCbor(certCBOR)
 
 	return cert, nil
 }

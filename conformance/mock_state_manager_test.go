@@ -55,16 +55,46 @@ func TestMockStateManagerTracksOriginalStakeCredentialDeposit(t *testing.T) {
 }
 
 func TestMockStateManagerTracksLargeDRepDeposit(t *testing.T) {
-	const deposit = uint64(1) << 62
-	credentialHash := []byte{0x05}
-	manager := NewMockStateManager()
+	for _, deposit := range []uint64{uint64(1) << 63, ^uint64(0)} {
+		t.Run(fmt.Sprintf("deposit_%d", deposit), func(t *testing.T) {
+			credential := common.Credential{
+				CredType:   common.CredentialTypeAddrKeyHash,
+				Credential: common.Blake2b224{0x05},
+			}
+			certificateCbor, err := cbor.Encode([]any{
+				uint(common.CertificateTypeRegistrationDrep),
+				credential,
+				deposit,
+				nil,
+			})
+			require.NoError(t, err)
+			certificate := &common.RegistrationDrepCertificate{
+				CertType:       uint(common.CertificateTypeRegistrationDrep),
+				DrepCredential: credential,
+			}
+			certificate.SetCbor(certificateCbor)
+
+			manager := NewMockStateManager()
+			manager.processCertificate(certificate)
+			got := manager.drepRegistrations[ledger.NewRewardAccountKey(
+				credential,
+			)]
+			require.NotNil(t, got)
+			assert.Equal(t, deposit, *got)
+		})
+	}
+}
+
+func TestMockStateManagerTracksLargeDRepDepositFromBuilder(t *testing.T) {
+	const deposit = uint64(1) << 63
 	certificate, err := ledger.NewDRepRegistrationBuilder().
-		WithCredential(credentialHash).
+		WithCredential([]byte{0x05}).
 		WithDeposit(deposit).
 		Build()
 	require.NoError(t, err)
-	manager.processCertificate(certificate)
 
+	manager := NewMockStateManager()
+	manager.processCertificate(certificate)
 	got := manager.drepRegistrations[ledger.NewRewardAccountKey(
 		certificate.DrepCredential,
 	)]

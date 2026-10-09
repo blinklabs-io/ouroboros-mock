@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
@@ -653,7 +654,7 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := drepCert.DrepCredential
 			// The certificate carries the deposit the DRep paid, and
 			// that is the amount its deregistration must refund.
-			deposit := nonNegativeDeposit(drepCert.DepositAmount())
+			deposit := nonNegativeDeposit(drepCertificateDepositAmount(drepCert))
 			m.drepRegistrations[ledger.NewRewardAccountKey(credential)] = &deposit
 			m.govState.RegisterDRepCredentialUntil(
 				credential,
@@ -824,6 +825,34 @@ func nonNegativeDeposit(amount *big.Int) uint64 {
 		return 0
 	}
 	return amount.Uint64()
+}
+
+// drepCertificateDepositAmount reads the Word64 from preserved CBOR because
+// the released certificate accessor interprets it as a signed int64.
+func drepCertificateDepositAmount(
+	cert *common.RegistrationDrepCertificate,
+) *big.Int {
+	if cert == nil {
+		return nil
+	}
+	certCbor := cert.Cbor()
+	if len(certCbor) == 0 {
+		return cert.DepositAmount()
+	}
+	var fields []cbor.RawMessage
+	if _, err := cbor.Decode(certCbor, &fields); err != nil || len(fields) != 4 {
+		return nil
+	}
+	var certType uint
+	if _, err := cbor.Decode(fields[0], &certType); err != nil ||
+		certType != uint(common.CertificateTypeRegistrationDrep) {
+		return nil
+	}
+	var amount uint64
+	if _, err := cbor.Decode(fields[2], &amount); err != nil {
+		return nil
+	}
+	return new(big.Int).SetUint64(amount)
 }
 
 func drepDelegation(drep common.Drep) common.Drep {

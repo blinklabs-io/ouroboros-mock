@@ -84,15 +84,7 @@ func TestParameterComparisonCoversDecodedFields(t *testing.T) {
 		t.Parallel()
 		check(t, 18, map[uint][]int64{0: {1}}, map[uint][]int64{0: {2}})
 	})
-	for component := range 2 {
-		t.Run(fmt.Sprintf("protocol_version_14_component_%d", component), func(t *testing.T) {
-			t.Parallel()
-			first, second := []any{uint(9), uint(3)}, []any{uint(9), uint(3)}
-			second[component] = uint(10)
-			check(t, 14, first, second)
-		})
-	}
-	for key, length := range map[uint]int{19: 2, 20: 2, 21: 2, 25: 5, 26: 10} {
+	for key, length := range map[uint]int{14: 2, 19: 2, 20: 2, 21: 2, 25: 5, 26: 10} {
 		for component := range length {
 			t.Run(
 				fmt.Sprintf("array_%d_component_%d", key, component),
