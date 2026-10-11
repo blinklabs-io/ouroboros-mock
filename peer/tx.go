@@ -15,6 +15,7 @@
 package peer
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 
@@ -138,6 +139,7 @@ func (r *relay) retain(txs []Tx) {
 		if len(tx.Raw) > maxRetainedTxBytes {
 			continue
 		}
+		tx.Raw = bytes.Clone(tx.Raw)
 		r.received = append(r.received, tx)
 		r.bytes += len(tx.Raw)
 		for len(r.received) > maxRetainedTxCount ||
@@ -154,5 +156,10 @@ func (r *relay) retain(txs []Tx) {
 func (r *relay) Received() []Tx {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]Tx(nil), r.received...)
+	ret := make([]Tx, len(r.received))
+	for i, tx := range r.received {
+		tx.Raw = bytes.Clone(tx.Raw)
+		ret[i] = tx
+	}
+	return ret
 }

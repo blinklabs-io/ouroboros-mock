@@ -56,6 +56,25 @@ func TestRelayRetentionBoundsPayloadBytes(t *testing.T) {
 	require.Equal(t, []Tx{retainedTx(2, txSize)}, r.Received())
 }
 
+func TestRelayRetentionOwnsTransactionBodies(t *testing.T) {
+	t.Parallel()
+	r := &relay{}
+	delivered := retainedTx(1, 1)
+	delivered.Raw[0] = 1
+	r.retain([]Tx{delivered})
+
+	// Event delivery uses the same transactions passed to retain.
+	event := Event{Kind: EventTxsReceived, Txs: []Tx{delivered}}
+	event.Txs[0].Raw[0] = 2
+	require.Equal(t, byte(1), r.Received()[0].Raw[0])
+
+	u := &Upstream{relays: list.New()}
+	u.relays.PushBack(&session{relay: r})
+	relayed := u.RelayedTxs()
+	relayed[0].Raw[0] = 3
+	require.Equal(t, byte(1), u.RelayedTxs()[0].Raw[0])
+}
+
 func TestUpstreamRetentionKeepsRecentClosuresAndActiveSession(t *testing.T) {
 	t.Parallel()
 	u := &Upstream{
