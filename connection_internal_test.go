@@ -107,12 +107,17 @@ func TestConnectionErrorDeliverySurvivesConcurrentClose(t *testing.T) {
 func TestProcessOutputRejectsOversizedPayload(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
-	defer server.Close()
+	testMuxer := muxer.New(server)
+	defer func() {
+		testMuxer.Stop()
+		for range testMuxer.ErrorChan() {
+		}
+	}()
 
 	msg := &protocol.MessageBase{}
 	msg.SetCbor(make([]byte, muxer.SegmentMaxPayloadLength+1))
 
-	err := (&Connection{muxer: muxer.New(server)}).processOutputEntry(ConversationEntryOutput{
+	err := (&Connection{muxer: testMuxer}).processOutputEntry(ConversationEntryOutput{
 		Messages: []protocol.Message{msg},
 	})
 
