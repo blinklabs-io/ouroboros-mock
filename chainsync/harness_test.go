@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -299,10 +300,17 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 
 	for round := range rounds {
 		t.Run(fmt.Sprintf("round%d", round), func(t *testing.T) {
-			gotCounts := make(chan int, senders)
+			var decoded atomic.Int32
 			r := &responder{
 				findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
-					gotCounts <- len(p)
+					if len(p) != numPoints {
+						return pcommon.Point{}, chainsync.Tip{}, fmt.Errorf(
+							"decoded %d points, expected %d",
+							len(p),
+							numPoints,
+						)
+					}
+					decoded.Add(1)
 					return csmock.OriginPoint(), chainsync.Tip{}, nil
 				},
 			}
@@ -341,18 +349,19 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 					t.Fatal("timed out waiting for the server")
 				}
 			}
+			requiredDecoded := max(1, found)
+			require.Eventually(
+				t,
+				func() bool {
+					return int(decoded.Load()) >= requiredDecoded
+				},
+				time.Second,
+				time.Millisecond,
+				"server callbacks did not complete",
+			)
 			require.NoError(t, h.Close())
 			wg.Wait()
-
-			// gotCounts is not closed: the server's recv goroutine can still
-			// be unwinding after Close, and closing would race its send.
-			decoded := 0
-			for len(gotCounts) > 0 {
-				require.Equal(t, numPoints, <-gotCounts)
-				decoded++
-			}
-			require.GreaterOrEqual(t, decoded, 1)
-			require.GreaterOrEqual(t, decoded, found)
+			require.GreaterOrEqual(t, int(decoded.Load()), found)
 		})
 	}
 }
