@@ -71,8 +71,15 @@ func TestRelayRetentionOwnsTransactionBodies(t *testing.T) {
 	u := &Upstream{relays: list.New()}
 	u.relays.PushBack(&session{relay: r})
 	relayed := u.RelayedTxs()
+	if len(relayed) != 1 {
+		t.Fatalf("expected one relayed transaction, got %d", len(relayed))
+	}
 	relayed[0].Raw[0] = 3
-	require.Equal(t, byte(1), u.RelayedTxs()[0].Raw[0])
+	after := u.RelayedTxs()
+	if len(after) != 1 {
+		t.Fatalf("expected one retained transaction, got %d", len(after))
+	}
+	require.Equal(t, byte(1), after[0].Raw[0])
 }
 
 func TestUpstreamRetentionKeepsRecentClosuresAndActiveSession(t *testing.T) {
