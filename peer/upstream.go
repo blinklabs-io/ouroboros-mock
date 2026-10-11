@@ -15,6 +15,7 @@
 package peer
 
 import (
+	"container/list"
 	"errors"
 	"fmt"
 	"net"
@@ -59,9 +60,11 @@ type Upstream struct {
 	// a handshake whose client never arrives.
 	handshaking map[net.Conn]struct{}
 	listeners   []net.Listener
-	// relays keeps active relays and a bounded history of retired relays.
-	relays []*relay
-	wg     sync.WaitGroup
+	// relays preserves connection order for active and retained sessions.
+	relays *list.List
+	// retiredRelays tracks close order for constant-time history eviction.
+	retiredRelays *list.List
+	wg            sync.WaitGroup
 }
 
 // NewUpstream returns an Upstream serving cfg.Blocks. Release it with
@@ -75,12 +78,13 @@ func NewUpstream(cfg UpstreamConfig) (*Upstream, error) {
 		return nil, err
 	}
 	return &Upstream{
-		cfg:      cfg,
-		chain:    chain,
-		events:   newEventStream(),
-		sessions: make(map[uint64]*session),
-
-		handshaking: make(map[net.Conn]struct{}),
+		cfg:           cfg,
+		chain:         chain,
+		events:        newEventStream(),
+		sessions:      make(map[uint64]*session),
+		relays:        list.New(),
+		retiredRelays: list.New(),
+		handshaking:   make(map[net.Conn]struct{}),
 	}, nil
 }
 
@@ -187,7 +191,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	}
 	s.conn = oConn
 	u.sessions[s.id] = s
-	u.relays = append(u.relays, s.relay)
+	s.relayElement = u.relays.PushBack(s)
 	u.mu.Unlock()
 
 	u.events.publish(Event{Kind: EventSessionStarted, Session: s.id})
@@ -264,8 +268,10 @@ func (u *Upstream) Accept(l net.Listener) error {
 // and 4 MiB of transaction bodies per connection.
 func (u *Upstream) RelayedTxs() []Tx {
 	u.mu.Lock()
-	relays := make([]*relay, 0, len(u.relays))
-	relays = append(relays, u.relays...)
+	relays := make([]*relay, 0, u.relays.Len())
+	for element := u.relays.Front(); element != nil; element = element.Next() {
+		relays = append(relays, element.Value.(*session).relay)
+	}
 	u.mu.Unlock()
 	var out []Tx
 	for _, r := range relays {
@@ -324,31 +330,19 @@ func wakeSessions(sessions []*session) {
 
 func (u *Upstream) removeSession(id uint64) {
 	u.mu.Lock()
-	delete(u.sessions, id)
-	u.pruneRelaysLocked()
-	u.mu.Unlock()
-}
-
-func (u *Upstream) pruneRelaysLocked() {
-	retired := 0
-	for _, r := range u.relays {
-		if _, active := u.sessions[r.session]; !active {
-			retired++
-		}
-	}
-	drop := retired - maxRetiredRelayCount
-	if drop <= 0 {
+	defer u.mu.Unlock()
+	s, ok := u.sessions[id]
+	if !ok {
 		return
 	}
-	kept := u.relays[:0]
-	for _, r := range u.relays {
-		_, active := u.sessions[r.session]
-		if !active && drop > 0 {
-			drop--
-			continue
-		}
-		kept = append(kept, r)
+	delete(u.sessions, id)
+	u.retiredRelays.PushBack(s)
+	if u.retiredRelays.Len() <= maxRetiredRelayCount {
+		return
 	}
-	clear(u.relays[len(kept):])
-	u.relays = kept
+	oldest := u.retiredRelays.Front()
+	retired := oldest.Value.(*session)
+	u.retiredRelays.Remove(oldest)
+	u.relays.Remove(retired.relayElement)
+	retired.relayElement = nil
 }

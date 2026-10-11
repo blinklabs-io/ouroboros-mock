@@ -15,6 +15,7 @@
 package peer
 
 import (
+	"container/list"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,23 +56,37 @@ func TestRelayRetentionBoundsPayloadBytes(t *testing.T) {
 	require.Equal(t, []Tx{retainedTx(2, txSize)}, r.Received())
 }
 
-func TestUpstreamRetentionKeepsBoundedHistoryAndActiveSession(t *testing.T) {
+func TestUpstreamRetentionKeepsRecentClosuresAndActiveSession(t *testing.T) {
 	t.Parallel()
-	u := &Upstream{sessions: make(map[uint64]*session)}
+	u := &Upstream{
+		sessions:      make(map[uint64]*session),
+		relays:        list.New(),
+		retiredRelays: list.New(),
+	}
 	count := maxRetiredRelayCount + 3
 	for id := 1; id <= count; id++ {
 		r := &relay{session: uint64(id)}
 		r.retain([]Tx{retainedTx(byte(id), 1)})
-		u.relays = append(u.relays, r)
-		u.sessions[uint64(id)] = &session{id: uint64(id), relay: r}
+		s := &session{id: uint64(id), relay: r}
+		s.relayElement = u.relays.PushBack(s)
+		u.sessions[uint64(id)] = s
 	}
 
-	for id := 1; id < count; id++ {
+	closeOrder := []int{maxRetiredRelayCount + 1, maxRetiredRelayCount + 2}
+	for id := 1; id <= maxRetiredRelayCount; id++ {
+		closeOrder = append(closeOrder, id)
+	}
+	for _, id := range closeOrder {
 		u.removeSession(uint64(id))
 	}
 
 	got := u.RelayedTxs()
 	require.Len(t, got, maxRetiredRelayCount+1)
-	require.Equal(t, byte(3), got[0].ID[0])
-	require.Equal(t, byte(count), got[len(got)-1].ID[0])
+	require.Len(t, u.sessions, 1)
+	require.Equal(t, maxRetiredRelayCount, u.retiredRelays.Len())
+	require.Equal(t, maxRetiredRelayCount+1, u.relays.Len())
+	for i := 0; i < maxRetiredRelayCount; i++ {
+		require.Equal(t, byte(i+1), got[i].ID[0])
+	}
+	require.Equal(t, byte(count), got[maxRetiredRelayCount].ID[0])
 }

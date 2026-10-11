@@ -15,6 +15,7 @@
 package peer
 
 import (
+	"container/list"
 	"sync"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
@@ -30,7 +31,8 @@ type session struct {
 	id   uint64
 	conn *ouroboros.Connection
 	// relay collects transactions the client announces.
-	relay *relay
+	relay        *relay
+	relayElement *list.Element
 
 	mu     sync.Mutex
 	server *gchainsync.Server
