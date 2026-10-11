@@ -22,6 +22,11 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 )
 
+const (
+	maxRetainedTxCount = 256
+	maxRetainedTxBytes = 4 << 20
+)
+
 // Tx is a transaction a peer offers or has received.
 type Tx struct {
 	// EraId is the tx-submission era index of the transaction.
@@ -66,6 +71,7 @@ type relay struct {
 
 	mu       sync.Mutex
 	received []Tx
+	bytes    int
 }
 
 func (r *relay) config() txsubmission.Config {
@@ -116,9 +122,7 @@ func (r *relay) run(server *txsubmission.Server) {
 			}
 			got = append(got, tx)
 		}
-		r.mu.Lock()
-		r.received = append(r.received, got...)
-		r.mu.Unlock()
+		r.retain(got)
 		r.events.publish(Event{
 			Kind:    EventTxsReceived,
 			Session: r.session,
@@ -127,7 +131,26 @@ func (r *relay) run(server *txsubmission.Server) {
 	}
 }
 
-// Received returns the transactions the remote node has delivered.
+func (r *relay) retain(txs []Tx) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, tx := range txs {
+		if len(tx.Raw) > maxRetainedTxBytes {
+			continue
+		}
+		r.received = append(r.received, tx)
+		r.bytes += len(tx.Raw)
+		for len(r.received) > maxRetainedTxCount ||
+			r.bytes > maxRetainedTxBytes {
+			r.bytes -= len(r.received[0].Raw)
+			r.received[0] = Tx{}
+			r.received = r.received[1:]
+		}
+	}
+}
+
+// Received returns the most recently retained transactions delivered by the
+// remote node.
 func (r *relay) Received() []Tx {
 	r.mu.Lock()
 	defer r.mu.Unlock()

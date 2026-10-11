@@ -28,6 +28,8 @@ import (
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
 )
 
+const maxRetiredRelayCount = 8
+
 // ErrClosed is returned by operations on a closed peer.
 var ErrClosed = errors.New("peer closed")
 
@@ -57,8 +59,7 @@ type Upstream struct {
 	// a handshake whose client never arrives.
 	handshaking map[net.Conn]struct{}
 	listeners   []net.Listener
-	// relays keeps every connection's relay so received transactions remain
-	// readable after the connection ends.
+	// relays keeps active relays and a bounded history of retired relays.
 	relays []*relay
 	wg     sync.WaitGroup
 }
@@ -257,8 +258,10 @@ func (u *Upstream) Accept(l net.Listener) error {
 	return nil
 }
 
-// RelayedTxs returns the transactions connected nodes have delivered through
-// tx-submission, in delivery order per connection.
+// RelayedTxs returns retained transactions delivered through tx-submission,
+// in delivery order per connection. It includes active connections and the
+// eight most recently closed connections, retaining at most 256 transactions
+// and 4 MiB of transaction bodies per connection.
 func (u *Upstream) RelayedTxs() []Tx {
 	u.mu.Lock()
 	relays := make([]*relay, 0, len(u.relays))
@@ -322,5 +325,30 @@ func wakeSessions(sessions []*session) {
 func (u *Upstream) removeSession(id uint64) {
 	u.mu.Lock()
 	delete(u.sessions, id)
+	u.pruneRelaysLocked()
 	u.mu.Unlock()
+}
+
+func (u *Upstream) pruneRelaysLocked() {
+	retired := 0
+	for _, r := range u.relays {
+		if _, active := u.sessions[r.session]; !active {
+			retired++
+		}
+	}
+	drop := retired - maxRetiredRelayCount
+	if drop <= 0 {
+		return
+	}
+	kept := u.relays[:0]
+	for _, r := range u.relays {
+		_, active := u.sessions[r.session]
+		if !active && drop > 0 {
+			drop--
+			continue
+		}
+		kept = append(kept, r)
+	}
+	clear(u.relays[len(kept):])
+	u.relays = kept
 }
