@@ -16,10 +16,45 @@ package peer
 
 import (
 	"testing"
+	"time"
 
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTxPeerCloseUnblocksBlockingTxIdRequest(t *testing.T) {
+	t.Parallel()
+	p := &TxPeer{
+		events: newEventStream(),
+		more:   make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := p.requestTxIds(
+			txsubmission.CallbackContext{},
+			true,
+			0,
+			1,
+		)
+		errCh <- err
+	}()
+
+	select {
+	case event := <-p.Events():
+		require.Equal(t, EventTxIdsBlocked, event.Kind)
+	case <-time.After(time.Second):
+		t.Fatal("blocking transaction ID request did not start")
+	}
+	require.NoError(t, p.Close())
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, txsubmission.ErrStopServerProcess)
+	case <-time.After(time.Second):
+		t.Fatal("Close did not unblock transaction ID request")
+	}
+	require.NoError(t, p.Close())
+}
 
 func TestTxPeerRequestTxsMatchesEraAndHash(t *testing.T) {
 	t.Parallel()

@@ -40,6 +40,10 @@ type TxPeerConfig struct {
 type TxPeer struct {
 	conn   *ouroboros.Connection
 	events *eventStream
+	done   chan struct{}
+
+	closeOnce sync.Once
+	closeErr  error
 
 	mu sync.Mutex
 	// txs holds every offered transaction; txs[:announced] have been announced
@@ -62,6 +66,7 @@ func NewTxPeer(cfg TxPeerConfig) (*TxPeer, error) {
 		events: newEventStream(),
 		txs:    append([]Tx(nil), cfg.Txs...),
 		more:   make(chan struct{}),
+		done:   make(chan struct{}),
 	}
 	txCfg := txsubmission.Config{
 		RequestTxIdsFunc: p.requestTxIds,
@@ -109,12 +114,14 @@ func (p *TxPeer) Served() []Tx {
 
 // Close ends the connection and closes the event channel.
 func (p *TxPeer) Close() error {
-	var err error
-	if p.conn != nil {
-		err = p.conn.Close()
-	}
-	p.events.close()
-	return err
+	p.closeOnce.Do(func() {
+		close(p.done)
+		if p.conn != nil {
+			p.closeErr = p.conn.Close()
+		}
+		p.events.close()
+	})
+	return p.closeErr
 }
 
 func (p *TxPeer) watch() {
@@ -156,10 +163,10 @@ func (p *TxPeer) requestTxIds(
 		more := p.more
 		p.mu.Unlock()
 		p.events.publish(Event{Kind: EventTxIdsBlocked})
-		// Close does not wake this request to send MsgDone: the gouroboros
-		// tx-submission server this module pins races on receiving it.
 		select {
 		case <-more:
+		case <-p.done:
+			return nil, txsubmission.ErrStopServerProcess
 		case <-ctx.DoneChan:
 			return nil, txsubmission.ErrStopServerProcess
 		}
