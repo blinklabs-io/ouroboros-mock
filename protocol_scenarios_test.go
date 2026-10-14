@@ -464,6 +464,17 @@ func TestTxSubmissionScenarioRejectsPairedSizeMismatch(t *testing.T) {
 	require.Nil(t, entries)
 }
 
+func TestTxSubmissionScenarioAcceptsWrappedWireSize(t *testing.T) {
+	body := txsubmission.TxBody{EraId: 6, TxBody: []byte{0x80}}
+	encodedBody, err := body.MarshalCBOR()
+	require.NoError(t, err)
+	ids := []txsubmission.TxIdAndSize{{TxId: txsubmission.TxId{EraId: body.EraId}, Size: uint32(len(encodedBody))}}
+
+	entries, err := TxSubmissionScenario(ids, []txsubmission.TxBody{body})
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+}
+
 // TestTxSubmissionScenarioFollowsOutboundRequestRules replays scenarios through
 // the outbound side's RequestTxIds checks: a blocking request needs no
 // unacknowledged txids after its ack, and a non-blocking one needs some.

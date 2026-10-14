@@ -145,8 +145,12 @@ func TxSubmissionScenario(
 		if id.TxId.EraId != txs[i].EraId {
 			return nil, fmt.Errorf("transaction %d ID and body must have equal era IDs", i)
 		}
-		if uint64(id.Size) != uint64(len(txs[i].TxBody)) {
-			return nil, fmt.Errorf("transaction %d advertised size must match its body length", i)
+		encodedBody, err := txs[i].MarshalCBOR()
+		if err != nil {
+			return nil, fmt.Errorf("transaction %d: encode body for size validation: %w", i, err)
+		}
+		if uint64(id.Size) != uint64(len(txs[i].TxBody)) && uint64(id.Size) != uint64(len(encodedBody)) {
+			return nil, fmt.Errorf("transaction %d advertised size must match its body or wire length", i)
 		}
 	}
 	requestCount := uint16(count)
