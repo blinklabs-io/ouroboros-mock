@@ -313,6 +313,17 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 			// Otherwise the protocol state race can reject every caller before
 			// the server decodes any request, which does not exercise framing.
 			require.NoError(t, h.FindIntersect(points))
+			select {
+			case count := <-gotCounts:
+				require.Equal(t, numPoints, count)
+			case err, ok := <-h.ServerErrors():
+				if !ok {
+					t.Fatal("server closed before decoding the baseline request")
+				}
+				t.Fatalf("server failed before decoding the baseline request: %v", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("server did not decode the baseline request")
+			}
 
 			// A send may fail once the server tears down on the agency
 			// error, so send errors are not asserted; the server's view is.
@@ -351,7 +362,7 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 
 			// gotCounts is not closed: the server's recv goroutine can still
 			// be unwinding after Close, and closing would race its send.
-			decoded := 0
+			decoded := 1 // The synchronized baseline request was already consumed.
 			for len(gotCounts) > 0 {
 				require.Equal(t, numPoints, <-gotCounts)
 				decoded++
