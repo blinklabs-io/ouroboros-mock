@@ -115,7 +115,7 @@ func TestDijkstraBlockBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Dijkstra block builder to reject Plutus V4 witness scripts")
 	}
-	if !strings.Contains(err.Error(), "plutus V4 witness scripts are not part of the Dijkstra CDDL") {
+	if !strings.Contains(err.Error(), "does not support field 8") {
 		t.Fatalf("unexpected error: %s", err)
 	}
 }
@@ -185,17 +185,13 @@ func TestDijkstraBlockBuilderEncodesInProcessTransactionMetadata(t *testing.T) {
 
 func TestDijkstraBlockBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
 	var body dijkstra.DijkstraTransactionBody
-	_, err := cbor.Decode(
-		[]byte{
-			0xa4, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00,
-			0x17, 0xd9, 0x01, 0x02, 0x80,
-		},
-		&body,
-	)
-	require.NoError(t, err)
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	body.SetCbor([]byte{
+		0xa4, 0x00, 0x80, 0x01, 0x80, 0x02, 0x00,
+		0x17, 0xd9, 0x01, 0x02, 0x80,
+	})
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
-	_, err = fixtures.NewDijkstraBlockBuilder().
+	_, err := fixtures.NewDijkstraBlockBuilder().
 		WithTransactions(dijkstra.DijkstraTransaction{Body: body, TxIsValid: true}).
 		Build()
 	require.ErrorContains(
@@ -203,25 +199,17 @@ func TestDijkstraBlockBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
 	)
 }
 
-// A transaction decoded from a block keeps its block_transaction bytes, which
-// gouroboros reuses verbatim when the block body is encoded.
+// A transaction that carries block_transaction bytes has them reused verbatim
+// when the block body is encoded. The decoder rejects such bytes, so they are
+// set directly.
 func TestDijkstraBlockBuilderRejectsDecodedBlockTransactionMissingRequiredKeys(
 	t *testing.T,
 ) {
-	var decoded dijkstra.DijkstraBlockBody
-	_, err := cbor.Decode(
-		[]byte{
-			0x83,
-			0x81, 0x84, 0xa1, 0x00, 0x80, 0xa0, 0xf6, 0xf5,
-			0xf6, 0xf6,
-		},
-		&decoded,
-	)
-	require.NoError(t, err)
-	require.Len(t, decoded.Transactions, 1)
+	var tx dijkstra.DijkstraTransaction
+	tx.SetCbor([]byte{0x84, 0xa1, 0x00, 0x80, 0xa0, 0xf5, 0xf6})
 
-	_, err = fixtures.NewDijkstraBlockBuilder().
-		WithTransactions(decoded.Transactions[0]).
+	_, err := fixtures.NewDijkstraBlockBuilder().
+		WithTransactions(tx).
 		Build()
 	require.ErrorContains(
 		t, err, "transaction 0: transaction body is missing required key 1",

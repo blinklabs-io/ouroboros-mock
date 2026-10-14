@@ -29,6 +29,13 @@ var (
 	_ lcommon.RewardState = (*MockLedgerState)(nil)
 	_ lcommon.GovState    = (*MockLedgerState)(nil)
 
+	_ lcommon.GenesisDelegationState = (*MockLedgerState)(
+		nil,
+	)
+	_ lcommon.ClassicProtocolParameterUpdateWindowState = (*MockLedgerState)(
+		nil,
+	)
+
 	// Verify MockLedgerState satisfies the unified StateProvider interface.
 	_ StateProvider = (*MockLedgerState)(nil)
 )

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/assert"
@@ -244,6 +245,178 @@ func TestLedgerStateBuilder_WithNetworkId(t *testing.T) {
 	if state.NetworkId() != networkId {
 		t.Errorf("Expected NetworkId %d, got %d", networkId, state.NetworkId())
 	}
+}
+
+func TestLedgerState_ProtocolParameterUpdateWindowRequiresSchedule(
+	t *testing.T,
+) {
+	state := ledger.NewLedgerStateBuilder().Build()
+	_, _, err := state.ProtocolParameterUpdateWindow(0)
+	require.ErrorAs(
+		t,
+		err,
+		&lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError{},
+	)
+}
+
+// The reference slot of no return is
+// epochInfoFirst (succ e) *- Duration (2 * stabilityWindow), with
+// stabilityWindow = ceiling (3k/f) and *- saturating at slot 0
+// (cardano-ledger Cardano.Ledger.Slot.getTheSlotOfNoReturn and
+// Cardano.Ledger.Shelley.StabilityWindow.computeStabilityWindow).
+func TestFixedEpochProtocolParameterUpdateWindow(t *testing.T) {
+	tests := []struct {
+		name             string
+		epochLength      uint64
+		securityParam    uint64
+		activeSlotsCoeff *big.Rat
+		epoch            uint64
+		slotOfNoReturn   uint64
+	}{
+		{
+			// 2 * 3 * 2160 / 0.05 = 259200
+			name:             "mainnet parameters",
+			epochLength:      432_000,
+			securityParam:    2160,
+			activeSlotsCoeff: big.NewRat(1, 20),
+			epoch:            3,
+			slotOfNoReturn:   4*432_000 - 259_200,
+		},
+		{
+			// 2 * 3 * 432 / 0.05 = 51840
+			name:             "preview parameters",
+			epochLength:      86_400,
+			securityParam:    432,
+			activeSlotsCoeff: big.NewRat(1, 20),
+			epoch:            0,
+			slotOfNoReturn:   86_400 - 51_840,
+		},
+		{
+			// 3k/f = 30/7 rounds up to 5; floor(6k/f) would give 8
+			name:             "fractional window below one half",
+			epochLength:      100,
+			securityParam:    1,
+			activeSlotsCoeff: big.NewRat(7, 10),
+			epoch:            2,
+			slotOfNoReturn:   300 - 10,
+		},
+		{
+			// 3k/f = 300/7 rounds up to 43; floor(6k/f) would give 85
+			name:             "fractional window above one half",
+			epochLength:      200,
+			securityParam:    1,
+			activeSlotsCoeff: big.NewRat(7, 100),
+			epoch:            1,
+			slotOfNoReturn:   400 - 86,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			window := ledger.FixedEpochProtocolParameterUpdateWindow(
+				tt.epochLength,
+				tt.securityParam,
+				tt.activeSlotsCoeff,
+			)
+			state := ledger.NewLedgerStateBuilder().
+				WithProtocolParameterUpdateWindow(window).
+				Build()
+			epochStart := tt.epoch * tt.epochLength
+			for _, slot := range []uint64{
+				epochStart,
+				tt.slotOfNoReturn - 1,
+				tt.slotOfNoReturn,
+				epochStart + tt.epochLength - 1,
+			} {
+				epoch, slotOfNoReturn, err := state.ProtocolParameterUpdateWindow(
+					slot,
+				)
+				require.NoError(t, err, "slot %d", slot)
+				assert.Equal(t, tt.epoch, epoch, "slot %d", slot)
+				assert.Equal(
+					t,
+					tt.slotOfNoReturn,
+					slotOfNoReturn,
+					"slot %d",
+					slot,
+				)
+			}
+			epoch, _, err := state.ProtocolParameterUpdateWindow(
+				epochStart + tt.epochLength,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, tt.epoch+1, epoch)
+		})
+	}
+}
+
+func TestFixedEpochProtocolParameterUpdateWindowCoversEpoch(t *testing.T) {
+	// 2 * ceiling(3 * 1 / 0.01) = 600 slots exceeds the 100-slot epoch, so the
+	// point of no return precedes the epoch and every slot targets the next
+	// epoch. Epoch 0 saturates at slot 0.
+	window := ledger.FixedEpochProtocolParameterUpdateWindow(
+		100,
+		1,
+		big.NewRat(1, 100),
+	)
+	epoch, slotOfNoReturn, err := window(0)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0), epoch)
+	assert.Equal(t, uint64(0), slotOfNoReturn)
+	epoch, slotOfNoReturn, err = window(1000)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(10), epoch)
+	assert.Equal(t, uint64(1100-600), slotOfNoReturn)
+}
+
+func TestFixedEpochProtocolParameterUpdateWindowRejectsInvalidSchedule(
+	t *testing.T,
+) {
+	tests := []struct {
+		name             string
+		epochLength      uint64
+		securityParam    uint64
+		activeSlotsCoeff *big.Rat
+		slot             uint64
+	}{
+		{"zero epoch length", 0, 2160, big.NewRat(1, 20), 0},
+		{"zero security parameter", 432_000, 0, big.NewRat(1, 20), 0},
+		{"nil coefficient", 432_000, 2160, nil, 0},
+		{"zero coefficient", 432_000, 2160, big.NewRat(0, 1), 0},
+		{"coefficient above one", 432_000, 2160, big.NewRat(3, 2), 0},
+		{
+			"next epoch start overflows",
+			432_000,
+			2160,
+			big.NewRat(1, 20),
+			^uint64(0),
+		},
+		{"unit epochs overflow", 1, 2160, big.NewRat(1, 20), ^uint64(0)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			window := ledger.FixedEpochProtocolParameterUpdateWindow(
+				tt.epochLength,
+				tt.securityParam,
+				tt.activeSlotsCoeff,
+			)
+			_, _, err := window(tt.slot)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLedgerState_ProtocolParameterUpdateWindowCallback(t *testing.T) {
+	state := ledger.NewLedgerStateBuilder().
+		WithProtocolParameterUpdateWindow(func(slot uint64) (uint64, uint64, error) {
+			assert.Equal(t, uint64(42), slot)
+			return 3, 99, nil
+		}).
+		Build()
+
+	currentEpoch, slotOfNoReturn, err := state.ProtocolParameterUpdateWindow(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(3), currentEpoch)
+	assert.Equal(t, uint64(99), slotOfNoReturn)
 }
 
 func TestLedgerStateBuilder_WithAdaPots(t *testing.T) {
@@ -1129,8 +1302,8 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 		t.Fatalf("Build() returned error: %v", err)
 	}
 
-	if cert.Amount != int64(deposit) {
-		t.Errorf("Expected Amount %d, got %d", deposit, cert.Amount)
+	if got := cert.DepositAmount().Uint64(); got != deposit {
+		t.Errorf("Expected Amount %d, got %d", deposit, got)
 	}
 
 	if cert.Anchor == nil {
@@ -1139,6 +1312,52 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 
 	if cert.Anchor.Url != anchorUrl {
 		t.Errorf("Expected anchor URL %s, got %s", anchorUrl, cert.Anchor.Url)
+	}
+}
+
+func TestDRepRegistrationBuilder_Build_Word64Deposit(t *testing.T) {
+	for _, deposit := range []uint64{
+		uint64(1<<63 - 1),
+		uint64(1) << 63,
+		^uint64(0),
+	} {
+		t.Run(fmt.Sprintf("deposit_%d", deposit), func(t *testing.T) {
+			cert, err := ledger.NewDRepRegistrationBuilder().
+				WithCredential(sampleKeyHash()).
+				WithDeposit(deposit).
+				Build()
+			require.NoError(t, err)
+			assert.Equal(t, deposit, cert.Amount)
+			assert.Equal(t, new(big.Int).SetUint64(deposit), cert.DepositAmount())
+
+			encoded, err := cbor.Encode(cert)
+			require.NoError(t, err)
+			assert.Equal(t, cert.Cbor(), encoded)
+
+			var fields []cbor.RawMessage
+			if _, err := cbor.Decode(cert.Cbor(), &fields); err != nil {
+				t.Fatalf("decode certificate CBOR: %v", err)
+			}
+			require.Len(t, fields, 4)
+			var got uint64
+			if _, err := cbor.Decode(fields[2], &got); err != nil {
+				t.Fatalf("decode unsigned deposit: %v", err)
+			}
+			if got != deposit {
+				t.Fatalf("deposit %d, want %d", got, deposit)
+			}
+
+			utxoCertificate, err := cert.Utxorpc()
+			require.NoError(t, err)
+			coin := utxoCertificate.GetRegDrepCert().GetCoin()
+			var utxoAmount big.Int
+			if bigUInt := coin.GetBigUInt(); bigUInt != nil {
+				utxoAmount.SetBytes(bigUInt)
+			} else {
+				utxoAmount.SetInt64(coin.GetInt())
+			}
+			assert.Equal(t, new(big.Int).SetUint64(deposit), &utxoAmount)
+		})
 	}
 }
 

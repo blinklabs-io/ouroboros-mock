@@ -21,6 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
+	"github.com/blinklabs-io/ouroboros-mock/address"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
 	"github.com/blinklabs-io/plutigo/data"
 	"github.com/stretchr/testify/require"
@@ -125,25 +126,24 @@ func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(t *testing
 	})
 	require.NoError(t, err)
 	var body dijkstra.DijkstraTransactionBody
-	_, err = cbor.Decode(bodyCBOR, &body)
-	require.NoError(t, err)
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	body.SetCbor(bodyCBOR)
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
 	_, err = fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
 	require.ErrorContains(t, err, "sub-transactions must not be empty")
 }
 
-// A decoded body keeps its original bytes, so the builder cannot add the
-// transaction_body keys 1 (outputs) and 2 (fee) that the bytes omit.
+// A body that carries original bytes is encoded from them, so the builder
+// cannot add the transaction_body keys 1 (outputs) and 2 (fee) that the bytes
+// omit. The decoder rejects such bytes, so they are set directly.
 func TestDijkstraTransactionBuilderRejectsDecodedBodyMissingRequiredKeys(
 	t *testing.T,
 ) {
 	var body dijkstra.DijkstraTransactionBody
-	_, err := cbor.Decode([]byte{0xa1, 0x00, 0x80}, &body)
-	require.NoError(t, err)
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	body.SetCbor([]byte{0xa1, 0x00, 0x80})
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
-	_, err = fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
+	_, err := fixtures.NewDijkstraTransactionBuilder().WithBody(body).Build()
 	require.ErrorContains(t, err, "transaction body is missing required key 1")
 }
 
@@ -151,11 +151,10 @@ func TestDijkstraTransactionBuilderRejectsDecodedSubTransactionBodyMissingOutput
 	t *testing.T,
 ) {
 	var body dijkstra.DijkstraSubTransactionBody
-	_, err := cbor.Decode([]byte{0xa1, 0x00, 0x80}, &body)
-	require.NoError(t, err)
-	require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+	body.SetCbor([]byte{0xa1, 0x00, 0x80})
+	require.NotEmpty(t, body.Cbor(), "test requires the raw-CBOR path")
 
-	_, err = fixtures.NewDijkstraTransactionBuilder().
+	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{Body: body}).
 		Build()
 	require.ErrorContains(
@@ -163,21 +162,17 @@ func TestDijkstraTransactionBuilderRejectsDecodedSubTransactionBodyMissingOutput
 	)
 }
 
-// gouroboros v0.205.4 decodes witness key 8 into WsPlutusV4Scripts and
-// encodes it back as key 8, so a decoded witness set reaches the same rule as
-// an in-process one.
+// A witness set that carries original bytes with key 8 reaches the builder's
+// key rule. The decoder rejects such bytes, so they are set directly.
 func TestDijkstraTransactionBuilderRejectsDecodedPlutusV4WitnessScripts(
 	t *testing.T,
 ) {
 	var witnesses dijkstra.DijkstraTransactionWitnessSet
-	_, err := cbor.Decode(
+	witnesses.SetCbor(
 		[]byte{0xa1, 0x08, 0xd9, 0x01, 0x02, 0x81, 0x41, 0x01},
-		&witnesses,
 	)
-	require.NoError(t, err)
-	require.Len(t, witnesses.WsPlutusV4Scripts.Items(), 1)
 
-	_, err = fixtures.NewDijkstraTransactionBuilder().
+	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(witnesses).
 		Build()
 	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
@@ -192,7 +187,7 @@ func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 			),
 		}).
 		Build()
-	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
+	require.ErrorContains(t, err, "does not support field 8")
 }
 
 func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
@@ -208,7 +203,7 @@ func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
 			},
 		}).
 		Build()
-	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
+	require.ErrorContains(t, err, "does not support field 8")
 }
 
 // The Dijkstra CDDL requires transaction_body keys 0 (inputs), 1 (outputs),
@@ -331,4 +326,215 @@ func TestDijkstraTransactionBuilderRebuildsDecodedWitnessSet(t *testing.T) {
 	encoded, err := cbor.Encode(got.Data)
 	require.NoError(t, err)
 	require.Equal(t, []byte{0x02}, encoded, "replacement redeemer datum")
+}
+
+func testAccountAddress(t *testing.T, seed byte) common.Address {
+	t.Helper()
+	hash := make([]byte, common.AddressHashSize)
+	hash[0] = seed
+	account, err := address.NewAddress().WithStakingKeyHash(hash).BuildAccount()
+	require.NoError(t, err)
+	return account
+}
+
+func TestDijkstraTransactionBuilderEncodesDirectDeposits(t *testing.T) {
+	t.Parallel()
+	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
+	firstBytes, err := first.Bytes()
+	require.NoError(t, err)
+	secondBytes, err := second.Bytes()
+	require.NoError(t, err)
+
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
+		WithDirectDeposit(first, 5).
+		WithDirectDeposit(second, 7).
+		WithDirectDeposit(first, 9).
+		Build()
+	require.NoError(t, err)
+	require.Equal(t, dijkstra.DijkstraDirectDeposits{
+		cbor.NewByteString(firstBytes):  9,
+		cbor.NewByteString(secondBytes): 7,
+	}, tx.Body.TxDirectDeposits)
+	_, body := blockTransactionFields(t, tx)
+	require.Contains(t, body, uint64(25))
+}
+
+func TestDijkstraTransactionBuilderEncodesAccountBalanceIntervals(t *testing.T) {
+	t.Parallel()
+	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
+	firstBytes, err := first.Bytes()
+	require.NoError(t, err)
+	secondBytes, err := second.Bytes()
+	require.NoError(t, err)
+	exact, lower, upper := uint64(10), uint64(20), uint64(30)
+
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
+		WithAccountBalanceInterval(
+			first,
+			dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+		).
+		WithAccountBalanceInterval(
+			second,
+			dijkstra.DijkstraAccountBalanceInterval{LowerBound: &lower},
+		).
+		WithAccountBalanceInterval(
+			second,
+			dijkstra.DijkstraAccountBalanceInterval{
+				LowerBound: &lower,
+				UpperBound: &upper,
+			},
+		).
+		Build()
+	require.NoError(t, err)
+	require.Len(t, tx.Body.TxBalanceIntervals, 2)
+	firstInterval, ok := tx.Body.TxBalanceIntervals[cbor.NewByteString(firstBytes)]
+	require.True(t, ok)
+	require.NotNil(t, firstInterval)
+	require.Equal(
+		t,
+		dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+		*firstInterval,
+	)
+	secondInterval, ok := tx.Body.TxBalanceIntervals[cbor.NewByteString(secondBytes)]
+	require.True(t, ok)
+	require.NotNil(t, secondInterval)
+	require.Equal(
+		t,
+		dijkstra.DijkstraAccountBalanceInterval{LowerBound: &lower, UpperBound: &upper},
+		*secondInterval,
+		"a later interval for the same account replaces the earlier one",
+	)
+	_, body := blockTransactionFields(t, tx)
+	require.Contains(t, body, uint64(26))
+}
+
+func TestDijkstraTransactionBuilderAccountSettersOwnMapChanges(t *testing.T) {
+	t.Parallel()
+	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
+	firstBytes, err := first.Bytes()
+	require.NoError(t, err)
+	exact := uint64(10)
+	body := dijkstra.DijkstraTransactionBody{
+		TxDirectDeposits: map[cbor.ByteString]uint64{
+			cbor.NewByteString(firstBytes): 5,
+		},
+		TxBalanceIntervals: dijkstra.DijkstraAccountBalanceIntervals{
+			cbor.NewByteString(firstBytes): {Exact: &exact},
+		},
+	}
+	builder := fixtures.NewDijkstraTransactionBuilder().
+		WithBody(body).
+		WithDirectDeposit(second, 7).
+		WithAccountBalanceInterval(
+			second,
+			dijkstra.DijkstraAccountBalanceInterval{Exact: new(uint64)},
+		)
+
+	require.Len(t, body.TxDirectDeposits, 1)
+	require.Len(t, body.TxBalanceIntervals, 1)
+	body.TxDirectDeposits[cbor.NewByteString(firstBytes)] = 99
+	exact = 99
+	tx, err := builder.Build()
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), tx.Body.TxDirectDeposits[cbor.NewByteString(firstBytes)])
+	firstInterval, ok := tx.Body.TxBalanceIntervals[cbor.NewByteString(firstBytes)]
+	require.True(t, ok)
+	require.NotNil(t, firstInterval)
+	require.NotNil(t, firstInterval.Exact)
+	require.Equal(t, uint64(10), *firstInterval.Exact)
+}
+
+func TestDijkstraTransactionBuilderRejectsInvalidAccountFields(t *testing.T) {
+	t.Parallel()
+	enterprise, err := address.RandomEnterprise(address.Testnet)
+	require.NoError(t, err)
+	account := testAccountAddress(t, 1)
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().
+		WithDirectDeposit(enterprise, 1).
+		Build()
+	require.ErrorContains(t, err, "not a reward account")
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().
+		WithAccountBalanceInterval(
+			enterprise,
+			dijkstra.DijkstraAccountBalanceInterval{Exact: new(uint64)},
+		).
+		Build()
+	require.ErrorContains(t, err, "not a reward account")
+
+	_, err = fixtures.NewDijkstraTransactionBuilder().
+		WithAccountBalanceInterval(
+			account,
+			dijkstra.DijkstraAccountBalanceInterval{},
+		).
+		Build()
+	require.ErrorContains(t, err, "requires a lower or upper bound")
+}
+
+func TestDijkstraTransactionBuilderRejectsEmptyBalanceIntervalAccount(
+	t *testing.T,
+) {
+	t.Parallel()
+	exact := uint64(10)
+	body := dijkstra.DijkstraTransactionBody{
+		TxBalanceIntervals: dijkstra.DijkstraAccountBalanceIntervals{
+			cbor.NewByteString(nil): {Exact: &exact},
+		},
+	}
+
+	_, err := fixtures.NewDijkstraTransactionBuilder().
+		WithBody(body).
+		WithAccountBalanceInterval(
+			testAccountAddress(t, 1),
+			dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+		).
+		Build()
+	require.Error(t, err)
+}
+
+// A decoded body keeps its original bytes, so each account setter must drop
+// them or Build would encode the body without the new field.
+func TestDijkstraTransactionBuilderAccountFieldsReplaceDecodedBodyCBOR(
+	t *testing.T,
+) {
+	t.Parallel()
+	account := testAccountAddress(t, 1)
+	exact := uint64(10)
+	for _, test := range []struct {
+		name string
+		key  uint64
+		set  func(*fixtures.DijkstraTransactionBuilder) *fixtures.DijkstraTransactionBuilder
+	}{
+		{"direct deposit", 25, func(b *fixtures.DijkstraTransactionBuilder) *fixtures.DijkstraTransactionBuilder {
+			return b.WithDirectDeposit(account, 5)
+		}},
+		{"balance interval", 26, func(b *fixtures.DijkstraTransactionBuilder) *fixtures.DijkstraTransactionBuilder {
+			return b.WithAccountBalanceInterval(
+				account,
+				dijkstra.DijkstraAccountBalanceInterval{Exact: &exact},
+			)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			bodyCBOR, err := cbor.Encode(map[uint64]any{
+				0: []any{},
+				1: []any{},
+				2: uint64(0),
+			})
+			require.NoError(t, err)
+			var body dijkstra.DijkstraTransactionBody
+			_, err = cbor.Decode(bodyCBOR, &body)
+			require.NoError(t, err)
+			require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+
+			tx, err := test.set(
+				fixtures.NewDijkstraTransactionBuilder().WithBody(body),
+			).Build()
+			require.NoError(t, err)
+			_, fields := blockTransactionFields(t, tx)
+			require.Contains(t, fields, test.key)
+		})
+	}
 }

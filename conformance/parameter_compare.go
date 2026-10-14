@@ -24,8 +24,7 @@ import (
 )
 
 // parameterUpdatesEqual compares decoded fields without comparing or rewriting
-// preserved CBOR. Re-encoding is not a value comparison: the rational encoder
-// has narrower magnitude support than the decoder.
+// preserved CBOR, so two encodings of the same values compare equal.
 func parameterUpdatesEqual(a, b *conway.ConwayProtocolParameterUpdate) bool {
 	if a == nil || b == nil {
 		return a == b

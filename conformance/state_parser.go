@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -90,6 +91,13 @@ type ParsedInitialState struct {
 	// CommitteeMembersByCredential preserves the full cold credential identity.
 	CommitteeMembersByCredential map[mockledger.RewardAccountKey]uint64
 
+	// CommitteeThreshold is the committee's required approval fraction. It is
+	// nil when the state carries no committee.
+	CommitteeThreshold *big.Rat
+
+	// Treasury is the treasury balance in lovelace.
+	Treasury uint64
+
 	// DRepRegistrations contains registered DReps (credential hash).
 	DRepRegistrations []common.Blake2b224
 
@@ -155,9 +163,14 @@ type GovActionInfo struct {
 	ProposedMembers map[common.Blake2b224]uint64         // For UpdateCommittee: cold key -> expiry
 	// ProposedMembersByCredential preserves the full cold credential identity.
 	ProposedMembersByCredential map[mockledger.RewardAccountKey]uint64
-	ProtocolVersion             *ProtocolVersionInfo                  // For HardFork
-	PolicyHash                  []byte                                // For NewConstitution
-	ParameterUpdate             *conway.ConwayProtocolParameterUpdate // For ParameterChange
+	// ProposedThreshold is the committee approval fraction an UpdateCommittee
+	// action installs.
+	ProposedThreshold *big.Rat
+	// Withdrawals maps TreasuryWithdrawal recipients to lovelace.
+	Withdrawals     map[mockledger.RewardAccountKey]uint64
+	ProtocolVersion *ProtocolVersionInfo                  // For HardFork
+	PolicyHash      []byte                                // For NewConstitution
+	ParameterUpdate *conway.ConwayProtocolParameterUpdate // For ParameterChange
 }
 
 // ProtocolVersionInfo contains protocol version for HardFork proposals.
@@ -331,6 +344,8 @@ func ParseInitialState(raw cbor.RawMessage) (*ParsedInitialState, error) {
 		// Fully replace UTxOs to avoid stale entries from generic parsing
 		state.Utxos = utxos
 	}
+
+	state.Treasury = parseTreasuryFromRawCBOR(raw)
 
 	// Parse committee members from raw CBOR using typed decoders
 	// This avoids the circular pointer issue with cbor.Value
@@ -624,6 +639,27 @@ func parseProposalInfoFromRawCBOR(
 	return info, true
 }
 
+// parseTreasuryFromRawCBOR reads the treasury from the begin-epoch AccountState,
+// which is [treasury, reserves]. It returns zero when the state carries none.
+func parseTreasuryFromRawCBOR(raw cbor.RawMessage) uint64 {
+	var initialState []cbor.RawMessage
+	if _, err := cbor.Decode(raw, &initialState); err != nil ||
+		len(initialState) < 4 {
+		return 0
+	}
+	var beginEpochState []cbor.RawMessage
+	if _, err := cbor.Decode(initialState[3], &beginEpochState); err != nil ||
+		len(beginEpochState) < 1 {
+		return 0
+	}
+	var account []uint64
+	if _, err := cbor.Decode(beginEpochState[0], &account); err != nil ||
+		len(account) < 1 {
+		return 0
+	}
+	return account[0]
+}
+
 // parseCommitteeFromRawCBOR parses committee members from raw CBOR using typed decoders.
 // This follows the same approach as gouroboros conformance tests to avoid circular pointer issues.
 func parseCommitteeFromRawCBOR(
@@ -668,6 +704,14 @@ func parseCommitteeFromRawCBOR(
 	}
 	if len(committeeData) < 1 {
 		return errors.New("committee data array too short")
+	}
+
+	// committeeData[1] = approval threshold
+	if len(committeeData) > 1 {
+		var threshold cbor.Rat
+		if _, err := cbor.Decode(committeeData[1], &threshold); err == nil {
+			state.CommitteeThreshold = threshold.Rat
+		}
 	}
 
 	// committeeData[0] = map of cold credentials -> expiry epoch
@@ -1932,14 +1976,56 @@ func extractProposalPayload(info *GovActionInfo, procedure []any) {
 		if _, err := cbor.Decode(encoded, &update); err == nil {
 			info.ParameterUpdate = &update
 		}
+	case common.GovActionTypeUpdateCommittee:
+		if len(action) > 4 {
+			info.ProposedThreshold = decodeRat(action[4])
+		}
+	case common.GovActionTypeTreasuryWithdrawal:
+		info.Withdrawals = decodeWithdrawals(action[1])
 	case common.GovActionTypeHardForkInitiation,
-		common.GovActionTypeTreasuryWithdrawal,
 		common.GovActionTypeNoConfidence,
-		common.GovActionTypeUpdateCommittee,
 		common.GovActionTypeInfo:
 		// These action payloads do not expose additional fields that this
 		// parser needs to preserve for final-state comparison.
 	}
+}
+
+// decodeRat decodes a rational that was decoded generically from CBOR.
+func decodeRat(raw any) *big.Rat {
+	encoded, err := cbor.Encode(raw)
+	if err != nil {
+		return nil
+	}
+	var rat cbor.Rat
+	if _, err := cbor.Decode(encoded, &rat); err != nil {
+		return nil
+	}
+	return rat.Rat
+}
+
+// decodeWithdrawals decodes a treasury withdrawal map from reward-account
+// bytes to lovelace, keyed by the credential that receives the funds.
+func decodeWithdrawals(raw any) map[mockledger.RewardAccountKey]uint64 {
+	encoded, err := cbor.Encode(raw)
+	if err != nil {
+		return nil
+	}
+	var withdrawals map[cbor.ByteString]uint64
+	if _, err := cbor.Decode(encoded, &withdrawals); err != nil {
+		return nil
+	}
+	result := make(map[mockledger.RewardAccountKey]uint64, len(withdrawals))
+	for account, amount := range withdrawals {
+		if key := extractRewardAccountKey(account); key != nil {
+			// Distinct accounts can share a stake credential; a wrapped
+			// sum would understate the withdrawal against the treasury.
+			if amount > math.MaxUint64-result[*key] {
+				return nil
+			}
+			result[*key] += amount
+		}
+	}
+	return result
 }
 
 func rawBytes(raw any) []byte {
