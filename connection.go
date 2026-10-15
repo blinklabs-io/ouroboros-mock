@@ -53,6 +53,7 @@ type Connection struct {
 	onceInput     sync.Once
 	inputAccepted chan struct{}
 	onInputWait   func()
+	onOutputWait  func()
 	errorChan     chan error
 	errorMu       sync.Mutex
 	errorClosed   bool
@@ -64,10 +65,19 @@ func NewConnection(
 	protocolRole ProtocolRole,
 	conversation []ConversationEntry,
 ) net.Conn {
+	return newConnection(protocolRole, conversation, nil)
+}
+
+func newConnection(
+	protocolRole ProtocolRole,
+	conversation []ConversationEntry,
+	onOutputWait func(),
+) *Connection {
 	c := &Connection{
 		conversation:  conversation,
 		doneChan:      make(chan any),
 		inputAccepted: make(chan struct{}),
+		onOutputWait:  onOutputWait,
 		errorChan:     make(chan error, 1),
 		inputBuffers:  make(map[uint16]*bytes.Buffer),
 	}
@@ -236,7 +246,15 @@ func (c *Connection) asyncLoop() {
 				c.onceInput.Do(func() { close(c.inputAccepted) })
 			}
 		case ConversationEntryOutput:
+			if c.onOutputWait != nil {
+				c.onOutputWait()
+			}
 			err := c.processOutputEntry(entry)
+			select {
+			case <-c.doneChan:
+				return
+			default:
+			}
 			if entry.ExpectedError != "" {
 				if err == nil {
 					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))

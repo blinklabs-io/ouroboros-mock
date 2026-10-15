@@ -148,6 +148,32 @@ func TestClosePendingInputClosesErrorChannelWithoutValue(t *testing.T) {
 	}
 }
 
+func TestClosePendingOutputClosesErrorChannelWithoutValue(t *testing.T) {
+	waiting := make(chan struct{})
+	conn := newConnection(ProtocolRoleClient, []ConversationEntry{
+		ConversationEntryOutput{
+			ProtocolId: keepalive.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				keepalive.NewMsgKeepAliveResponse(7),
+			},
+		},
+	}, func() { close(waiting) })
+
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not reach the pending output")
+	}
+	require.NoError(t, conn.Close())
+	select {
+	case err, ok := <-conn.ErrorChan():
+		require.False(t, ok, "shutdown published an output error: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("error channel did not close after connection shutdown")
+	}
+}
+
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {
 	conn := &Connection{errorChan: make(chan error, 1)}
 	conn.deliverError(errors.New("test error"))
