@@ -40,6 +40,7 @@ const (
 	KindHeader                   Kind = "header"
 	KindProtocolParameters       Kind = "protocol-parameters"
 	KindProtocolParametersUpdate Kind = "protocol-parameters-update"
+	KindReferenceData            Kind = "reference-data"
 	KindTransaction              Kind = "transaction"
 	KindTransactionID            Kind = "transaction-id"
 	KindTranslation              Kind = "translation"
@@ -102,6 +103,8 @@ func classifyFixture(relPath string) (Kind, Format, string) {
 	baseName := filepath.Base(normalizedPath)
 
 	switch {
+	case strings.HasPrefix(normalizedPath, "e34/"):
+		return KindReferenceData, formatFromFilename(baseName), ""
 	case strings.HasPrefix(normalizedPath, byronSSCFixtureRoot):
 		switch baseName {
 		case "CommitmentsMap", "OpeningsMap", "SharesMap", "VssCertificatesMap":

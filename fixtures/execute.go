@@ -48,8 +48,8 @@ type ExecutionResult struct {
 	CaseCount int
 }
 
-// RunAllExecutions executes every curated fixture using the built-in execution
-// logic and fails the test on the first failing fixture.
+// RunAllExecutions executes every curated executable fixture using the built-in
+// execution logic and fails the test on the first failing fixture.
 func (h *Harness) RunAllExecutions(t *testing.T) {
 	t.Helper()
 	h.runMatchingExecutions(t, Filter{})
@@ -94,8 +94,8 @@ func (h *Harness) ExecuteFixture(relPath string) (ExecutionResult, error) {
 	return executeFixtureWithIndex(fixture, fixtureMap), nil
 }
 
-// RunAllExecutionsWithResults executes every curated fixture and returns the
-// detailed results without requiring a testing.T.
+// RunAllExecutionsWithResults executes every curated executable fixture and
+// returns the detailed results without requiring a testing.T.
 func (h *Harness) RunAllExecutionsWithResults() ([]ExecutionResult, error) {
 	fixtures, fixtureMap, err := h.collectFixtureIndex()
 	if err != nil {
@@ -104,6 +104,9 @@ func (h *Harness) RunAllExecutionsWithResults() ([]ExecutionResult, error) {
 
 	results := make([]ExecutionResult, 0, len(fixtures))
 	for _, fixture := range fixtures {
+		if fixture.Kind == KindReferenceData {
+			continue
+		}
 		results = append(results, executeFixtureWithIndex(fixture, fixtureMap))
 	}
 	return results, nil
@@ -119,7 +122,7 @@ func (h *Harness) runMatchingExecutions(t *testing.T, filter Filter) {
 
 	var matched int
 	for _, fixture := range fixtures {
-		if !filter.Matches(fixture) {
+		if fixture.Kind == KindReferenceData || !filter.Matches(fixture) {
 			continue
 		}
 		matched++

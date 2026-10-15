@@ -93,11 +93,18 @@ The `github.com/blinklabs-io/ouroboros-mock/fixtures` package exposes this
 fixture corpus through a public test harness so downstream projects can reuse
 the same inventory, filtering logic, and built-in execution paths.
 
-`RunAllExecutions*` validates fixture contents using the shared checks below.
+`RunAllExecutions*` validates executable fixtures using the shared checks below.
 The built-in runner decodes ledger blocks, headers, and
 transactions where possible, cross-checks paired consensus fixtures, derives
 protocol parameters from genesis files, applies protocol-parameter updates,
 validates governance metadata, and walks every translation corpus case.
+
+The `e34/` compatibility corpus and its reference sources are non-executable
+`KindReferenceData`. They remain in the complete embedded/manifest inventory
+but are excluded from execution APIs, not reported as successful executions.
+The integrity test checks every imported file against `SHA256SUMS`; downstream
+E34 tests consume the arithmetic and schedule rows directly. Go tests never
+implicitly execute the preserved Haskell generator or Python verifier.
 
 ### Validation ownership
 
