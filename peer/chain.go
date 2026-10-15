@@ -211,6 +211,30 @@ func (c *Chain) follow(path []pcommon.Point) (next, []pcommon.Point) {
 		}
 		return n, path
 	}
+	if len(path) > 0 {
+		if b, ok := c.byHash[string(path[len(path)-1].Hash)]; ok &&
+			b.SlotNumber() == path[len(path)-1].Slot {
+			seen := make(map[string]struct{})
+			for {
+				parentHash := string(b.PrevHash().Bytes())
+				if _, ok := seen[parentHash]; ok {
+					break
+				}
+				seen[string(b.Hash().Bytes())] = struct{}{}
+				parent, ok := c.byHash[string(parentHash)]
+				if !ok {
+					break
+				}
+				point := pointOf(parent)
+				if _, selected := c.indexOfLocked(point); selected {
+					n.rollback = true
+					n.point = point
+					return n, []pcommon.Point{point}
+				}
+				b = parent
+			}
+		}
+	}
 	origin := pcommon.NewPointOrigin()
 	n.rollback = true
 	n.point = origin

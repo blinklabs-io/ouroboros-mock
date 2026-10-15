@@ -245,6 +245,32 @@ func TestUpstreamForkSwitchRollsBackWaitingClient(t *testing.T) {
 	require.Equal(t, csmock.TipOf(fork[2]), up.Chain().Tip())
 }
 
+func TestUpstreamForkRollbackFindsSelectedAncestor(t *testing.T) {
+	t.Parallel()
+	chain := buildChain(t, 6, common.Blake2b256{}, 1, 100)
+	fork := forkOf(t, chain, 2, 2)
+	up := newUpstream(t, chain)
+	tc := newTestClient(t, up)
+
+	known := csmock.PointOf(chain[5])
+	require.NoError(
+		t,
+		tc.conn.ChainSync().Client.Sync([]pcommon.Point{known}),
+	)
+	u := tc.next(t)
+	require.True(t, u.rollback)
+	require.Equal(t, known, u.point)
+	waitEvent(t, up, peer.EventAwaitReply)
+
+	_, err := up.SwitchFork(fork)
+	require.NoError(t, err)
+
+	u = tc.next(t)
+	require.True(t, u.rollback)
+	require.Equal(t, csmock.PointOf(chain[2]), u.point)
+	tc.expectForward(t, fork...)
+}
+
 func TestUpstreamForkAtOriginRollsBackToOrigin(t *testing.T) {
 	t.Parallel()
 	chain := buildChain(t, 2, common.Blake2b256{}, 1, 100)
