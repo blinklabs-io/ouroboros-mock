@@ -24,6 +24,7 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
+	utxorpc "github.com/utxorpc/go-codegen/utxorpc/v1alpha/cardano"
 )
 
 const hashSize = lcommon.Blake2b224Size
@@ -229,11 +230,10 @@ func (b *RegistrationBuilder) Build() (*lcommon.RegistrationCertificate, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.RegistrationCertificate{
-		CertType:        uint(lcommon.CertificateTypeRegistration),
-		StakeCredential: b.credential,
-		Amount:          amount,
-	}, nil
+	return decodeCertificate(
+		[]any{uint(lcommon.CertificateTypeRegistration), b.credential, amount},
+		&lcommon.RegistrationCertificate{},
+	)
 }
 
 // DeregistrationBuilder builds a Conway stake deregistration certificate with
@@ -271,11 +271,10 @@ func (b *DeregistrationBuilder) Build() (*lcommon.DeregistrationCertificate, err
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.DeregistrationCertificate{
-		CertType:        uint(lcommon.CertificateTypeDeregistration),
-		StakeCredential: b.credential,
-		Amount:          amount,
-	}, nil
+	return decodeCertificate(
+		[]any{uint(lcommon.CertificateTypeDeregistration), b.credential, amount},
+		&lcommon.DeregistrationCertificate{},
+	)
 }
 
 // StakeDelegationBuilder builds a Shelley stake delegation certificate.
@@ -573,6 +572,34 @@ func checkedAmount(amount uint64) (int64, error) {
 	return int64(amount), nil
 }
 
+func decodeCertificate[T any](fields []any, certificate *T) (*T, error) {
+	encoded, err := cbor.Encode(fields)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := cbor.Decode(encoded, certificate); err != nil {
+		return nil, err
+	}
+	if stored, ok := any(certificate).(interface{ SetCbor([]byte) }); ok {
+		stored.SetCbor(nil)
+	}
+	switch cert := any(certificate).(type) {
+	case *lcommon.RegistrationCertificate:
+		cert.StakeCredential.SetCbor(nil)
+	case *lcommon.DeregistrationCertificate:
+		cert.StakeCredential.SetCbor(nil)
+	case *lcommon.DeregistrationDrepCertificate:
+		cert.DrepCredential.SetCbor(nil)
+	case *lcommon.StakeRegistrationDelegationCertificate:
+		cert.StakeCredential.SetCbor(nil)
+	case *lcommon.VoteRegistrationDelegationCertificate:
+		cert.StakeCredential.SetCbor(nil)
+	case *lcommon.StakeVoteRegistrationDelegationCertificate:
+		cert.StakeCredential.SetCbor(nil)
+	}
+	return certificate, nil
+}
+
 func (b *conwayBuilder) WithCredential(hash []byte) *conwayBuilder {
 	b.credential, b.credentialErr = keyCredential(hash)
 	b.credentialSet = true
@@ -620,10 +647,104 @@ func (b *conwayBuilder) validate() error {
 	if b.anchorErr != nil {
 		return b.anchorErr
 	}
-	if b.deposit > math.MaxInt64 {
-		return fmt.Errorf("deposit %d exceeds maximum int64 value", b.deposit)
-	}
 	return nil
+}
+
+// DRepRegistrationCertificate retains the unsigned deposit alongside the
+// upstream ledger certificate fields.
+type DRepRegistrationCertificate struct {
+	*lcommon.RegistrationDrepCertificate
+	Amount uint64
+}
+
+var _ lcommon.Certificate = (*DRepRegistrationCertificate)(nil)
+
+// DepositAmount returns the full unsigned deposit amount.
+func (c *DRepRegistrationCertificate) DepositAmount() *big.Int {
+	if c == nil {
+		return nil
+	}
+	return new(big.Int).SetUint64(c.Amount)
+}
+
+// Utxorpc returns the certificate with its full unsigned deposit amount.
+func (c *DRepRegistrationCertificate) Utxorpc() (*utxorpc.Certificate, error) {
+	if c == nil || c.RegistrationDrepCertificate == nil {
+		return nil, errors.New("DRep registration certificate is nil")
+	}
+	result, err := c.RegistrationDrepCertificate.Utxorpc()
+	if err != nil {
+		return nil, err
+	}
+	regCert := result.GetRegDrepCert()
+	if regCert == nil {
+		return nil, errors.New("UTxORPC certificate is not a DRep registration")
+	}
+	regCert.Coin = lcommon.BigIntToUtxorpcBigInt(c.DepositAmount())
+	return result, nil
+}
+
+// MarshalCBOR returns the encoded certificate, preserving the unsigned amount.
+func (c *DRepRegistrationCertificate) MarshalCBOR() ([]byte, error) {
+	if c == nil || c.RegistrationDrepCertificate == nil {
+		return nil, errors.New("DRep registration certificate is nil")
+	}
+	// The embedded certificate's amount may be signed, so encode from the
+	// wrapper's unsigned amount instead of using its cached representation.
+	return cbor.Encode([]any{
+		c.CertType,
+		c.DrepCredential,
+		c.Amount,
+		c.Anchor,
+	})
+}
+
+// DRepDeregistrationCertificate retains the unsigned refund alongside the
+// upstream ledger certificate fields.
+type DRepDeregistrationCertificate struct {
+	*lcommon.DeregistrationDrepCertificate
+	Amount uint64
+}
+
+var _ lcommon.Certificate = (*DRepDeregistrationCertificate)(nil)
+
+// DepositAmount returns the full unsigned refund amount.
+func (c *DRepDeregistrationCertificate) DepositAmount() *big.Int {
+	if c == nil {
+		return nil
+	}
+	return new(big.Int).SetUint64(c.Amount)
+}
+
+// Utxorpc returns the certificate with its full unsigned refund amount.
+func (c *DRepDeregistrationCertificate) Utxorpc() (*utxorpc.Certificate, error) {
+	if c == nil || c.DeregistrationDrepCertificate == nil {
+		return nil, errors.New("DRep deregistration certificate is nil")
+	}
+	result, err := c.DeregistrationDrepCertificate.Utxorpc()
+	if err != nil {
+		return nil, err
+	}
+	unregCert := result.GetUnregDrepCert()
+	if unregCert == nil {
+		return nil, errors.New("UTxORPC certificate is not a DRep deregistration")
+	}
+	unregCert.Coin = lcommon.BigIntToUtxorpcBigInt(c.DepositAmount())
+	return result, nil
+}
+
+// MarshalCBOR returns the encoded certificate, preserving the unsigned amount.
+func (c *DRepDeregistrationCertificate) MarshalCBOR() ([]byte, error) {
+	if c == nil || c.DeregistrationDrepCertificate == nil {
+		return nil, errors.New("DRep deregistration certificate is nil")
+	}
+	// The embedded certificate's amount may be signed, so encode from the
+	// wrapper's unsigned amount instead of using its cached representation.
+	return cbor.Encode([]any{
+		c.CertType,
+		c.DrepCredential,
+		c.Amount,
+	})
 }
 
 // DRepRegistrationBuilder builds a Conway DRep registration certificate.
@@ -660,19 +781,35 @@ func (b *DRepRegistrationBuilder) WithAnchor(
 	return b
 }
 
-func (b *DRepRegistrationBuilder) Build() (*lcommon.RegistrationDrepCertificate, error) {
+func (b *DRepRegistrationBuilder) Build() (*DRepRegistrationCertificate, error) {
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
-	amount, err := checkedAmount(b.deposit)
+	encoded, err := cbor.Encode([]any{
+		uint(lcommon.CertificateTypeRegistrationDrep),
+		b.credential,
+		b.deposit,
+		cloneAnchor(b.anchor),
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode DRep registration certificate: %w", err)
 	}
-	return &lcommon.RegistrationDrepCertificate{
+	cert := &lcommon.RegistrationDrepCertificate{
 		CertType:       uint(lcommon.CertificateTypeRegistrationDrep),
 		DrepCredential: b.credential,
-		Amount:         amount,
 		Anchor:         cloneAnchor(b.anchor),
+	}
+	if b.deposit <= math.MaxInt64 {
+		if _, err := cbor.Decode(encoded, cert); err != nil {
+			return nil, err
+		}
+		cert.DrepCredential = b.credential
+		cert.Anchor = cloneAnchor(b.anchor)
+	}
+	cert.SetCbor(encoded)
+	return &DRepRegistrationCertificate{
+		RegistrationDrepCertificate: cert,
+		Amount:                      b.deposit,
 	}, nil
 }
 
@@ -702,18 +839,32 @@ func (b *DRepDeregistrationBuilder) WithDeposit(
 	return b
 }
 
-func (b *DRepDeregistrationBuilder) Build() (*lcommon.DeregistrationDrepCertificate, error) {
+func (b *DRepDeregistrationBuilder) Build() (*DRepDeregistrationCertificate, error) {
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
-	amount, err := checkedAmount(b.deposit)
+	encoded, err := cbor.Encode([]any{
+		uint(lcommon.CertificateTypeDeregistrationDrep),
+		b.credential,
+		b.deposit,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode DRep deregistration certificate: %w", err)
 	}
-	return &lcommon.DeregistrationDrepCertificate{
+	cert := &lcommon.DeregistrationDrepCertificate{
 		CertType:       uint(lcommon.CertificateTypeDeregistrationDrep),
 		DrepCredential: b.credential,
-		Amount:         amount,
+	}
+	if b.deposit <= math.MaxInt64 {
+		if _, err := cbor.Decode(encoded, cert); err != nil {
+			return nil, err
+		}
+		cert.DrepCredential = b.credential
+	}
+	cert.SetCbor(encoded)
+	return &DRepDeregistrationCertificate{
+		DeregistrationDrepCertificate: cert,
+		Amount:                        b.deposit,
 	}, nil
 }
 
@@ -1057,14 +1208,15 @@ func (b *StakeRegistrationDelegationBuilder) Build() (*lcommon.StakeRegistration
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.StakeRegistrationDelegationCertificate{
-		CertType: uint(
-			lcommon.CertificateTypeStakeRegistrationDelegation,
-		),
-		StakeCredential: b.credential,
-		PoolKeyHash:     b.poolKeyHash,
-		Amount:          amount,
-	}, nil
+	return decodeCertificate(
+		[]any{
+			uint(lcommon.CertificateTypeStakeRegistrationDelegation),
+			b.credential,
+			b.poolKeyHash,
+			amount,
+		},
+		&lcommon.StakeRegistrationDelegationCertificate{},
+	)
 }
 
 // VoteRegistrationDelegationBuilder builds a Conway vote registration and delegation certificate.
@@ -1133,14 +1285,15 @@ func (b *VoteRegistrationDelegationBuilder) Build() (*lcommon.VoteRegistrationDe
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.VoteRegistrationDelegationCertificate{
-		CertType: uint(
-			lcommon.CertificateTypeVoteRegistrationDelegation,
-		),
-		StakeCredential: b.credential,
-		Drep:            cloneDRep(b.drep),
-		Amount:          amount,
-	}, nil
+	return decodeCertificate(
+		[]any{
+			uint(lcommon.CertificateTypeVoteRegistrationDelegation),
+			b.credential,
+			cloneDRep(b.drep),
+			amount,
+		},
+		&lcommon.VoteRegistrationDelegationCertificate{},
+	)
 }
 
 // StakeVoteRegistrationDelegationBuilder builds a Conway stake and vote registration and delegation certificate.
@@ -1207,15 +1360,16 @@ func (b *StakeVoteRegistrationDelegationBuilder) Build() (*lcommon.StakeVoteRegi
 	if err != nil {
 		return nil, err
 	}
-	return &lcommon.StakeVoteRegistrationDelegationCertificate{
-		CertType: uint(
-			lcommon.CertificateTypeStakeVoteRegistrationDelegation,
-		),
-		StakeCredential: b.credential,
-		PoolKeyHash:     b.poolKeyHash,
-		Drep:            cloneDRep(b.drep),
-		Amount:          amount,
-	}, nil
+	return decodeCertificate(
+		[]any{
+			uint(lcommon.CertificateTypeStakeVoteRegistrationDelegation),
+			b.credential,
+			b.poolKeyHash,
+			cloneDRep(b.drep),
+			amount,
+		},
+		&lcommon.StakeVoteRegistrationDelegationCertificate{},
+	)
 }
 
 // AuthCommitteeHotBuilder builds a Conway committee hot-key authorization certificate.

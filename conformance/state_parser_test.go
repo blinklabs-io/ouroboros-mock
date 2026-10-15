@@ -38,6 +38,24 @@ func parseSyntheticInitialState(
 	proposalsHex string,
 ) *ParsedInitialState {
 	t.Helper()
+	return parseSyntheticInitialStateWithAccountAndCommittee(
+		t, votingStateHex, poolStateHex, delegationStateHex, proposalsHex,
+		"", "",
+	)
+}
+
+// parseSyntheticInitialStateWithAccountAndCommittee also takes the
+// begin-epoch AccountState and the GovState committee fragments.
+func parseSyntheticInitialStateWithAccountAndCommittee(
+	t *testing.T,
+	votingStateHex string,
+	poolStateHex string,
+	delegationStateHex string,
+	proposalsHex string,
+	accountStateHex string,
+	committeeHex string,
+) *ParsedInitialState {
+	t.Helper()
 	if votingStateHex == "" {
 		votingStateHex = "82a0a0"
 	}
@@ -50,13 +68,19 @@ func parseSyntheticInitialState(
 	if proposalsHex == "" {
 		proposalsHex = "85a0f6f6f6f6"
 	}
+	if accountStateHex == "" {
+		accountStateHex = "f6"
+	}
+	if committeeHex == "" {
+		committeeHex = "8182a0f6"
+	}
 	// InitialState[3].BeginEpochState[1].LedgerState contains CertState and
 	// UTxOState. The latter carries GovState at index 3. Empty surrounding
 	// fields are valid sentinels and keep every target fragment on its real
 	// exported ParseInitialState path.
-	rawHex := "8400f6f682f68283" +
+	rawHex := "8400f6f682" + accountStateHex + "8283" +
 		votingStateHex + poolStateHex + delegationStateHex +
-		"84a0a0f683" + proposalsHex + "8182a0f681f6"
+		"84a0a0f683" + proposalsHex + committeeHex + "81f6"
 	raw, err := hex.DecodeString(rawHex)
 	require.NoError(t, err)
 	state, err := ParseInitialState(cbor.RawMessage(raw))

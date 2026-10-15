@@ -301,6 +301,7 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 	for round := range rounds {
 		t.Run(fmt.Sprintf("round%d", round), func(t *testing.T) {
 			var decoded atomic.Int32
+			baselineDecoded := make(chan struct{})
 			r := &responder{
 				findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
 					if len(p) != numPoints {
@@ -310,18 +311,35 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 							numPoints,
 						)
 					}
-					decoded.Add(1)
+					if decoded.Add(1) == 1 {
+						close(baselineDecoded)
+					}
 					return csmock.OriginPoint(), chainsync.Tip{}, nil
 				},
 			}
 			h := newHarness(t, csmock.ModeNtC, r)
 			defer h.Close()
 
+			// Put one complete request on the wire before racing later calls.
+			// Otherwise the protocol state race can reject every caller before
+			// the server decodes any request, which does not exercise framing.
+			require.NoError(t, h.FindIntersect(points))
+			select {
+			case <-baselineDecoded:
+			case err, ok := <-h.ServerErrors():
+				if !ok {
+					t.Fatal("server closed before decoding the baseline request")
+				}
+				t.Fatalf("server failed before decoding the baseline request: %v", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("server did not decode the baseline request")
+			}
+
 			// A send may fail once the server tears down on the agency
 			// error, so send errors are not asserted; the server's view is.
 			start := make(chan struct{})
 			var wg sync.WaitGroup
-			for range senders {
+			for range senders - 1 {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()

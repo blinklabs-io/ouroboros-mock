@@ -45,6 +45,7 @@ const (
 type DijkstraTransactionBuilder struct {
 	tx       dijkstra.DijkstraTransaction
 	metadata common.TransactionMetadatum
+	err      error
 }
 
 // NewDijkstraTransactionBuilder creates an empty Dijkstra transaction builder.
@@ -84,6 +85,94 @@ func (b *DijkstraTransactionBuilder) WithSubTransactions(
 	b.tx.Body.TxSubTransactions = cbor.NewSetType(items, true)
 	b.tx.Body.SetCbor(nil)
 	return b
+}
+
+// WithDirectDeposit sets the CIP-159 direct deposit of coin lovelace to
+// account, replacing any earlier deposit to the same account. Build rejects an
+// address that is not an account (reward) address.
+func (b *DijkstraTransactionBuilder) WithDirectDeposit(
+	account common.Address,
+	coin uint64,
+) *DijkstraTransactionBuilder {
+	if _, err := account.RewardAccountCredential(); err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("direct deposit: %w", err))
+		return b
+	}
+	raw, err := account.Bytes()
+	if err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("direct deposit: %w", err))
+		return b
+	}
+	deposits := maps.Clone(b.tx.Body.TxDirectDeposits)
+	if deposits == nil {
+		deposits = map[cbor.ByteString]uint64{}
+	}
+	deposits[cbor.NewByteString(raw)] = coin
+	b.tx.Body.TxDirectDeposits = deposits
+	b.tx.Body.SetCbor(nil)
+	return b
+}
+
+// WithAccountBalanceInterval sets the CIP-159 balance interval asserted for
+// account, replacing any earlier interval for the same account. Build rejects
+// an address that is not an account (reward) address.
+func (b *DijkstraTransactionBuilder) WithAccountBalanceInterval(
+	account common.Address,
+	interval dijkstra.DijkstraAccountBalanceInterval,
+) *DijkstraTransactionBuilder {
+	if _, err := account.RewardAccountCredential(); err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("balance interval: %w", err))
+		return b
+	}
+	raw, err := account.Bytes()
+	if err != nil {
+		b.err = errors.Join(b.err, fmt.Errorf("balance interval: %w", err))
+		return b
+	}
+	intervals := cloneDijkstraAccountBalanceIntervals(
+		b.tx.Body.TxBalanceIntervals,
+	)
+	if intervals == nil {
+		intervals = dijkstra.DijkstraAccountBalanceIntervals{}
+		b.tx.Body.TxBalanceIntervals = intervals
+	}
+	intervals[cbor.NewByteString(raw)] = cloneDijkstraAccountBalanceInterval(&interval)
+	b.tx.Body.TxBalanceIntervals = intervals
+	b.tx.Body.SetCbor(nil)
+	return b
+}
+
+func cloneDijkstraAccountBalanceIntervals(
+	intervals dijkstra.DijkstraAccountBalanceIntervals,
+) dijkstra.DijkstraAccountBalanceIntervals {
+	if intervals == nil {
+		return nil
+	}
+	cloned := make(dijkstra.DijkstraAccountBalanceIntervals, len(intervals))
+	for account, interval := range intervals {
+		cloned[account] = cloneDijkstraAccountBalanceInterval(interval)
+	}
+	return cloned
+}
+
+func cloneDijkstraAccountBalanceInterval(
+	interval *dijkstra.DijkstraAccountBalanceInterval,
+) *dijkstra.DijkstraAccountBalanceInterval {
+	if interval == nil {
+		return nil
+	}
+	cloned := *interval
+	cloneBound := func(value *uint64) *uint64 {
+		if value == nil {
+			return nil
+		}
+		bound := *value
+		return &bound
+	}
+	cloned.Exact = cloneBound(interval.Exact)
+	cloned.LowerBound = cloneBound(interval.LowerBound)
+	cloned.UpperBound = cloneBound(interval.UpperBound)
+	return &cloned
 }
 
 // WithWitnessSet replaces the transaction witness set.
@@ -129,6 +218,9 @@ func (b *DijkstraTransactionBuilder) Build() (
 	*dijkstra.DijkstraTransaction,
 	error,
 ) {
+	if b.err != nil {
+		return nil, b.err
+	}
 	var auxCBOR []byte
 	if b.metadata != nil {
 		encoded, err := encodeDijkstraMetadata(b.metadata)

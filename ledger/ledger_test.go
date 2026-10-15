@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	lcommon "github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/ouroboros-mock/ledger"
 	"github.com/stretchr/testify/assert"
@@ -1301,8 +1302,8 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 		t.Fatalf("Build() returned error: %v", err)
 	}
 
-	if cert.Amount != int64(deposit) {
-		t.Errorf("Expected Amount %d, got %d", deposit, cert.Amount)
+	if got := cert.DepositAmount().Uint64(); got != deposit {
+		t.Errorf("Expected Amount %d, got %d", deposit, got)
 	}
 
 	if cert.Anchor == nil {
@@ -1311,6 +1312,52 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 
 	if cert.Anchor.Url != anchorUrl {
 		t.Errorf("Expected anchor URL %s, got %s", anchorUrl, cert.Anchor.Url)
+	}
+}
+
+func TestDRepRegistrationBuilder_Build_Word64Deposit(t *testing.T) {
+	for _, deposit := range []uint64{
+		uint64(1<<63 - 1),
+		uint64(1) << 63,
+		^uint64(0),
+	} {
+		t.Run(fmt.Sprintf("deposit_%d", deposit), func(t *testing.T) {
+			cert, err := ledger.NewDRepRegistrationBuilder().
+				WithCredential(sampleKeyHash()).
+				WithDeposit(deposit).
+				Build()
+			require.NoError(t, err)
+			assert.Equal(t, deposit, cert.Amount)
+			assert.Equal(t, new(big.Int).SetUint64(deposit), cert.DepositAmount())
+
+			encoded, err := cbor.Encode(cert)
+			require.NoError(t, err)
+			assert.Equal(t, cert.Cbor(), encoded)
+
+			var fields []cbor.RawMessage
+			if _, err := cbor.Decode(cert.Cbor(), &fields); err != nil {
+				t.Fatalf("decode certificate CBOR: %v", err)
+			}
+			require.Len(t, fields, 4)
+			var got uint64
+			if _, err := cbor.Decode(fields[2], &got); err != nil {
+				t.Fatalf("decode unsigned deposit: %v", err)
+			}
+			if got != deposit {
+				t.Fatalf("deposit %d, want %d", got, deposit)
+			}
+
+			utxoCertificate, err := cert.Utxorpc()
+			require.NoError(t, err)
+			coin := utxoCertificate.GetRegDrepCert().GetCoin()
+			var utxoAmount big.Int
+			if bigUInt := coin.GetBigUInt(); bigUInt != nil {
+				utxoAmount.SetBytes(bigUInt)
+			} else {
+				utxoAmount.SetInt64(coin.GetInt())
+			}
+			assert.Equal(t, new(big.Int).SetUint64(deposit), &utxoAmount)
+		})
 	}
 }
 

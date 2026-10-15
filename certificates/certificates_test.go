@@ -232,10 +232,10 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				return func() (lcommon.Certificate, error) { return builder.Build() }
 			}(),
 			mutate: func(cert lcommon.Certificate) {
-				cert.(*lcommon.RegistrationDrepCertificate).Anchor.DataHash[0] = 0xff
+				cert.(*certificates.DRepRegistrationCertificate).Anchor.DataHash[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x03), cert.(*lcommon.RegistrationDrepCertificate).Anchor.DataHash[0])
+				require.Equal(t, byte(0x03), cert.(*certificates.DRepRegistrationCertificate).Anchor.DataHash[0])
 			},
 		},
 		{
@@ -409,14 +409,17 @@ func TestGovernanceBuildersReturnCertificatesUsableInTransactions(
 	assertCertificateRoundTrip(
 		t,
 		drepRegistration,
-		&lcommon.RegistrationDrepCertificate{
-			CertType:       16,
-			DrepCredential: keyCredential(stakeHash),
-			Amount:         100,
-			Anchor: &lcommon.GovAnchor{
-				Url:      "https://example.test/drep",
-				DataHash: [32]byte(vrfHash),
+		&certificates.DRepRegistrationCertificate{
+			RegistrationDrepCertificate: &lcommon.RegistrationDrepCertificate{
+				CertType:       16,
+				DrepCredential: keyCredential(stakeHash),
+				Amount:         100,
+				Anchor: &lcommon.GovAnchor{
+					Url:      "https://example.test/drep",
+					DataHash: [32]byte(vrfHash),
+				},
 			},
+			Amount: 100,
 		},
 	)
 	assertCertificateRoundTrip(
@@ -549,9 +552,6 @@ func TestBuildersRejectInvalidHashes(t *testing.T) {
 	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).WithOperator(poolHash).WithVrfKeyHash(vrfHash).WithRewardAccountKey(stakeHash).WithMargin(2, 1).Build(); err == nil {
 		t.Fatal("expected out-of-range pool margin to be rejected")
 	}
-	if _, err := certificates.NewDRepRegistration().WithCredential(stakeHash).WithDeposit(^uint64(0)).Build(); err == nil {
-		t.Fatal("expected overflowing DRep deposit to be rejected")
-	}
 	if _, err := certificates.NewPoolRegistration(lcommon.AddressNetworkTestnet).WithOwners([]byte{1}).Build(); err == nil {
 		t.Fatal("expected invalid pool owner hash to be rejected")
 	}
@@ -589,6 +589,99 @@ func TestBuildersRejectInvalidHashes(t *testing.T) {
 	}
 	if _, err := certificates.NewVoteDelegation().WithCredential(stakeHash).WithDRep(lcommon.Drep{Type: 99}).Build(); err == nil {
 		t.Fatal("expected unknown DRep type to be rejected")
+	}
+}
+
+func TestDRepRegistrationBuilderPreservesWord64Deposit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		amount uint64
+	}{
+		{name: "above int64", amount: uint64(1) << 63},
+		{name: "maximum uint64", amount: ^uint64(0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cert, err := certificates.NewDRepRegistration().
+				WithCredential(stakeHash).
+				WithDeposit(tc.amount).
+				Build()
+			require.NoError(t, err)
+			require.Equal(t, tc.amount, cert.Amount)
+			require.Equal(
+				t,
+				new(big.Int).SetUint64(tc.amount),
+				cert.DepositAmount(),
+			)
+
+			wantCBOR, err := cbor.Encode([]any{
+				uint(lcommon.CertificateTypeRegistrationDrep),
+				keyCredential(stakeHash),
+				tc.amount,
+				nil,
+			})
+			require.NoError(t, err)
+			require.Equal(t, wantCBOR, cert.Cbor())
+			encoded, err := cbor.Encode(cert)
+			require.NoError(t, err)
+			require.Equal(t, wantCBOR, encoded)
+
+			utxoCertificate, err := cert.Utxorpc()
+			require.NoError(t, err)
+			coin := utxoCertificate.GetRegDrepCert().GetCoin()
+			var got big.Int
+			if bigUInt := coin.GetBigUInt(); bigUInt != nil {
+				got.SetBytes(bigUInt)
+			} else {
+				got.SetInt64(coin.GetInt())
+			}
+			require.Equal(t, new(big.Int).SetUint64(tc.amount), &got)
+		})
+	}
+}
+
+func TestDRepDeregistrationBuilderPreservesWord64Deposit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		amount uint64
+	}{
+		{name: "above int64", amount: uint64(1) << 63},
+		{name: "maximum uint64", amount: ^uint64(0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cert, err := certificates.NewDRepDeregistration().
+				WithCredential(stakeHash).
+				WithDeposit(tc.amount).
+				Build()
+			require.NoError(t, err)
+			require.Equal(t, tc.amount, cert.Amount)
+			require.Equal(
+				t,
+				new(big.Int).SetUint64(tc.amount),
+				cert.DepositAmount(),
+			)
+
+			wantCBOR, err := cbor.Encode([]any{
+				uint(lcommon.CertificateTypeDeregistrationDrep),
+				keyCredential(stakeHash),
+				tc.amount,
+			})
+			require.NoError(t, err)
+			require.Equal(t, wantCBOR, cert.Cbor())
+			encoded, err := cbor.Encode(cert)
+			require.NoError(t, err)
+			require.Equal(t, wantCBOR, encoded)
+
+			utxoCertificate, err := cert.Utxorpc()
+			require.NoError(t, err)
+			coin := utxoCertificate.GetUnregDrepCert().GetCoin()
+			var got big.Int
+			if bigUInt := coin.GetBigUInt(); bigUInt != nil {
+				got.SetBytes(bigUInt)
+			} else {
+				got.SetInt64(coin.GetInt())
+			}
+			require.Equal(t, new(big.Int).SetUint64(tc.amount), &got)
+		})
 	}
 }
 
@@ -689,9 +782,16 @@ func assertCertificateRoundTrip(
 	}
 	// Pool registration can re-encode its retained CBOR without consulting
 	// decoded fields. Expectations come from the builder inputs.
+	decodedExpected := expected
+	if drepRegistration, ok := expected.(*certificates.DRepRegistrationCertificate); ok {
+		decodedExpected = drepRegistration.RegistrationDrepCertificate
+	}
+	if drepDeregistration, ok := expected.(*certificates.DRepDeregistrationCertificate); ok {
+		decodedExpected = drepDeregistration.DeregistrationDrepCertificate
+	}
 	require.EqualExportedValues(
 		t,
-		expected,
+		decodedExpected,
 		decoded.Certificate,
 		"decoded certificate fields",
 	)
@@ -775,10 +875,13 @@ func TestGovernanceBuildersPreserveRequestedFields(t *testing.T) {
 					WithDeposit(321).
 					Build()
 			},
-			expected: &lcommon.DeregistrationDrepCertificate{
-				CertType:       17,
-				DrepCredential: scriptCredential(stakeHash),
-				Amount:         321,
+			expected: &certificates.DRepDeregistrationCertificate{
+				DeregistrationDrepCertificate: &lcommon.DeregistrationDrepCertificate{
+					CertType:       17,
+					DrepCredential: scriptCredential(stakeHash),
+					Amount:         321,
+				},
+				Amount: 321,
 			},
 		},
 		{
