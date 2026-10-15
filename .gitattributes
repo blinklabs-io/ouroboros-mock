@@ -1,0 +1,2 @@
+# The corpus and oracle sources are checksum-pinned original bytes.
+fixtures/upstream/e34/** -text
