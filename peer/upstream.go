@@ -94,6 +94,12 @@ func (u *Upstream) Events() <-chan Event {
 	return u.events.out
 }
 
+// DroppedEvents returns the number of events discarded because the event
+// queue was full. Protocol progress does not depend on consuming Events.
+func (u *Upstream) DroppedEvents() uint64 {
+	return u.events.droppedEvents()
+}
+
 // Chain returns a copy of the chain the peer serves. Changing the copy does
 // not change what the peer serves; use [Upstream.Append] and
 // [Upstream.SwitchFork], which also answer waiting clients.

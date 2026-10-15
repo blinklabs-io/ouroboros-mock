@@ -204,6 +204,9 @@ func TestUpstreamServesChainSyncFromOrigin(t *testing.T) {
 		t,
 		tc.conn.ChainSync().Client.Sync([]pcommon.Point{csmock.OriginPoint()}),
 	)
+	u := tc.next(t)
+	require.True(t, u.rollback)
+	require.Equal(t, csmock.OriginPoint(), u.point)
 	tc.expectForward(t, chain...)
 	waitEvent(t, up, peer.EventAwaitReply)
 
@@ -225,6 +228,9 @@ func TestUpstreamForkSwitchRollsBackWaitingClient(t *testing.T) {
 		t,
 		tc.conn.ChainSync().Client.Sync([]pcommon.Point{csmock.OriginPoint()}),
 	)
+	u := tc.next(t)
+	require.True(t, u.rollback)
+	require.Equal(t, csmock.OriginPoint(), u.point)
 	tc.expectForward(t, chain...)
 	waitEvent(t, up, peer.EventAwaitReply)
 
@@ -232,7 +238,7 @@ func TestUpstreamForkSwitchRollsBackWaitingClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, csmock.PointOf(chain[1]), intersection)
 
-	u := tc.next(t)
+	u = tc.next(t)
 	require.True(t, u.rollback, "expected a rollback to the intersection")
 	require.Equal(t, csmock.PointOf(chain[1]), u.point)
 	tc.expectForward(t, fork...)
@@ -250,13 +256,16 @@ func TestUpstreamForkAtOriginRollsBackToOrigin(t *testing.T) {
 		t,
 		tc.conn.ChainSync().Client.Sync([]pcommon.Point{csmock.OriginPoint()}),
 	)
+	u := tc.next(t)
+	require.True(t, u.rollback)
+	require.Equal(t, csmock.OriginPoint(), u.point)
 	tc.expectForward(t, chain...)
 	waitEvent(t, up, peer.EventAwaitReply)
 
 	intersection, err := up.SwitchFork(fork)
 	require.NoError(t, err)
 	require.Equal(t, csmock.OriginPoint(), intersection)
-	u := tc.next(t)
+	u = tc.next(t)
 	require.True(t, u.rollback)
 	require.Equal(t, csmock.OriginPoint(), u.point)
 	tc.expectForward(t, fork...)
@@ -275,6 +284,13 @@ func TestUpstreamIntersectsMostRecentKnownPoint(t *testing.T) {
 			[]pcommon.Point{unknown, csmock.PointOf(chain[1])},
 		),
 	)
+	u := tc.next(t)
+	require.True(
+		t,
+		u.rollback,
+		"first update must roll back to the intersection",
+	)
+	require.Equal(t, csmock.PointOf(chain[1]), u.point)
 	tc.expectForward(t, chain[2:]...)
 }
 

@@ -33,36 +33,39 @@ func TestEventStreamBoundsPendingEvents(t *testing.T) {
 
 	published := make(chan struct{})
 	go func() {
-		s.publish(Event{
-			Kind:    EventAwaitReply,
-			Session: eventQueueCapacity,
-		})
+		s.publish(Event{Kind: EventAwaitReply, Session: eventQueueCapacity})
 		close(published)
 	}()
-
 	select {
 	case <-published:
-		t.Fatal("publish completed while the event queue was full")
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
+		t.Fatal("full event queue blocked publication")
 	}
-
-	first := <-s.out
-	require.Equal(t, uint64(0), first.Session)
-	require.Eventually(t, func() bool {
+	require.Equal(t, uint64(1), s.droppedEvents())
+	for i := range eventQueueCapacity {
 		select {
-		case <-published:
-			return true
-		default:
-			return false
+		case e := <-s.out:
+			require.Equal(t, uint64(i), e.Session)
+		case <-time.After(time.Second):
+			t.Fatal("queued event was not delivered")
 		}
-	}, time.Second, time.Millisecond)
-	for i := 1; i <= eventQueueCapacity; i++ {
-		e := <-s.out
-		require.Equal(t, uint64(i), e.Session)
 	}
+	require.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.queue) == 0
+	}, time.Second, time.Millisecond)
+	s.publish(Event{Kind: EventAwaitReply, Session: eventQueueCapacity + 1})
+	select {
+	case e := <-s.out:
+		require.Equal(t, uint64(eventQueueCapacity+1), e.Session)
+	case <-time.After(time.Second):
+		t.Fatal("publication did not resume after draining the queue")
+	}
+	require.Equal(t, uint64(1), s.droppedEvents())
 }
 
-func TestUpstreamCloseUnblocksEventPublisher(t *testing.T) {
+func TestUpstreamClosesWithFullEventQueue(t *testing.T) {
 	u, err := NewUpstream(UpstreamConfig{})
 	require.NoError(t, err)
 	for range eventQueueCapacity {
@@ -107,34 +110,16 @@ func TestEventStreamConcurrentPublishAndClose(t *testing.T) {
 	}
 }
 
-func TestEventStreamCloseUnblocksPublisher(t *testing.T) {
+func TestEventStreamPublishAfterClose(t *testing.T) {
 	s := newEventStream()
-	for range eventQueueCapacity {
-		s.publish(Event{Kind: EventRequestNext})
-	}
-
-	published := make(chan struct{})
-	go func() {
-		s.publish(Event{Kind: EventAwaitReply})
-		close(published)
-	}()
-	t.Cleanup(func() { <-published })
-
-	select {
-	case <-published:
-		t.Fatal("publish completed while the event queue was full")
-	case <-time.After(100 * time.Millisecond):
-	}
-
 	s.close()
-	require.Eventually(t, func() bool {
-		select {
-		case <-published:
-			return true
-		default:
-			return false
-		}
-	}, time.Second, time.Millisecond)
+	s.publish(Event{Kind: EventAwaitReply})
+	_, ok := <-s.out
+	require.False(t, ok)
+	require.Zero(t, s.droppedEvents())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	require.Empty(t, s.queue)
 }
 
 func TestEventStreamCloseDiscardsQueuedEvents(t *testing.T) {

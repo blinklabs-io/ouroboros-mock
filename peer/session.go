@@ -41,6 +41,9 @@ type session struct {
 	path []pcommon.Point
 	// pending is set while the client has been told to wait at the tip.
 	pending bool
+	// intersectRollback sends the ChainDB follower's initial rollback before
+	// advancing from a newly negotiated intersection.
+	intersectRollback bool
 }
 
 func (s *session) emit(kind EventKind, points ...pcommon.Point) {
@@ -74,6 +77,7 @@ func (s *session) findIntersect(
 	s.server = ctx.Server
 	s.path = []pcommon.Point{point}
 	s.pending = false
+	s.intersectRollback = true
 	s.mu.Unlock()
 	s.emit(EventIntersectFound, point)
 	return point, tip, nil
@@ -104,6 +108,12 @@ func (s *session) wake() {
 // serveLocked sends the client its next update. fromRequest is false when
 // answering an earlier await-reply, which must not be repeated.
 func (s *session) serveLocked(fromRequest bool) error {
+	if s.intersectRollback {
+		s.intersectRollback = false
+		point := s.path[0]
+		s.emit(EventRollBackward, point)
+		return s.server.RollBackward(point, s.up.chain.Tip())
+	}
 	n, path := s.up.chain.follow(s.path)
 	s.path = path
 	switch {

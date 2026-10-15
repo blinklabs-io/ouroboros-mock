@@ -94,6 +94,12 @@ func (p *TxPeer) Events() <-chan Event {
 	return p.events.out
 }
 
+// DroppedEvents returns the number of events discarded because the event
+// queue was full. Protocol progress does not depend on consuming Events.
+func (p *TxPeer) DroppedEvents() uint64 {
+	return p.events.droppedEvents()
+}
+
 // Offer adds transactions to announce. A node waiting on a blocking request
 // is answered immediately.
 func (p *TxPeer) Offer(txs ...Tx) {

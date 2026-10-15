@@ -27,9 +27,9 @@
 // transactions through tx-submission and records what the node requests;
 // [Upstream] collects what a node relays to it.
 //
-// Every peer publishes [Event] values on a bounded, ordered channel. Tests
-// should consume events as the protocol runs; a stalled consumer applies
-// backpressure instead of allowing event memory to grow without limit.
+// Every peer publishes [Event] values on a bounded, ordered channel. When the
+// queue is full, new events are dropped so protocol callbacks keep running.
+// Each peer reports the number of dropped events through DroppedEvents.
 package peer
 
 import (
@@ -114,7 +114,7 @@ const eventQueueCapacity = 256
 type eventStream struct {
 	mu      sync.Mutex
 	queue   []Event
-	slots   chan struct{}
+	dropped uint64
 	wake    chan struct{}
 	out     chan Event
 	done    chan struct{}
@@ -126,7 +126,6 @@ type eventStream struct {
 func newEventStream() *eventStream {
 	s := &eventStream{
 		queue:   make([]Event, 0, eventQueueCapacity),
-		slots:   make(chan struct{}, eventQueueCapacity),
 		wake:    make(chan struct{}, 1),
 		out:     make(chan Event),
 		done:    make(chan struct{}),
@@ -137,15 +136,14 @@ func newEventStream() *eventStream {
 }
 
 func (s *eventStream) publish(e Event) {
-	select {
-	case s.slots <- struct{}{}:
-	case <-s.done:
-		return
-	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		<-s.slots
+		return
+	}
+	if len(s.queue) == eventQueueCapacity {
+		s.dropped++
+		s.mu.Unlock()
 		return
 	}
 	s.queue = append(s.queue, e)
@@ -154,6 +152,12 @@ func (s *eventStream) publish(e Event) {
 	case s.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (s *eventStream) droppedEvents() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dropped
 }
 
 func (s *eventStream) pump() {
@@ -183,7 +187,6 @@ func (s *eventStream) pump() {
 			s.queue[0] = Event{}
 			s.queue = s.queue[1:]
 			s.mu.Unlock()
-			<-s.slots
 		case <-s.done:
 			return
 		}

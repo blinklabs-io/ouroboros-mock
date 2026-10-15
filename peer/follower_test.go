@@ -18,6 +18,7 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
@@ -75,7 +76,7 @@ func TestFollowerRecordsHeadersAndBlocks(t *testing.T) {
 		}
 		require.Equal(t, b.Cbor(), got.Cbor())
 	}
-	require.Empty(t, f.Rollbacks())
+	require.Equal(t, []pcommon.Point{csmock.OriginPoint()}, f.Rollbacks())
 }
 
 func TestFollowerWithoutFetchLeavesBlocksUnfetched(t *testing.T) {
@@ -115,7 +116,11 @@ func TestFollowerSeesForkSwitch(t *testing.T) {
 		want = append(want, csmock.PointOf(b))
 	}
 	require.Equal(t, want, f.Followed())
-	require.Equal(t, []pcommon.Point{intersection}, f.Rollbacks())
+	require.Equal(
+		t,
+		[]pcommon.Point{csmock.OriginPoint(), intersection},
+		f.Rollbacks(),
+	)
 	// Headers keeps the abandoned branch.
 	require.Len(t, f.Headers(), len(chain)+len(fork))
 }
@@ -166,4 +171,34 @@ func TestNewFollowerClosesConnectionAfterHandshakeFailure(t *testing.T) {
 
 	require.Error(t, err)
 	require.True(t, conn.closed.Load())
+}
+
+func TestPeersSyncWithoutEventConsumers(t *testing.T) {
+	for _, fetch := range []bool{false, true} {
+		name := "headers"
+		if fetch {
+			name = "blocks"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			chain := buildChain(t, 300, common.Blake2b256{}, 1, 100)
+			up := newUpstream(t, chain)
+			f := newFollower(t, up, fetch)
+			require.Eventually(t, func() bool {
+				if len(f.Followed()) != len(chain) {
+					return false
+				}
+				if fetch {
+					_, ok := f.Block(csmock.PointOf(chain[len(chain)-1]))
+					return ok
+				}
+				return true
+			}, waitTimeout, time.Millisecond, "unread events stalled chain sync")
+			require.NoError(t, f.Err())
+			require.Positive(t, up.DroppedEvents())
+			require.Positive(t, f.DroppedEvents())
+			require.NoError(t, f.Close())
+			require.NoError(t, up.Close())
+		})
+	}
 }

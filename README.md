@@ -135,8 +135,10 @@ mini-protocols instead of a scripted conversation:
 - `peer.TxPeer` offers fixture transactions through tx-submission and records
   what the node requests.
 
-Each peer publishes events on a channel, so tests wait on the event they expect
-rather than sleeping.
+Each peer publishes events on a bounded, ordered channel. A full queue drops
+new events without stalling protocols; `DroppedEvents()` reports the number
+discarded. Tests that require every event must consume the channel as protocols
+run and check that `DroppedEvents()` is zero.
 
 ### Certificate Fixtures
 

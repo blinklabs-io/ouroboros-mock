@@ -113,6 +113,12 @@ func (f *Follower) Events() <-chan Event {
 	return f.events.out
 }
 
+// DroppedEvents returns the number of events discarded because the event
+// queue was full. Protocol progress does not depend on consuming Events.
+func (f *Follower) DroppedEvents() uint64 {
+	return f.events.droppedEvents()
+}
+
 // Followed returns the points of the chain the follower currently holds:
 // every announced header with rolled-back headers removed.
 func (f *Follower) Followed() []pcommon.Point {
