@@ -372,6 +372,13 @@ func (c *Connection) processOutputEntry(entry ConversationEntryOutput) error {
 		payloadBuf.Bytes(),
 		entry.IsResponse,
 	)
+	if segment == nil {
+		return fmt.Errorf(
+			"output payload length %d exceeds muxer segment limit %d",
+			payloadBuf.Len(),
+			muxer.SegmentMaxPayloadLength,
+		)
+	}
 	if err := c.muxer.Send(segment); err != nil {
 		return err
 	}
