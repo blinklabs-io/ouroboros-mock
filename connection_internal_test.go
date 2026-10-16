@@ -44,9 +44,20 @@ type writeSignalConn struct {
 	once         sync.Once
 }
 
+type writeErrorConn struct {
+	net.Conn
+	writeStarted chan struct{}
+	once         sync.Once
+}
+
 func (c *writeSignalConn) Write(p []byte) (int, error) {
 	c.once.Do(func() { close(c.writeStarted) })
 	return c.Conn.Write(p)
+}
+
+func (c *writeErrorConn) Write([]byte) (int, error) {
+	c.once.Do(func() { close(c.writeStarted) })
+	return 0, io.ErrClosedPipe
 }
 
 type unencodableMessage struct {
@@ -222,6 +233,62 @@ func TestCloseDuringOutputSendClosesErrorChannelWithoutValue(t *testing.T) {
 		t.Fatal("conversation did not begin the muxer write")
 	}
 	require.NoError(t, conn.Close())
+	select {
+	case err, ok := <-conn.ErrorChan():
+		require.False(t, ok, "shutdown published an output error: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("error channel did not close after connection shutdown")
+	}
+}
+
+func TestCloseAfterOutputSendErrorClosesErrorChannelWithoutValue(t *testing.T) {
+	client, server := net.Pipe()
+	writeStarted := make(chan struct{})
+	resultReady := make(chan struct{})
+	releaseResult := make(chan struct{})
+	mockConn := &writeErrorConn{Conn: server, writeStarted: writeStarted}
+	testMuxer := muxer.New(mockConn)
+	_, recv, _ := testMuxer.RegisterProtocol(
+		muxer.ProtocolUnknown,
+		muxer.ProtocolRoleResponder,
+	)
+	require.NotNil(t, recv)
+	testMuxer.Start()
+	conn := &Connection{
+		conversation: []ConversationEntry{ConversationEntryOutput{
+			ProtocolId: keepalive.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				keepalive.NewMsgKeepAliveResponse(7),
+			},
+		}},
+		doneChan:      make(chan any),
+		inputAccepted: make(chan struct{}),
+		conn:          client,
+		mockConn:      mockConn,
+		muxer:         testMuxer,
+		muxerRecvChan: recv,
+		errorChan:     make(chan error, 1),
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
+		hooks: connectionHooks{onEntryResult: func() {
+			close(resultReady)
+			<-releaseResult
+		}},
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	go conn.asyncLoop()
+	select {
+	case <-writeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not begin the muxer write")
+	}
+	select {
+	case <-resultReady:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not return from the failed muxer write")
+	}
+	require.NoError(t, conn.Close())
+	close(releaseResult)
 	select {
 	case err, ok := <-conn.ErrorChan():
 		require.False(t, ok, "shutdown published an output error: %v", err)

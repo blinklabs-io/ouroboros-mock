@@ -41,6 +41,14 @@ const (
 
 var errConversationClosed = errors.New("conversation closed")
 
+type outputSendError struct {
+	err error
+}
+
+func (e outputSendError) Error() string { return e.err.Error() }
+
+func (e outputSendError) Unwrap() error { return e.err }
+
 // Connection mocks an Ouroboros connection
 type Connection struct {
 	mockConn      net.Conn
@@ -259,6 +267,14 @@ func (c *Connection) asyncLoop() {
 			if errors.Is(err, errConversationClosed) {
 				return
 			}
+			var sendErr outputSendError
+			if errors.As(err, &sendErr) {
+				select {
+				case <-c.doneChan:
+					return
+				default:
+				}
+			}
 			if entry.ExpectedError != "" {
 				if err == nil {
 					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))
@@ -441,7 +457,7 @@ func (c *Connection) processOutputEntry(entry ConversationEntryOutput) error {
 			return errConversationClosed
 		default:
 		}
-		return err
+		return outputSendError{err: err}
 	}
 	return nil
 }
