@@ -174,7 +174,12 @@ func TestHarnessIntegration(t *testing.T) {
 
 func TestFixtureExecutionHarness(t *testing.T) {
 	harness := fixtures.NewHarness(fixtures.HarnessConfig{})
-	expectedFixtureCount := len(expectedFixturesFromManifest(t, harness))
+	var expectedFixtureCount int
+	for _, fixture := range expectedFixturesFromManifest(t, harness) {
+		if fixture.Kind != fixtures.KindReferenceData {
+			expectedFixtureCount++
+		}
+	}
 
 	t.Run("RunAllExecutions", func(t *testing.T) {
 		harness.RunAllExecutions(t)

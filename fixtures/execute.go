@@ -48,15 +48,15 @@ type ExecutionResult struct {
 	CaseCount int
 }
 
-// RunAllExecutions executes every curated fixture using the built-in execution
-// logic and fails the test on the first failing fixture.
+// RunAllExecutions executes every curated executable fixture using the built-in
+// execution logic and fails the test on the first failing fixture.
 func (h *Harness) RunAllExecutions(t *testing.T) {
 	t.Helper()
 	h.runMatchingExecutions(t, Filter{})
 }
 
-// RunMatchingExecutions executes every fixture that matches the supplied
-// filter and fails the test if the filter matches no fixtures.
+// RunMatchingExecutions executes every executable fixture matching the filter.
+// It fails the test if the filter matches no executable fixtures.
 func (h *Harness) RunMatchingExecutions(t *testing.T, filter Filter) {
 	t.Helper()
 	h.runMatchingExecutions(t, filter)
@@ -94,8 +94,8 @@ func (h *Harness) ExecuteFixture(relPath string) (ExecutionResult, error) {
 	return executeFixtureWithIndex(fixture, fixtureMap), nil
 }
 
-// RunAllExecutionsWithResults executes every curated fixture and returns the
-// detailed results without requiring a testing.T.
+// RunAllExecutionsWithResults executes every curated executable fixture and
+// returns the detailed results without requiring a testing.T.
 func (h *Harness) RunAllExecutionsWithResults() ([]ExecutionResult, error) {
 	fixtures, fixtureMap, err := h.collectFixtureIndex()
 	if err != nil {
@@ -104,6 +104,9 @@ func (h *Harness) RunAllExecutionsWithResults() ([]ExecutionResult, error) {
 
 	results := make([]ExecutionResult, 0, len(fixtures))
 	for _, fixture := range fixtures {
+		if fixture.Kind == KindReferenceData {
+			continue
+		}
 		results = append(results, executeFixtureWithIndex(fixture, fixtureMap))
 	}
 	return results, nil
@@ -119,7 +122,7 @@ func (h *Harness) runMatchingExecutions(t *testing.T, filter Filter) {
 
 	var matched int
 	for _, fixture := range fixtures {
-		if !filter.Matches(fixture) {
+		if fixture.Kind == KindReferenceData || !filter.Matches(fixture) {
 			continue
 		}
 		matched++
@@ -259,6 +262,10 @@ func executeFixture(
 		return 1, executeScriptFixture(fixture, fixtureMap)
 	case KindUnknown:
 		return 0, fmt.Errorf("unknown fixture kind for %s", fixture.RelPath)
+	case KindReferenceData:
+		return 0, fmt.Errorf(
+			"reference-data fixture is not executable: %s", fixture.RelPath,
+		)
 	default:
 		return 0, fmt.Errorf(
 			"unsupported fixture kind %q for %s",
