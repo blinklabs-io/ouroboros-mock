@@ -156,6 +156,16 @@ to testnet; `WithNetwork` selects their network ID. `StakeLifecycle`,
 `PoolLifecycle`, and `DRepLifecycle` build related registration, delegation or
 update, and retirement or deregistration sequences.
 
+### Ledger State Fixtures
+
+The `ledger` package's `NewLedgerStateBuilder` configures governance-purpose
+roots with `WithGovPurposeRoots` (a lookup callback) or
+`WithGovPurposeRootsValue` (a static value). A nonnil empty
+`common.GovPurposeRoots` explicitly means no action of any purpose has been
+enacted. An unconfigured builder or nil static value returns an error rather
+than evidence of known empty governance state. A configured callback
+takes precedence over the static value and preserves lookup errors.
+
 ## Command line listener
 
 Run `ouroboros-mock demo.yaml` to listen for one connection and execute the

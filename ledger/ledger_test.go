@@ -1328,7 +1328,11 @@ func TestDRepRegistrationBuilder_Build_Word64Deposit(t *testing.T) {
 				Build()
 			require.NoError(t, err)
 			assert.Equal(t, deposit, cert.Amount)
-			assert.Equal(t, new(big.Int).SetUint64(deposit), cert.DepositAmount())
+			assert.Equal(
+				t,
+				new(big.Int).SetUint64(deposit),
+				cert.DepositAmount(),
+			)
 
 			encoded, err := cbor.Encode(cert)
 			require.NoError(t, err)
@@ -2619,6 +2623,55 @@ func TestLedgerStateBuilder_WithConstitutionValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, constitution, result)
+}
+
+func TestLedgerStateBuilder_GovPurposeRoots(t *testing.T) {
+	t.Run("unconfigured roots are unavailable", func(t *testing.T) {
+		state := ledger.NewLedgerStateBuilder().Build()
+		roots, err := state.GovPurposeRoots()
+		require.Error(t, err)
+		require.Nil(t, roots)
+	})
+	t.Run("known empty roots are available", func(t *testing.T) {
+		known := &lcommon.GovPurposeRoots{}
+		state := ledger.NewLedgerStateBuilder().
+			WithGovPurposeRootsValue(known).
+			Build()
+		roots, err := state.GovPurposeRoots()
+		require.NoError(t, err)
+		require.Same(t, known, roots)
+	})
+	t.Run(
+		"callback takes precedence and propagates failure",
+		func(t *testing.T) {
+			lookupErr := fmt.Errorf("root lookup failed")
+			state := ledger.NewLedgerStateBuilder().
+				WithGovPurposeRootsValue(&lcommon.GovPurposeRoots{}).
+				WithGovPurposeRoots(func() (*lcommon.GovPurposeRoots, error) {
+					return nil, lookupErr
+				}).
+				Build()
+			roots, err := state.GovPurposeRoots()
+			require.ErrorIs(t, err, lookupErr)
+			require.Nil(t, roots)
+		},
+	)
+	t.Run("configured purpose root is preserved", func(t *testing.T) {
+		known := &lcommon.GovPurposeRoots{
+			Committee: &lcommon.GovActionId{
+				TransactionId: lcommon.Blake2b256{0x51},
+				GovActionIdx:  2,
+			},
+		}
+		state := ledger.NewLedgerStateBuilder().
+			WithGovPurposeRoots(func() (*lcommon.GovPurposeRoots, error) {
+				return known, nil
+			}).
+			Build()
+		roots, err := state.GovPurposeRoots()
+		require.NoError(t, err)
+		require.Equal(t, known, roots)
+	})
 }
 
 // =============================================================================
