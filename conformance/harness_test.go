@@ -1187,3 +1187,38 @@ func TestHarnessRollbackCachePopulatedByBothPaths(t *testing.T) {
 		}
 	})
 }
+
+func TestNoOpStateManagerFailsEveryMutationBearingVector(t *testing.T) {
+	t.Parallel()
+	noOp := &noOpStateManager{MockStateManager: NewMockStateManager()}
+	results, err := NewHarness(
+		noOp,
+		HarnessConfig{TestdataRoot: "testdata"},
+	).RunAllVectorsWithResults()
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+
+	var survivors []string
+	for _, result := range results {
+		if !result.Success {
+			continue
+		}
+		vector, err := DecodeTestVector(result.Path)
+		require.NoError(t, err)
+		applied := false
+		for _, event := range vector.Events {
+			if event.Type == EventTypeTransaction && event.Success {
+				applied = true
+				break
+			}
+		}
+		if applied {
+			survivors = append(survivors, result.Path)
+		}
+	}
+	require.Empty(
+		t,
+		survivors,
+		"vectors with a successful transaction passed with a no-op ApplyTransaction",
+	)
+}

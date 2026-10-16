@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -232,6 +233,12 @@ func TestFindIntersectOversizedPayload(t *testing.T) {
 	require.Equal(t, numPoints, <-gotCount)
 }
 
+// Concurrent transport writes preserve complete oversized message boundaries.
+func TestConcurrentOversizedSends(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	csmock.VerifyConcurrentOversizedSends(t)
+}
+
 // Repeated multi-segment sends must each reach the server whole, with no
 // CBOR-decode error. The server rejects a FindIntersect sent while it still
 // has agency, so each send waits for the previous response.
@@ -293,21 +300,46 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 
 	for round := range rounds {
 		t.Run(fmt.Sprintf("round%d", round), func(t *testing.T) {
-			gotCounts := make(chan int, senders)
+			var decoded atomic.Int32
+			baselineDecoded := make(chan struct{})
 			r := &responder{
 				findIntersect: func(p []pcommon.Point) (pcommon.Point, chainsync.Tip, error) {
-					gotCounts <- len(p)
+					if len(p) != numPoints {
+						return pcommon.Point{}, chainsync.Tip{}, fmt.Errorf(
+							"decoded %d points, expected %d",
+							len(p),
+							numPoints,
+						)
+					}
+					if decoded.Add(1) == 1 {
+						close(baselineDecoded)
+					}
 					return csmock.OriginPoint(), chainsync.Tip{}, nil
 				},
 			}
 			h := newHarness(t, csmock.ModeNtC, r)
 			defer h.Close()
 
+			// Put one complete request on the wire before racing later calls.
+			// Otherwise the protocol state race can reject every caller before
+			// the server decodes any request, which does not exercise framing.
+			require.NoError(t, h.FindIntersect(points))
+			select {
+			case <-baselineDecoded:
+			case err, ok := <-h.ServerErrors():
+				if !ok {
+					t.Fatal("server closed before decoding the baseline request")
+				}
+				t.Fatalf("server failed before decoding the baseline request: %v", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("server did not decode the baseline request")
+			}
+
 			// A send may fail once the server tears down on the agency
 			// error, so send errors are not asserted; the server's view is.
 			start := make(chan struct{})
 			var wg sync.WaitGroup
-			for range senders {
+			for range senders - 1 {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
@@ -335,18 +367,19 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 					t.Fatal("timed out waiting for the server")
 				}
 			}
+			requiredDecoded := max(1, found)
+			require.Eventually(
+				t,
+				func() bool {
+					return int(decoded.Load()) >= requiredDecoded
+				},
+				time.Second,
+				time.Millisecond,
+				"server callbacks did not complete",
+			)
 			require.NoError(t, h.Close())
 			wg.Wait()
-
-			// gotCounts is not closed: the server's recv goroutine can still
-			// be unwinding after Close, and closing would race its send.
-			decoded := 0
-			for len(gotCounts) > 0 {
-				require.Equal(t, numPoints, <-gotCounts)
-				decoded++
-			}
-			require.GreaterOrEqual(t, decoded, 1)
-			require.GreaterOrEqual(t, decoded, found)
+			require.GreaterOrEqual(t, int(decoded.Load()), found)
 		})
 	}
 }

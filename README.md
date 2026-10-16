@@ -46,6 +46,63 @@ mockConn := ouroboros_mock.NewConnection(
 )
 ```
 
+### Protocol message and scenario builders
+
+Message builders describe a server's expected client inputs and server outputs.
+Pass `ProtocolRoleClient` to `NewConnection` when the attached gouroboros peer
+is the client. Add the handshake entries before a protocol scenario.
+
+```go
+start := ouroboros_mock.NewPoint(startSlot, startHash)
+end := ouroboros_mock.NewPoint(endSlot, endHash)
+entries := []ouroboros_mock.ConversationEntry{
+    ouroboros_mock.ConversationEntryHandshakeRequestGeneric,
+    ouroboros_mock.ConversationEntryHandshakeNtNResponse,
+}
+scenario, err := ouroboros_mock.BlockFetchScenario(start, end, blockTypes, blocks)
+if err != nil {
+    panic(err)
+}
+entries = append(entries, scenario...)
+mockConn := ouroboros_mock.NewConnection(ouroboros_mock.ProtocolRoleClient, entries)
+```
+
+`blocks` contains raw ledger block CBOR and `blockTypes` contains each block's
+wire block type, as returned by the block's `Type()` method rather than its
+ledger era ID. The builder encodes the wrapper required by BlockFetch. An
+empty block slice produces `NoBlocks`; otherwise the scenario emits
+`StartBatch`, each `Block`, and `BatchDone`. The client finishes with
+`ClientDone`. `BlockFetchBlock` retains its existing complete single-block batch
+behavior; `BlockFetchBlockResponse` wraps the supplied raw block and emits one response
+within an open batch. The existing `BlockFetchBlock` takes an already encoded
+block wrapper.
+
+| Flow | Scenario builder |
+| --- | --- |
+| Forward headers in NtN | `ChainSyncForwardScenarioNtN` |
+| Forward blocks in NtC | `ChainSyncForwardScenarioNtC` |
+| Rollback in either mode | `ChainSyncRollbackScenario` |
+| Intersection found or not found | `ChainSyncIntersectionScenario` |
+| Block range or no blocks | `BlockFetchScenario` |
+| Transaction IDs, bodies, and acknowledgement | `TxSubmissionScenario` |
+
+These finite scenarios end with the client's protocol termination message and
+do not close the connection. `ChainSyncScenario` retains its existing NtN
+behavior with a final `RequestNext` awaiting another response. Intersection
+success requires a point offered by the client. Transaction ID and body slices
+must describe matching transactions in the same order and have equal lengths;
+request counts cannot exceed the protocol's `uint16` limit. Both
+transaction-ID requests block, because no IDs are outstanding when either is
+sent; the final one permits the client to send `Done`.
+
+Individual builders support ChainSync await/intersection responses, BlockFetch
+batch boundaries, LocalTxMonitor acquisition and replies, LocalStateQuery
+acquisition targets and results, PeerSharing, and parameterized KeepAlive
+cookies. `LocalStateQueryResult` accepts a CBOR-encodable result value;
+`LocalStateQueryQuery` preserves the typed query representation required by the
+mock's input comparison. Peers and captured transactions retain their protocol
+encoding, and callers supply valid ledger block and transaction content.
+
 ### Negative Test Cases
 
 To test scenarios where errors are expected, set the `ExpectedError` field on conversation entries:
@@ -63,6 +120,41 @@ mockConn := ouroboros_mock.NewConnection(
 ```
 
 If the entry produces an error matching the `ExpectedError`, the conversation continues without failure. If the error does not match or no error occurs when expected, the mock will report an error.
+
+### Reactive Peers
+
+The `peer` package provides peers that answer a node over real Ouroboros
+mini-protocols instead of a scripted conversation:
+
+- `peer.Upstream` serves chain-sync and block-fetch from a fixture chain and
+  collects transactions the node relays to it. `SwitchFork` moves it to a
+  competing branch: clients are rolled back to the intersection and then sent
+  the new branch.
+- `peer.Follower` follows a node with chain-sync and block-fetch and records
+  the headers, blocks and rollbacks it was served.
+- `peer.TxPeer` offers fixture transactions through tx-submission and records
+  what the node requests.
+
+Each peer publishes events on a bounded, ordered channel. A full queue drops
+new events without stalling protocols; `DroppedEvents()` reports the number
+discarded. Tests that require every event must consume the channel as protocols
+run and check that `DroppedEvents()` is zero.
+
+### Certificate Fixtures
+
+The `certificates` package builds every certificate type through Conway.
+`NewMoveInstantaneousRewards(source)` uses the Shelley wire pot IDs: 0 for
+reserves and 1 for treasury. Select a signed credential reward map with
+`WithRewards`, `WithRewardKey`, or `WithRewardScript`, or a coin transfer with
+`WithOtherPot`. Reward maps and opposite-pot transfers are mutually exclusive;
+empty maps and zero transfers remain distinct. The MIR builder copies its
+inputs and returns independent certificate values.
+
+`NewGenerator(seed)` draws certificate types and inputs deterministically
+within a Go release, including both MIR targets. Pool reward accounts default
+to testnet; `WithNetwork` selects their network ID. `StakeLifecycle`,
+`PoolLifecycle`, and `DRepLifecycle` build related registration, delegation or
+update, and retirement or deregistration sequences.
 
 ## Command line listener
 
