@@ -38,6 +38,11 @@ type closeRecorder struct {
 	closed atomic.Bool
 }
 
+type unencodableMessage struct {
+	protocol.MessageBase
+	Value chan int
+}
+
 func (c *closeRecorder) Close() error {
 	c.closed.Store(true)
 	if c.err != nil {
@@ -71,42 +76,17 @@ func TestCloseReportsNoErrorOnAHealthyConnection(t *testing.T) {
 }
 
 func TestPendingInputClassifiesClosedReceive(t *testing.T) {
-	tests := []struct {
-		name    string
-		segment *muxer.Segment
-	}{
-		{name: "closed receive"},
-		{
-			name: "queued segment",
-			segment: muxer.NewSegment(
-				keepalive.ProtocolId+1,
-				nil,
-				false,
-			),
-		},
-	}
 	entry := ConversationEntryInput{ProtocolId: keepalive.ProtocolId}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			done := make(chan any)
-			received := make(chan *muxer.Segment, 1)
-			if test.segment != nil {
-				received <- test.segment
-			}
-			close(done)
-			close(received)
-			conn := &Connection{
-				doneChan:      done,
-				muxerRecvChan: received,
-				inputBuffers:  make(map[uint16]*bytes.Buffer),
-			}
-			require.ErrorIs(
-				t,
-				conn.processInputEntry(entry),
-				errConversationClosed,
-			)
-		})
+	done := make(chan any)
+	received := make(chan *muxer.Segment)
+	close(done)
+	close(received)
+	conn := &Connection{
+		doneChan:      done,
+		muxerRecvChan: received,
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
 	}
+	require.ErrorIs(t, conn.processInputEntry(entry), errConversationClosed)
 
 	remote := &Connection{
 		doneChan:      make(chan any),
@@ -115,6 +95,27 @@ func TestPendingInputClassifiesClosedReceive(t *testing.T) {
 	}
 	close(remote.muxerRecvChan)
 	require.ErrorIs(t, remote.processInputEntry(entry), io.ErrUnexpectedEOF)
+}
+
+func TestPendingInputPreservesQueuedSegmentError(t *testing.T) {
+	done := make(chan any)
+	received := make(chan *muxer.Segment, 1)
+	received <- muxer.NewSegment(keepalive.ProtocolId+1, nil, false)
+	close(done)
+	close(received)
+	conn := &Connection{
+		doneChan:      done,
+		muxerRecvChan: received,
+		inputBuffers:  make(map[uint16]*bytes.Buffer),
+	}
+
+	require.EqualError(
+		t,
+		conn.processInputEntry(
+			ConversationEntryInput{ProtocolId: keepalive.ProtocolId},
+		),
+		"input muxer segment protocol ID did not match expected value: expected 8, got 9",
+	)
 }
 
 func TestClosePendingInputClosesErrorChannelWithoutValue(t *testing.T) {
@@ -129,7 +130,7 @@ func TestClosePendingInputClosesErrorChannelWithoutValue(t *testing.T) {
 		ConversationEntryInput{ProtocolId: keepalive.ProtocolId},
 	}).(*Connection)
 	waiting := make(chan struct{})
-	conn.onInputWait = func() { close(waiting) }
+	conn.hooks.onInputWait = func() { close(waiting) }
 
 	data := make([]byte, 64)
 	_, err := conn.Read(data)
@@ -158,7 +159,7 @@ func TestClosePendingOutputClosesErrorChannelWithoutValue(t *testing.T) {
 				keepalive.NewMsgKeepAliveResponse(7),
 			},
 		},
-	}, func() { close(waiting) })
+	}, connectionHooks{onOutputWait: func() { close(waiting) }})
 
 	select {
 	case <-waiting:
@@ -172,6 +173,106 @@ func TestClosePendingOutputClosesErrorChannelWithoutValue(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("error channel did not close after connection shutdown")
 	}
+}
+
+func TestCloseAfterInputResultPreservesError(t *testing.T) {
+	resultReady := make(chan struct{})
+	releaseResult := make(chan struct{})
+	conn := newConnection(
+		ProtocolRoleClient,
+		[]ConversationEntry{
+			ConversationEntryInput{ProtocolId: keepalive.ProtocolId},
+		},
+		connectionHooks{onEntryResult: func() {
+			close(resultReady)
+			<-releaseResult
+		}},
+	)
+	go func() {
+		conn.muxerRecvChan <- muxer.NewSegment(keepalive.ProtocolId+1, nil, false)
+	}()
+
+	select {
+	case <-resultReady:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not produce the input result")
+	}
+	require.NoError(t, conn.Close())
+	close(releaseResult)
+	require.EqualError(
+		t,
+		<-conn.ErrorChan(),
+		"input error: input muxer segment protocol ID did not match expected value: expected 8, got 9",
+	)
+}
+
+func TestCloseAfterOutputResultPreservesExpectedError(t *testing.T) {
+	resultReady := make(chan struct{})
+	releaseResult := make(chan struct{})
+	conn := newConnection(
+		ProtocolRoleClient,
+		[]ConversationEntry{ConversationEntryOutput{
+			ProtocolId: keepalive.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				keepalive.NewMsgKeepAliveResponse(7),
+			},
+			ExpectedError: "send failed",
+		}},
+		connectionHooks{onEntryResult: func() {
+			close(resultReady)
+			<-releaseResult
+		}},
+	)
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		_, _ = conn.Read(make([]byte, 64))
+	}()
+
+	select {
+	case <-resultReady:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not produce the output result")
+	}
+	require.NoError(t, conn.Close())
+	close(releaseResult)
+	require.EqualError(
+		t,
+		<-conn.ErrorChan(),
+		`expected error "send failed" but none occurred`,
+	)
+	<-readDone
+}
+
+func TestCloseAfterOutputResultPreservesEncodeError(t *testing.T) {
+	resultReady := make(chan struct{})
+	releaseResult := make(chan struct{})
+	conn := newConnection(
+		ProtocolRoleClient,
+		[]ConversationEntry{ConversationEntryOutput{
+			ProtocolId: keepalive.ProtocolId,
+			Messages: []protocol.Message{
+				&unencodableMessage{Value: make(chan int)},
+			},
+		}},
+		connectionHooks{onEntryResult: func() {
+			close(resultReady)
+			<-releaseResult
+		}},
+	)
+
+	select {
+	case <-resultReady:
+	case <-time.After(time.Second):
+		t.Fatal("conversation did not produce the output result")
+	}
+	require.NoError(t, conn.Close())
+	close(releaseResult)
+	err := <-conn.ErrorChan()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "output error")
+	require.ErrorContains(t, err, "unencodableMessage")
 }
 
 func TestConnectionErrorDeliveryAndClosure(t *testing.T) {
