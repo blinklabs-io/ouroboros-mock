@@ -323,12 +323,12 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 			}
 		case segment, ok = <-c.muxerRecvChan:
 		}
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		default:
+		}
 		if !ok {
-			select {
-			case <-c.doneChan:
-				return errConversationClosed
-			default:
-			}
 			return io.ErrUnexpectedEOF
 		}
 		if segment.GetProtocolId() != entry.ProtocolId {
@@ -436,12 +436,10 @@ func (c *Connection) processOutputEntry(entry ConversationEntryOutput) error {
 	default:
 	}
 	if err := c.muxer.Send(segment); err != nil {
-		if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
-			select {
-			case <-c.doneChan:
-				return errConversationClosed
-			default:
-			}
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		default:
 		}
 		return err
 	}
