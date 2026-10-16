@@ -77,10 +77,6 @@ copy_with_parents() {
 	done
 }
 
-echo "Syncing curated upstream fixtures into ${DEST_DIR}"
-rm -rf "${DEST_DIR}"
-mkdir -p "${DEST_DIR}"
-
 consensus_root=$(
 	stage_repo \
 		"ouroboros-consensus" \
@@ -109,6 +105,18 @@ node_root=$(
 		"${CARDANO_NODE_REVISION}" \
 		"${CARDANO_NODE_SRC:-}"
 )
+
+echo "Syncing curated upstream fixtures into ${DEST_DIR}"
+# E34 is an independently imported corpus, not produced by the four sources.
+if [[ -d "${DEST_DIR}/e34" ]]; then
+	cp -a "${DEST_DIR}/e34" "${WORK_DIR}/e34"
+fi
+rm -rf "${DEST_DIR}"
+mkdir -p "${DEST_DIR}"
+
+if [[ -d "${WORK_DIR}/e34" ]]; then
+	cp -a "${WORK_DIR}/e34" "${DEST_DIR}/e34"
+fi
 
 consensus_prefix="ouroboros-consensus-cardano/golden/cardano/CardanoNodeToNodeVersion2"
 consensus_files=(

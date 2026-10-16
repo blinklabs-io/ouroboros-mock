@@ -55,8 +55,8 @@ func (h *Harness) RunAllExecutions(t *testing.T) {
 	h.runMatchingExecutions(t, Filter{})
 }
 
-// RunMatchingExecutions executes every fixture that matches the supplied
-// filter and fails the test if the filter matches no fixtures.
+// RunMatchingExecutions executes every executable fixture matching the filter.
+// It fails the test if the filter matches no executable fixtures.
 func (h *Harness) RunMatchingExecutions(t *testing.T, filter Filter) {
 	t.Helper()
 	h.runMatchingExecutions(t, filter)
@@ -262,6 +262,10 @@ func executeFixture(
 		return 1, executeScriptFixture(fixture, fixtureMap)
 	case KindUnknown:
 		return 0, fmt.Errorf("unknown fixture kind for %s", fixture.RelPath)
+	case KindReferenceData:
+		return 0, fmt.Errorf(
+			"reference-data fixture is not executable: %s", fixture.RelPath,
+		)
 	default:
 		return 0, fmt.Errorf(
 			"unsupported fixture kind %q for %s",

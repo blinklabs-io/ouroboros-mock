@@ -174,6 +174,12 @@ func TestHarnessIntegration(t *testing.T) {
 
 func TestFixtureExecutionHarness(t *testing.T) {
 	harness := fixtures.NewHarness(fixtures.HarnessConfig{})
+	var expectedFixtureCount int
+	for _, fixture := range expectedFixturesFromManifest(t, harness) {
+		if fixture.Kind != fixtures.KindReferenceData {
+			expectedFixtureCount++
+		}
+	}
 
 	t.Run("RunAllExecutions", func(t *testing.T) {
 		harness.RunAllExecutions(t)
@@ -184,8 +190,17 @@ func TestFixtureExecutionHarness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RunAllExecutionsWithResults failed: %v", err)
 		}
+		if len(results) != expectedFixtureCount {
+			t.Fatalf(
+				"expected %d execution results, got %d",
+				expectedFixtureCount,
+				len(results),
+			)
+		}
 
+		var totalCases int
 		for _, result := range results {
+			totalCases += result.CaseCount
 			if !result.Success {
 				t.Fatalf(
 					"%s execution failed: %v",
@@ -193,6 +208,19 @@ func TestFixtureExecutionHarness(t *testing.T) {
 					result.Error,
 				)
 			}
+			if result.CaseCount == 0 {
+				t.Fatalf(
+					"%s reported zero execution cases",
+					result.Fixture.RelPath,
+				)
+			}
+		}
+		if totalCases <= len(results) {
+			t.Fatalf(
+				"expected multi-case execution coverage, got %d total cases for %d fixtures",
+				totalCases,
+				len(results),
+			)
 		}
 	})
 

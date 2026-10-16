@@ -101,10 +101,18 @@ validates governance metadata, and walks every translation corpus case.
 
 The `e34/` compatibility corpus and its reference sources are non-executable
 `KindReferenceData`. They remain in the complete embedded/manifest inventory
-but are excluded from execution APIs, not reported as successful executions.
+but are excluded from bulk execution APIs, not reported as successful executions.
 The integrity test checks every imported file against `SHA256SUMS`; downstream
 E34 tests consume the arithmetic and schedule rows directly. Go tests never
 implicitly execute the preserved Haskell generator or Python verifier.
+
+For explicit regeneration, use `python3 scripts/verify-e34-reference.py` with
+`--jormanager-root` pointing to the original checkout described in
+`upstream/e34/PROVENANCE.txt`, followed by the verifier's `--check` or `--refresh`,
+`--ledger-source`, and `--oracle` arguments. This entry point checks the pinned
+reference sources and dependency freeze before running the preserved verifier;
+a changed freeze cannot be used to refresh the corpus. The imported reference
+files remain byte-for-byte copies of their upstream sources.
 
 ### Validation ownership
 

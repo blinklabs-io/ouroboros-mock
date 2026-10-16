@@ -74,16 +74,21 @@ func TestE34EmbeddedIntegrity(t *testing.T) {
 
 	// Pin independent source identities, not just a self-consistent manifest.
 	pins := map[string]string{
-		"pallas/node-vectors.tsv":
-			"0c2009981a5c31c16fcb943783254351ec910b5ab23d168eda3cce18ec058a1c",
-		"jormanager/node-vectors.tsv":
-			"c0db31169d1811092ad4e56521e802765ee2014945c06f43746847bc96b416cd",
-		"reference/cabal.project.freeze":
-			"867325116626ee6841449f09866200528d83a9321faf2df721cd45ef04cd4a69",
+		"pallas/node-vectors.tsv":        "0c2009981a5c31c16fcb943783254351ec910b5ab23d168eda3cce18ec058a1c",
+		"jormanager/node-vectors.tsv":    "c0db31169d1811092ad4e56521e802765ee2014945c06f43746847bc96b416cd",
+		"reference/cabal.project.freeze": "867325116626ee6841449f09866200528d83a9321faf2df721cd45ef04cd4a69",
 	}
 	for name, digest := range pins {
 		payload, err := embedded.ReadFile(root + name)
 		require.NoError(t, err)
 		require.Equal(t, digest, fmt.Sprintf("%x", sha256.Sum256(payload)))
 	}
+}
+
+func TestE34ReferenceDataIsNotExecutable(t *testing.T) {
+	harness := fixtures.NewHarness(fixtures.HarnessConfig{})
+	result, err := harness.ExecuteFixture("e34/pallas/node-vectors.tsv")
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.ErrorContains(t, result.Error, "reference-data fixture is not executable")
 }
