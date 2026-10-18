@@ -92,7 +92,7 @@ func TestStakeLifecycleRegistersDelegatesAndRefunds(t *testing.T) {
 	require.True(t, ok, "%T", certs[1])
 	deregistration, ok := certs[2].(*lcommon.DeregistrationCertificate)
 	require.True(t, ok, "%T", certs[2])
-	require.Equal(t, int64(2_000_000), registration.Amount)
+	require.Equal(t, uint64(2_000_000), registration.Amount)
 	require.Equal(t, registration.Amount, deregistration.Amount)
 	require.Equal(t, registration.StakeCredential, *delegation.StakeCredential)
 	require.Equal(
