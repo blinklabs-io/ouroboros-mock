@@ -157,12 +157,13 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	}
 	u.nextID++
 	s := &session{up: u, id: u.nextID}
-	s.relay = &relay{events: u.events, session: s.id}
+	s.relay = newRelay(u.events, s.id)
 	u.wg.Add(1)
 	u.handshaking[conn] = struct{}{}
 	u.mu.Unlock()
 	defer func() {
 		if s.conn == nil {
+			s.relay.attach(nil)
 			u.wg.Done()
 		}
 	}()
@@ -199,6 +200,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	u.sessions[s.id] = s
 	s.relayElement = u.relays.PushBack(s)
 	u.mu.Unlock()
+	s.relay.attach(oConn.TxSubmission().Server)
 
 	u.events.publish(Event{Kind: EventSessionStarted, Session: s.id})
 	go s.watch()
