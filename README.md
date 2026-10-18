@@ -121,6 +121,25 @@ mockConn := ouroboros_mock.NewConnection(
 
 If the entry produces an error matching the `ExpectedError`, the conversation continues without failure. If the error does not match or no error occurs when expected, the mock will report an error.
 
+### Reactive Peers
+
+The `peer` package provides peers that answer a node over real Ouroboros
+mini-protocols instead of a scripted conversation:
+
+- `peer.Upstream` serves chain-sync and block-fetch from a fixture chain and
+  collects transactions the node relays to it. `SwitchFork` moves it to a
+  competing branch: clients are rolled back to the intersection and then sent
+  the new branch.
+- `peer.Follower` follows a node with chain-sync and block-fetch and records
+  the headers, blocks and rollbacks it was served.
+- `peer.TxPeer` offers fixture transactions through tx-submission and records
+  what the node requests.
+
+Each peer publishes events on a bounded, ordered channel. A full queue drops
+new events without stalling protocols; `DroppedEvents()` reports the number
+discarded. Tests that require every event must consume the channel as protocols
+run and check that `DroppedEvents()` is zero.
+
 ### Certificate Fixtures
 
 The `certificates` package builds every certificate type through Conway.
@@ -136,6 +155,16 @@ within a Go release, including both MIR targets. Pool reward accounts default
 to testnet; `WithNetwork` selects their network ID. `StakeLifecycle`,
 `PoolLifecycle`, and `DRepLifecycle` build related registration, delegation or
 update, and retirement or deregistration sequences.
+
+### Ledger State Fixtures
+
+The `ledger` package's `NewLedgerStateBuilder` configures governance-purpose
+roots with `WithGovPurposeRoots` (a lookup callback) or
+`WithGovPurposeRootsValue` (a static value). A nonnil empty
+`common.GovPurposeRoots` explicitly means no action of any purpose has been
+enacted. An unconfigured builder or nil static value returns an error rather
+than evidence of known empty governance state. A configured callback
+takes precedence over the static value and preserves lookup errors.
 
 ## Command line listener
 

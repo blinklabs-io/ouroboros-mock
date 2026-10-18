@@ -20,6 +20,7 @@ GO_LDFLAGS=-ldflags "-s -w"
 	format \
 	golines \
 	test \
+	test-fixture-tools \
 	download-blueprint-testdata \
 	prepare-blueprint-testdata \
 	download-upstream-fixtures \
@@ -43,8 +44,11 @@ format: mod-tidy
 golines:
 	golines -w --ignore-generated --chain-split-dots --max-len=80 --reformat-tags .
 
-test: prepare-blueprint-testdata mod-tidy
+test: test-fixture-tools prepare-blueprint-testdata mod-tidy
 	go test -v -race ./...
+
+test-fixture-tools:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_e34_tools.py'
 
 # Build our program binaries
 # Depends on GO_FILES to determine when rebuild is needed

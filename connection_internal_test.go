@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/muxer"
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
 	"github.com/stretchr/testify/require"
@@ -101,6 +102,30 @@ func TestConnectionErrorDeliverySurvivesConcurrentClose(t *testing.T) {
 		wg.Wait()
 		conn.closeErrorChan()
 	}
+}
+
+func TestProcessOutputRejectsOversizedPayload(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	testMuxer := muxer.New(server)
+	defer func() {
+		testMuxer.Stop()
+		for range testMuxer.ErrorChan() {
+		}
+	}()
+
+	msg := &protocol.MessageBase{}
+	msg.SetCbor(make([]byte, muxer.SegmentMaxPayloadLength+1))
+
+	err := (&Connection{muxer: testMuxer}).processOutputEntry(ConversationEntryOutput{
+		Messages: []protocol.Message{msg},
+	})
+
+	require.EqualError(
+		t,
+		err,
+		"output payload length 65536 exceeds muxer segment limit 65535",
+	)
 }
 
 func TestCloseInterruptsConversationSleep(t *testing.T) {

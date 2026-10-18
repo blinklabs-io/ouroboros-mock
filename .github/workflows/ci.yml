@@ -13,15 +13,19 @@ on:
 jobs:
   golangci-lint:
     uses: blinklabs-io/actions/.github/workflows/reuseable-golangci-lint.yml@main
+    permissions:
+      contents: read
   nilaway:
     needs: [golangci-lint]
     uses: blinklabs-io/actions/.github/workflows/reuseable-nilaway.yml@main
+    permissions:
+      contents: read
     with:
       include-pkgs: github.com/blinklabs-io/ouroboros-mock
   publish:
     needs: [nilaway]
     if: github.event_name == 'push'
-    uses: blinklabs-io/actions/.github/workflows/reuseable-go-library-release.yml@main
+    uses: blinklabs-io/actions/.github/workflows/reuseable-go-library-release.yml@d3aa875070b18acdcb31256100558d44c16b512f
     permissions:
       attestations: write
       contents: write

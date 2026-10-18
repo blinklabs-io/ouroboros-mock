@@ -191,6 +191,9 @@ type DRepDelegationFunc func(lcommon.Credential) (*lcommon.Drep, error)
 // ConstitutionFunc is a callback for constitution lookups
 type ConstitutionFunc func() (*lcommon.Constitution, error)
 
+// GovPurposeRootsFunc is a callback for governance-purpose root lookups.
+type GovPurposeRootsFunc func() (*lcommon.GovPurposeRoots, error)
+
 // TreasuryValueFunc is a callback for treasury value lookups
 type TreasuryValueFunc func() (uint64, error)
 
@@ -239,12 +242,14 @@ type MockLedgerState struct {
 	DRepRegistrationCallback             DRepRegistrationFunc
 	DRepDelegationCallback               DRepDelegationFunc
 	ConstitutionCallback                 ConstitutionFunc
+	GovPurposeRootsCallback              GovPurposeRootsFunc
 	TreasuryValueCallback                TreasuryValueFunc
 	GovActionByIdCallback                GovActionByIdFunc
 	committeeMembers                     []lcommon.CommitteeMember
 	drepRegistrations                    []lcommon.DRepRegistration
 	govActions                           map[string]*lcommon.GovActionState // "hex(txhash)#index" -> state
 	constitution                         *lcommon.Constitution              // static constitution value
+	govPurposeRoots                      *lcommon.GovPurposeRoots
 	// ProposedCommitteeMembers tracks committee members proposed in pending
 	// UpdateCommittee governance actions. Per Cardano ledger spec, AUTH_CC
 	// should succeed if the member is either a current member OR proposed
@@ -642,6 +647,18 @@ func (ls *MockLedgerState) Constitution() (*lcommon.Constitution, error) {
 	return ls.constitution, nil
 }
 
+// GovPurposeRoots returns explicitly configured governance-purpose roots.
+// Unconfigured state is unavailable, not evidence of known empty roots.
+func (ls *MockLedgerState) GovPurposeRoots() (*lcommon.GovPurposeRoots, error) {
+	if ls.GovPurposeRootsCallback != nil {
+		return ls.GovPurposeRootsCallback()
+	}
+	if ls.govPurposeRoots == nil {
+		return nil, errors.New("governance purpose roots unavailable")
+	}
+	return ls.govPurposeRoots, nil
+}
+
 // TreasuryValue returns the current treasury value
 func (ls *MockLedgerState) TreasuryValue() (uint64, error) {
 	if ls.TreasuryValueCallback != nil {
@@ -1026,6 +1043,23 @@ func (b *LedgerStateBuilder) WithConstitutionValue(
 	constitution *lcommon.Constitution,
 ) *LedgerStateBuilder {
 	b.state.constitution = constitution
+	return b
+}
+
+// WithGovPurposeRoots sets the governance-purpose roots lookup callback.
+func (b *LedgerStateBuilder) WithGovPurposeRoots(
+	fn GovPurposeRootsFunc,
+) *LedgerStateBuilder {
+	b.state.GovPurposeRootsCallback = fn
+	return b
+}
+
+// WithGovPurposeRootsValue sets known governance-purpose roots. A non-nil
+// empty value explicitly records that no purpose has an enacted root.
+func (b *LedgerStateBuilder) WithGovPurposeRootsValue(
+	roots *lcommon.GovPurposeRoots,
+) *LedgerStateBuilder {
+	b.state.govPurposeRoots = roots
 	return b
 }
 
