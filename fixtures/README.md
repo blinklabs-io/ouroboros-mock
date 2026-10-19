@@ -33,6 +33,34 @@ Current sources:
   anchor fixtures, plus paired PlutusV1 hex and binary script captures
 - `cardano-node`: testnet genesis spec fixtures
 
+## Tachys leader vectors
+
+`LoadTachysLeaderVectors` returns the embedded CIP-0177 leader selection
+corpus. It records the pinned specification revision, exact nonce and slot
+encoding, pool order, total stake, hash input, sample, and expected leader.
+The corpus includes direct samples on both sides of cumulative interval
+boundaries and invalid distribution, nonce, and sample cases.
+
+Regenerate it with:
+
+```bash
+python3 scripts/generate_tachys_vectors.py
+```
+
+The generator uses only Python's standard library and calculates its expected
+results independently from downstream Go implementations.
+
+`NewTachysSignedHeaderFixtures` returns Babbage or Conway blocks with valid
+VRF, KES, operational certificate, and registered VRF key material. The
+scheduled fixture uses a deterministic one-pool distribution and its VRF
+output fails the recorded low Praos threshold. The set also includes a
+different validly signed producer and isolated invalid VRF, KES, and
+operational certificate inputs.
+
+`NewTachysChainScenario` returns a connected Babbage-to-Conway chain, a
+competing Conway branch from its rollback point, and two epoch records with
+different nonces and stake distributions.
+
 Intentional exclusions:
 
 - Cardano Blueprint conformance vectors are imported into `conformance/testdata/`
