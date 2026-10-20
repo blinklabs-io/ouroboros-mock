@@ -112,7 +112,10 @@ def generate() -> dict:
             },
             {
                 "name": "zero pool stake",
-                "pools": [{"pool_id": pool_id(1), "stake": 0}],
+                "pools": [
+                    {"pool_id": pool_id(1), "stake": 1},
+                    {"pool_id": pool_id(2), "stake": 0},
+                ],
                 "total_stake": 1,
             },
             {

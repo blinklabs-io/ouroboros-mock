@@ -56,14 +56,25 @@ type TachysSignedHeaderFixture struct {
 }
 
 // TachysSignedHeaderFixtures groups a scheduled producer, a different validly
-// signed producer, and single-fault cryptographic validation inputs.
+// signed producer, and single-fault cryptographic fixtures. Each invalid
+// fixture carries the corrupted block and the input derived from it, and
+// differs from Scheduled in exactly one cryptographic field.
 type TachysSignedHeaderFixtures struct {
 	Scheduled     TachysSignedHeaderFixture
 	WrongProducer TachysSignedHeaderFixture
-	InvalidVRF    consensus.ValidateHeaderInput
-	InvalidKES    consensus.ValidateHeaderInput
-	InvalidOpCert consensus.ValidateHeaderInput
+	InvalidVRF    TachysSignedHeaderFixture
+	InvalidKES    TachysSignedHeaderFixture
+	InvalidOpCert TachysSignedHeaderFixture
 }
+
+type tachysFault int
+
+const (
+	tachysFaultNone tachysFault = iota
+	tachysFaultVRF
+	tachysFaultKES
+	tachysFaultOpCert
+)
 
 // NewTachysSignedHeaderFixtures builds deterministic signed fixtures for the
 // Babbage or Conway era. Scheduled carries the pool ID for a one-pool Tachys
@@ -77,20 +88,35 @@ func NewTachysSignedHeaderFixtures(
 			"tachys signed fixtures require Babbage or Conway",
 		)
 	}
-	scheduled, err := buildTachysSignedHeaderFixture(era, "scheduled")
+	build := func(
+		identity string,
+		fault tachysFault,
+	) (TachysSignedHeaderFixture, error) {
+		return buildTachysSignedHeaderFixture(era, identity, fault)
+	}
+	// The "scheduled-a" identity is chosen so Praos at the mainnet active slot
+	// coefficient of 1/20 rejects this issuer's slot in both eras; changing the
+	// label can flip that and breaks the fixture's premise.
+	scheduled, err := build("scheduled-a", tachysFaultNone)
 	if err != nil {
 		return TachysSignedHeaderFixtures{}, err
 	}
-	wrong, err := buildTachysSignedHeaderFixture(era, "wrong-producer")
+	wrong, err := build("wrong-producer", tachysFaultNone)
 	if err != nil {
 		return TachysSignedHeaderFixtures{}, err
 	}
-	invalidVRF := cloneTachysValidateInput(scheduled.Input)
-	invalidVRF.VrfProof[0] ^= 0xff
-	invalidKES := cloneTachysValidateInput(scheduled.Input)
-	invalidKES.KesSignature[0] ^= 0xff
-	invalidOpCert := cloneTachysValidateInput(scheduled.Input)
-	invalidOpCert.OpCertSignature[0] ^= 0xff
+	invalidVRF, err := build("scheduled-a", tachysFaultVRF)
+	if err != nil {
+		return TachysSignedHeaderFixtures{}, err
+	}
+	invalidKES, err := build("scheduled-a", tachysFaultKES)
+	if err != nil {
+		return TachysSignedHeaderFixtures{}, err
+	}
+	invalidOpCert, err := build("scheduled-a", tachysFaultOpCert)
+	if err != nil {
+		return TachysSignedHeaderFixtures{}, err
+	}
 	return TachysSignedHeaderFixtures{
 		Scheduled:     scheduled,
 		WrongProducer: wrong,
@@ -103,6 +129,7 @@ func NewTachysSignedHeaderFixtures(
 func buildTachysSignedHeaderFixture(
 	era common.Era,
 	identity string,
+	fault tachysFault,
 ) (TachysSignedHeaderFixture, error) {
 	shape := eraBlockShapes[era.Id]
 	bodies, err := cbor.Encode([]cbor.RawMessage{})
@@ -111,11 +138,17 @@ func buildTachysSignedHeaderFixture(
 	}
 	witnesses, err := cbor.Encode([]cbor.RawMessage{})
 	if err != nil {
-		return TachysSignedHeaderFixture{}, fmt.Errorf("encode witnesses: %w", err)
+		return TachysSignedHeaderFixture{}, fmt.Errorf(
+			"encode witnesses: %w",
+			err,
+		)
 	}
 	metadata, err := cbor.Encode(map[uint]cbor.RawMessage{})
 	if err != nil {
-		return TachysSignedHeaderFixture{}, fmt.Errorf("encode metadata: %w", err)
+		return TachysSignedHeaderFixture{}, fmt.Errorf(
+			"encode metadata: %w",
+			err,
+		)
 	}
 	invalid := []byte{0x80}
 	bodyParts := [][]byte{bodies, witnesses, metadata, invalid}
@@ -193,19 +226,54 @@ func buildTachysSignedHeaderFixture(
 			Minor: header.Body.ProtoMinor,
 		},
 	}
+	// Body faults change the signed bytes, so the KES signature is recomputed
+	// to keep each fixture a single fault.
+	signature := append([]byte(nil), header.Signature...)
+	switch fault {
+	case tachysFaultVRF:
+		typedBody.VrfResult.Proof[0] ^= 0xff
+	case tachysFaultOpCert:
+		typedBody.OpCert.Signature[0] ^= 0xff
+	case tachysFaultNone, tachysFaultKES:
+	}
+	if fault == tachysFaultVRF || fault == tachysFaultOpCert {
+		faultedBody, err := cbor.Encode(typedBody)
+		if err != nil {
+			return TachysSignedHeaderFixture{}, err
+		}
+		signature, err = kesSigner.Sign(faultedBody)
+		if err != nil {
+			return TachysSignedHeaderFixture{}, err
+		}
+	}
+	if fault == tachysFaultKES {
+		signature[0] ^= 0xff
+	}
 	typedHeader := babbage.BabbageBlockHeader{
 		Body:      typedBody,
-		Signature: append([]byte(nil), header.Signature...),
+		Signature: signature,
 	}
 	headerCbor, err := cbor.Encode(typedHeader)
 	if err != nil {
-		return TachysSignedHeaderFixture{}, fmt.Errorf("encode signed header: %w", err)
+		return TachysSignedHeaderFixture{}, fmt.Errorf(
+			"encode signed header: %w",
+			err,
+		)
 	}
-	fields := []cbor.RawMessage{headerCbor, bodies, witnesses, metadata, invalid}
+	fields := []cbor.RawMessage{
+		headerCbor,
+		bodies,
+		witnesses,
+		metadata,
+		invalid,
+	}
 	fixtureBuilder := NewBlockBuilder(era)
-	block, err := fixtureBuilder.decodeEncoded(fields, func(data []byte) (ledger.Block, error) {
-		return shape.decode(data, common.VerifyConfig{})
-	})
+	block, err := fixtureBuilder.decodeEncoded(
+		fields,
+		func(data []byte) (ledger.Block, error) {
+			return shape.decode(data, common.VerifyConfig{})
+		},
+	)
 	if err != nil {
 		return TachysSignedHeaderFixture{}, err
 	}
@@ -219,30 +287,30 @@ func buildTachysSignedHeaderFixture(
 		PrevHash:             prevHash[:],
 		IssuerVkey:           append([]byte(nil), coldPublic...),
 		VrfKey:               append([]byte(nil), header.Body.VrfKey...),
-		VrfProof:             append([]byte(nil), header.Body.VrfProof...),
+		VrfProof:             append([]byte(nil), typedBody.VrfResult.Proof...),
 		VrfOutput:            append([]byte(nil), header.Body.VrfOutput...),
-		KesSignature:         append([]byte(nil), header.Signature...),
+		KesSignature:         append([]byte(nil), signature...),
 		HeaderBodyCbor:       bodyCbor,
 		OpCertHotVkey:        append([]byte(nil), kesPublic...),
 		OpCertSequenceNumber: 0,
 		OpCertKesPeriod:      0,
-		OpCertSignature:      append([]byte(nil), opCertSignature...),
-		PrevSlot:             slot - 1,
-		PrevBlockNumber:      0,
-		PrevHeaderHash:       prevHash[:],
-		EpochNonce:           epochNonce[:],
-		PoolStake:            1,
-		TotalStake:           1,
-		RegisteredVrfKeyHash: common.Blake2b256Hash(vrfSigner.PublicKey()).Bytes(),
+		OpCertSignature: append(
+			[]byte(nil),
+			typedBody.OpCert.Signature...),
+		PrevSlot:        slot - 1,
+		PrevBlockNumber: 0,
+		PrevHeaderHash:  prevHash[:],
+		EpochNonce:      epochNonce[:],
+		PoolStake:       1,
+		TotalStake:      1,
+		RegisteredVrfKeyHash: common.Blake2b256Hash(vrfSigner.PublicKey()).
+			Bytes(),
 	}
 	praosPassed, err := consensus.IsSlotLeaderFromComponentsWithMode(
 		input.VrfOutput,
 		1,
 		1,
-		new(big.Rat).SetFrac(
-			big.NewInt(1),
-			new(big.Int).SetUint64(10_000_000_000_000_000_000),
-		),
+		big.NewRat(1, 20),
 		consensus.ConsensusModeCPraos,
 	)
 	if err != nil {
@@ -255,25 +323,4 @@ func buildTachysSignedHeaderFixture(
 		EpochNonce:  epochNonce,
 		PraosPassed: praosPassed,
 	}, nil
-}
-
-func cloneTachysValidateInput(
-	input consensus.ValidateHeaderInput,
-) consensus.ValidateHeaderInput {
-	result := input
-	result.PrevHash = append([]byte(nil), input.PrevHash...)
-	result.IssuerVkey = append([]byte(nil), input.IssuerVkey...)
-	result.VrfKey = append([]byte(nil), input.VrfKey...)
-	result.VrfProof = append([]byte(nil), input.VrfProof...)
-	result.VrfOutput = append([]byte(nil), input.VrfOutput...)
-	result.KesSignature = append([]byte(nil), input.KesSignature...)
-	result.HeaderBodyCbor = append([]byte(nil), input.HeaderBodyCbor...)
-	result.OpCertHotVkey = append([]byte(nil), input.OpCertHotVkey...)
-	result.OpCertSignature = append([]byte(nil), input.OpCertSignature...)
-	result.PrevHeaderHash = append([]byte(nil), input.PrevHeaderHash...)
-	result.EpochNonce = append([]byte(nil), input.EpochNonce...)
-	result.RegisteredVrfKeyHash = append(
-		[]byte(nil), input.RegisteredVrfKeyHash...,
-	)
-	return result
 }

@@ -66,15 +66,54 @@ func TestTachysSignedHeaderFixtures(t *testing.T) {
 		}
 		validator := consensus.NewHeaderValidator(config)
 		require.True(t, validator.ValidateHeader(&set.Scheduled.Input).Valid)
-		require.True(t, validator.ValidateHeader(&set.WrongProducer.Input).Valid)
-		invalid := []*consensus.ValidateHeaderInput{
-			&set.InvalidVRF,
-			&set.InvalidKES,
-			&set.InvalidOpCert,
+		require.True(
+			t,
+			validator.ValidateHeader(&set.WrongProducer.Input).Valid,
+		)
+		for _, fixture := range []fixtures.TachysSignedHeaderFixture{
+			set.InvalidVRF,
+			set.InvalidKES,
+			set.InvalidOpCert,
+		} {
+			require.Equal(t, era, fixture.Block.Era())
+			require.False(t, validator.ValidateHeader(&fixture.Input).Valid)
 		}
-		for _, input := range invalid {
-			require.False(t, validator.ValidateHeader(input).Valid)
+		require.NotEqual(
+			t, set.Scheduled.Input.VrfProof, set.InvalidVRF.Input.VrfProof,
+		)
+		require.NotEqual(
+			t,
+			set.Scheduled.Input.KesSignature,
+			set.InvalidKES.Input.KesSignature,
+		)
+		require.NotEqual(
+			t,
+			set.Scheduled.Input.OpCertSignature,
+			set.InvalidOpCert.Input.OpCertSignature,
+		)
+		require.NotEqual(
+			t,
+			set.Scheduled.Block.Hash(),
+			set.InvalidVRF.Block.Hash(),
+		)
+		require.NotEqual(
+			t,
+			set.Scheduled.Block.Hash(),
+			set.InvalidKES.Block.Hash(),
+		)
+		require.NotEqual(
+			t, set.Scheduled.Block.Hash(), set.InvalidOpCert.Block.Hash(),
+		)
+
+		praosConfig := consensus.NetworkConfig{
+			ActiveSlotCoeff:   common.GenesisRat{Rat: big.NewRat(1, 20)},
+			SlotsPerKESPeriod: 129_600,
+			MaxKESEvolutions:  62,
 		}
+		praosValidator := consensus.NewHeaderValidator(praosConfig)
+		require.False(
+			t, praosValidator.ValidateHeader(&set.Scheduled.Input).Valid,
+		)
 	}
 }
 
