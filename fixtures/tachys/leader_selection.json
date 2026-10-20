@@ -1,0 +1,197 @@
+{
+  "format_version": 1,
+  "specification": {
+    "name": "CIP-0177",
+    "revision": "86b89208d3b2aabb5dcc5b778dfbe09096b4e114",
+    "source": "https://github.com/cardano-foundation/CIPs/blob/86b89208d3b2aabb5dcc5b778dfbe09096b4e114/CIP-0177/README.md"
+  },
+  "provenance": {
+    "generator": "scripts/generate_tachys_vectors.py",
+    "method": "independent Python standard-library calculation"
+  },
+  "encoding": {
+    "nonce": "32 raw bytes",
+    "slot": "absolute uint64 big-endian",
+    "hash_input": "nonce || slot",
+    "hash": "BLAKE2b-256",
+    "sample": "unsigned big-endian integer over [0, 2^256)",
+    "pool_order": "lexicographic raw 28-byte pool ID",
+    "intervals": "inclusive lower bound, exclusive upper bound"
+  },
+  "distribution": {
+    "pools": [
+      {
+        "pool_id": "01010101010101010101010101010101010101010101010101010101",
+        "stake": 1
+      },
+      {
+        "pool_id": "02020202020202020202020202020202020202020202020202020202",
+        "stake": 2
+      },
+      {
+        "pool_id": "03030303030303030303030303030303030303030303030303030303",
+        "stake": 3
+      }
+    ],
+    "total_stake": 6
+  },
+  "ordering_cases": [
+    {
+      "name": "unsorted input uses canonical pool ID order",
+      "pools": [
+        {
+          "pool_id": "03030303030303030303030303030303030303030303030303030303",
+          "stake": 3
+        },
+        {
+          "pool_id": "01010101010101010101010101010101010101010101010101010101",
+          "stake": 1
+        },
+        {
+          "pool_id": "02020202020202020202020202020202020202020202020202020202",
+          "stake": 2
+        }
+      ],
+      "expected_pool_ids": [
+        "01010101010101010101010101010101010101010101010101010101",
+        "02020202020202020202020202020202020202020202020202020202",
+        "03030303030303030303030303030303030303030303030303030303"
+      ]
+    }
+  ],
+  "selection_cases": [
+    {
+      "epoch_nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "slot": 0,
+      "hash_input": "00000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "sample": "4a1931803561f431decab002e7425f0a8531d5e456a1a47fd9998a2530c0f800",
+      "leader": "02020202020202020202020202020202020202020202020202020202"
+    },
+    {
+      "epoch_nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "slot": 1,
+      "hash_input": "00000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "sample": "53ab70c9205987ccac8cec0d5793acbeb1a810051e8dfb45bd579d13b8b2bba8",
+      "leader": "02020202020202020202020202020202020202020202020202020202"
+    },
+    {
+      "epoch_nonce": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "slot": 4492800,
+      "hash_input": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a50000000000448e00",
+      "sample": "078c16c737011e1d5e9122ddefad3d733d624ccad3ce84e409303b595fa59a28",
+      "leader": "01010101010101010101010101010101010101010101010101010101"
+    },
+    {
+      "epoch_nonce": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "slot": 18446744073709551615,
+      "hash_input": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "sample": "6002773786391ba081a87d2bf0139514627f79b1b8a4696ad7bee135e1646680",
+      "leader": "02020202020202020202020202020202020202020202020202020202"
+    }
+  ],
+  "boundary_cases": [
+    {
+      "name": "zero",
+      "sample": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leader": "01010101010101010101010101010101010101010101010101010101"
+    },
+    {
+      "name": "first interval last sample",
+      "sample": "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "leader": "01010101010101010101010101010101010101010101010101010101"
+    },
+    {
+      "name": "second interval first sample",
+      "sample": "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+      "leader": "02020202020202020202020202020202020202020202020202020202"
+    },
+    {
+      "name": "second interval last sample",
+      "sample": "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "leader": "02020202020202020202020202020202020202020202020202020202"
+    },
+    {
+      "name": "third interval first sample",
+      "sample": "8000000000000000000000000000000000000000000000000000000000000000",
+      "leader": "03030303030303030303030303030303030303030303030303030303"
+    },
+    {
+      "name": "maximum sample",
+      "sample": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "leader": "03030303030303030303030303030303030303030303030303030303"
+    }
+  ],
+  "invalid_cases": [
+    {
+      "name": "empty distribution",
+      "pools": [],
+      "total_stake": 0
+    },
+    {
+      "name": "duplicate pool ID",
+      "pools": [
+        {
+          "pool_id": "01010101010101010101010101010101010101010101010101010101",
+          "stake": 1
+        },
+        {
+          "pool_id": "01010101010101010101010101010101010101010101010101010101",
+          "stake": 1
+        }
+      ],
+      "total_stake": 2
+    },
+    {
+      "name": "zero pool stake",
+      "pools": [
+        {
+          "pool_id": "01010101010101010101010101010101010101010101010101010101",
+          "stake": 1
+        },
+        {
+          "pool_id": "02020202020202020202020202020202020202020202020202020202",
+          "stake": 0
+        }
+      ],
+      "total_stake": 1
+    },
+    {
+      "name": "inconsistent total",
+      "pools": [
+        {
+          "pool_id": "01010101010101010101010101010101010101010101010101010101",
+          "stake": 1
+        }
+      ],
+      "total_stake": 2
+    },
+    {
+      "name": "stake sum overflow",
+      "pools": [
+        {
+          "pool_id": "01010101010101010101010101010101010101010101010101010101",
+          "stake": 18446744073709551615
+        },
+        {
+          "pool_id": "02020202020202020202020202020202020202020202020202020202",
+          "stake": 1
+        }
+      ],
+      "total_stake": 18446744073709551615
+    },
+    {
+      "name": "short nonce",
+      "epoch_nonce": "00000000000000000000000000000000000000000000000000000000000000",
+      "slot": 0
+    },
+    {
+      "name": "long nonce",
+      "epoch_nonce": "000000000000000000000000000000000000000000000000000000000000000000",
+      "slot": 0
+    },
+    {
+      "name": "short sample",
+      "sample": "00000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}
