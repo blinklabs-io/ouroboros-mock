@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/blinklabs-io/gouroboros/connection"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 )
@@ -70,18 +71,45 @@ type relay struct {
 	events  *eventStream
 	session uint64
 
+	// ready is closed by attach once the connection, and so its server, is
+	// known. OnInit carries only a connection id, and a client's Init can
+	// arrive before the handshake has returned the connection.
+	ready      chan struct{}
+	attachOnce sync.Once
+	server     *txsubmission.Server
+
 	mu       sync.Mutex
 	received []Tx
 	bytes    int
 }
 
+func newRelay(events *eventStream, session uint64) *relay {
+	return &relay{
+		events:  events,
+		session: session,
+		ready:   make(chan struct{}),
+	}
+}
+
+// attach supplies the server the relay will drive. A nil server means the
+// connection never came up, which releases a waiting run without starting it.
+func (r *relay) attach(server *txsubmission.Server) {
+	r.attachOnce.Do(func() {
+		r.server = server
+		close(r.ready)
+	})
+}
+
 func (r *relay) config() txsubmission.Config {
 	return txsubmission.Config{
-		InitFunc: func(ctx txsubmission.CallbackContext) error {
-			go r.run(ctx.Server)
-			return nil
+		OnInit: func(connection.ConnectionId) {
+			go func() {
+				<-r.ready
+				if r.server != nil {
+					r.run(r.server)
+				}
+			}()
 		},
-		DoneFunc: func(txsubmission.CallbackContext) error { return nil },
 	}
 }
 

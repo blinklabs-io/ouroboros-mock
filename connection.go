@@ -39,6 +39,16 @@ const (
 	ProtocolRoleServer ProtocolRole = 2 // Server protocol role
 )
 
+var errConversationClosed = errors.New("conversation closed")
+
+type outputSendError struct {
+	err error
+}
+
+func (e outputSendError) Error() string { return e.err.Error() }
+
+func (e outputSendError) Unwrap() error { return e.err }
+
 // Connection mocks an Ouroboros connection
 type Connection struct {
 	mockConn      net.Conn
@@ -50,10 +60,17 @@ type Connection struct {
 	onceClose     sync.Once
 	onceInput     sync.Once
 	inputAccepted chan struct{}
+	hooks         connectionHooks
 	errorChan     chan error
 	errorMu       sync.Mutex
 	errorClosed   bool
 	inputBuffers  map[uint16]*bytes.Buffer
+}
+
+type connectionHooks struct {
+	onInputWait   func()
+	onOutputWait  func()
+	onEntryResult func()
 }
 
 // NewConnection returns a new Connection with the provided conversation entries
@@ -61,10 +78,19 @@ func NewConnection(
 	protocolRole ProtocolRole,
 	conversation []ConversationEntry,
 ) net.Conn {
+	return newConnection(protocolRole, conversation, connectionHooks{})
+}
+
+func newConnection(
+	protocolRole ProtocolRole,
+	conversation []ConversationEntry,
+	hooks connectionHooks,
+) *Connection {
 	c := &Connection{
 		conversation:  conversation,
 		doneChan:      make(chan any),
 		inputAccepted: make(chan struct{}),
+		hooks:         hooks,
 		errorChan:     make(chan error, 1),
 		inputBuffers:  make(map[uint16]*bytes.Buffer),
 	}
@@ -196,6 +222,12 @@ func (c *Connection) asyncLoop() {
 		switch entry := entry.(type) {
 		case ConversationEntryInput:
 			err := c.processInputEntry(entry)
+			if c.hooks.onEntryResult != nil {
+				c.hooks.onEntryResult()
+			}
+			if errors.Is(err, errConversationClosed) {
+				return
+			}
 			if entry.ExpectedError != "" {
 				if err == nil {
 					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))
@@ -225,7 +257,24 @@ func (c *Connection) asyncLoop() {
 				c.onceInput.Do(func() { close(c.inputAccepted) })
 			}
 		case ConversationEntryOutput:
+			if c.hooks.onOutputWait != nil {
+				c.hooks.onOutputWait()
+			}
 			err := c.processOutputEntry(entry)
+			if c.hooks.onEntryResult != nil {
+				c.hooks.onEntryResult()
+			}
+			if errors.Is(err, errConversationClosed) {
+				return
+			}
+			var sendErr outputSendError
+			if errors.As(err, &sendErr) {
+				select {
+				case <-c.doneChan:
+					return
+				default:
+				}
+			}
 			if entry.ExpectedError != "" {
 				if err == nil {
 					c.sendError(fmt.Errorf("expected error %q but none occurred", entry.ExpectedError))
@@ -276,7 +325,25 @@ func (c *Connection) processInputEntry(entry ConversationEntryInput) error {
 	buf := c.inputBuffers[entry.ProtocolId]
 	if buf.Len() == 0 {
 		// Wait for segment to be received from muxer
-		segment, ok := <-c.muxerRecvChan
+		if c.hooks.onInputWait != nil {
+			c.hooks.onInputWait()
+		}
+		var segment *muxer.Segment
+		var ok bool
+		select {
+		case <-c.doneChan:
+			select {
+			case segment, ok = <-c.muxerRecvChan:
+			default:
+				return errConversationClosed
+			}
+		case segment, ok = <-c.muxerRecvChan:
+		}
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		default:
+		}
 		if !ok {
 			return io.ErrUnexpectedEOF
 		}
@@ -379,8 +446,18 @@ func (c *Connection) processOutputEntry(entry ConversationEntryOutput) error {
 			muxer.SegmentMaxPayloadLength,
 		)
 	}
+	select {
+	case <-c.doneChan:
+		return errConversationClosed
+	default:
+	}
 	if err := c.muxer.Send(segment); err != nil {
-		return err
+		select {
+		case <-c.doneChan:
+			return errConversationClosed
+		default:
+		}
+		return outputSendError{err: err}
 	}
 	return nil
 }

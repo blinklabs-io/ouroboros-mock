@@ -671,7 +671,10 @@ func (w listeningWriter) Write(
 }
 
 func TestRunUnixListenerCleansOwnedSocket(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "demo.sock")
+	socketDir, err := os.MkdirTemp("", "om")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+	socket := filepath.Join(socketDir, "demo.sock")
 	config := filepath.Join(t.TempDir(), "demo.yaml")
 	text := "listener:\n  network: unix\n  address: " + socket + "\nentries:\n  - sleep: 1h\n"
 	require.NoError(t, os.WriteFile(config, []byte(text), 0o600))

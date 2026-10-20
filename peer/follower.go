@@ -52,8 +52,8 @@ type Follower struct {
 	cfg    FollowerConfig
 
 	mu sync.Mutex
-	// base is the intersection the node chose. It is not in chain, since the
-	// node never announces it, but it is a valid rollback target.
+	// base is the latest intersection or unseen rollback ancestor. It is not in
+	// chain, since the node never announces it, but it is a valid rollback target.
 	base pcommon.Point
 	// chain is the followed chain after applying rollbacks.
 	chain     []pcommon.Point
@@ -227,8 +227,12 @@ func (f *Follower) rollBackward(
 		}
 	}
 	if keep < 0 {
-		f.mu.Unlock()
-		return fmt.Errorf("rollback to unknown point at slot %d", point.Slot)
+		if point.Slot >= f.base.Slot {
+			f.mu.Unlock()
+			return fmt.Errorf("rollback to unknown point at slot %d", point.Slot)
+		}
+		f.base = point
+		keep = 0
 	}
 	f.chain = f.chain[:keep]
 	f.rollbacks = append(f.rollbacks, point)
