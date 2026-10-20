@@ -10,6 +10,8 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ouroboros-mock-fixtures.XXXXXX")
 
 OUROBOROS_CONSENSUS_REVISION=${OUROBOROS_CONSENSUS_REVISION:-259e00754b326a1e645b94c084815aab7f3797c2}
 CARDANO_LEDGER_REVISION=${CARDANO_LEDGER_REVISION:-82a4485f4b34da4752538cda7504aef346b9953b}
+CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION:-6d57bb507f256666695d94ea2f2ba1cf52f059ae}
+CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC:-${CARDANO_LEDGER_SRC:-}}
 CARDANO_API_REVISION=${CARDANO_API_REVISION:-c57b8893544aca0855b70bc07330005b7b514054}
 CARDANO_NODE_REVISION=${CARDANO_NODE_REVISION:-126efd54008b8f0f33b236a2fab43a16a1f3b4f1}
 
@@ -91,6 +93,11 @@ ledger_root=$(
 		"${CARDANO_LEDGER_REVISION}" \
 		"${CARDANO_LEDGER_SRC:-}"
 )
+dijkstra_ledger_golden_root=$(stage_repo \
+	"cardano-ledger" \
+	"https://github.com/IntersectMBO/cardano-ledger" \
+	"${CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION}" \
+	"${CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC}")
 api_root=$(
 	stage_repo \
 		"cardano-api" \
@@ -166,6 +173,9 @@ for era in alonzo babbage conway dijkstra; do
 done
 
 copy_with_parents "${ledger_root}" "cardano-ledger" "${ledger_files[@]}"
+
+copy_with_parents "${dijkstra_ledger_golden_root}" "cardano-ledger" \
+	"eras/dijkstra/impl/golden/tx.cbor"
 
 api_files=(
 	"cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.bin"
