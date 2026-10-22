@@ -15,6 +15,8 @@ jobs:
     uses: blinklabs-io/actions/.github/workflows/reuseable-golangci-lint.yml@main
     permissions:
       contents: read
+    with:
+      go-version: 1.26.10
   nilaway:
     needs: [golangci-lint]
     uses: blinklabs-io/actions/.github/workflows/reuseable-nilaway.yml@main
@@ -30,3 +32,5 @@ jobs:
       attestations: write
       contents: write
       id-token: write
+    with:
+      go-version: 1.26.10
