@@ -1,6 +1,6 @@
 module github.com/blinklabs-io/ouroboros-mock
 
-go 1.26.8
+go 1.26.10
 
 require (
 	github.com/blinklabs-io/gouroboros v0.212.6
