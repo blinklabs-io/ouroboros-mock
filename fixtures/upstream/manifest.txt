@@ -27,6 +27,7 @@
 ./cardano-ledger/eras/dijkstra/impl/golden/pparams-update.json
 ./cardano-ledger/eras/dijkstra/impl/golden/pparams.json
 ./cardano-ledger/eras/dijkstra/impl/golden/translations.cbor
+./cardano-ledger/eras/dijkstra/impl/golden/tx.cbor
 ./cardano-ledger/eras/shelley/impl/golden/pparams-update.json
 ./cardano-ledger/eras/shelley/impl/golden/pparams.json
 ./cardano-node/cardano-testnet/files/data/alonzo/genesis.alonzo.spec.json
