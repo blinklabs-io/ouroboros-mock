@@ -268,6 +268,15 @@ func assertEmptyPoolCollections(t *testing.T, cert lcommon.Certificate) {
 	_, err = cbor.Decode(wire, &fields)
 	require.NoError(t, err)
 	require.Len(t, fields, 10)
-	require.Equal(t, cbor.RawMessage{0x80}, fields[7], "empty owner set")
+	emptyOwners := cbor.NewSetType([]lcommon.AddrKeyHash{}, true)
+	wantOwners, err := cbor.Encode(&emptyOwners)
+	require.NoError(t, err)
+	require.Equal(t, cbor.RawMessage(wantOwners), fields[7], "empty owner set")
+	require.Equal(
+		t,
+		cbor.RawMessage{0xd9, 0x01, 0x02, 0x80},
+		fields[7],
+		"owner set is a tag-258 empty array",
+	)
 	require.Equal(t, cbor.RawMessage{0x80}, fields[8], "empty relay list")
 }

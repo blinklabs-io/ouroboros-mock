@@ -281,6 +281,9 @@ func buildTachysSignedHeaderFixture(
 	if err != nil {
 		return TachysSignedHeaderFixture{}, err
 	}
+	// The issuer has no prior counter entry, so the authoritative counter is
+	// zero, which the header's sequence number of zero matches.
+	issuerOpCertCounter := uint64(0)
 	input := consensus.ValidateHeaderInput{
 		Slot:                 slot,
 		BlockNumber:          1,
@@ -293,6 +296,7 @@ func buildTachysSignedHeaderFixture(
 		HeaderBodyCbor:       bodyCbor,
 		OpCertHotVkey:        append([]byte(nil), kesPublic...),
 		OpCertSequenceNumber: 0,
+		OpCertCounterState:   &issuerOpCertCounter,
 		OpCertKesPeriod:      0,
 		OpCertSignature: append(
 			[]byte(nil),
