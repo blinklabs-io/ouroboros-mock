@@ -11,7 +11,9 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ouroboros-mock-fixtures.XXXXXX")
 OUROBOROS_CONSENSUS_REVISION=${OUROBOROS_CONSENSUS_REVISION:-259e00754b326a1e645b94c084815aab7f3797c2}
 CARDANO_LEDGER_REVISION=${CARDANO_LEDGER_REVISION:-82a4485f4b34da4752538cda7504aef346b9953b}
 CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION:-6d57bb507f256666695d94ea2f2ba1cf52f059ae}
-CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC:-${CARDANO_LEDGER_SRC:-}}
+# Not inherited from CARDANO_LEDGER_SRC: that checkout is pinned to an older
+# ledger revision that predates the Dijkstra tx.cbor golden.
+CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC:-}
 CARDANO_API_REVISION=${CARDANO_API_REVISION:-c57b8893544aca0855b70bc07330005b7b514054}
 CARDANO_NODE_REVISION=${CARDANO_NODE_REVISION:-126efd54008b8f0f33b236a2fab43a16a1f3b4f1}
 
@@ -201,7 +203,8 @@ copy_with_parents "${node_root}" "cardano-node" "${node_files[@]}"
 manifest_tmp=$(mktemp "${WORK_DIR}/manifest.XXXXXX")
 (
 	cd "${DEST_DIR}"
-	find . -type f ! -name 'manifest.txt' | sort > "${manifest_tmp}"
+	# Byte order, so the committed manifest does not depend on the caller's locale.
+	find . -type f ! -name 'manifest.txt' | LC_ALL=C sort > "${manifest_tmp}"
 )
 mv "${manifest_tmp}" "${DEST_DIR}/manifest.txt"
 
