@@ -18,6 +18,7 @@ offline or local verification, you can point it at existing checkouts:
 ```bash
 OUROBOROS_CONSENSUS_SRC=/tmp/ouroboros-consensus \
 CARDANO_LEDGER_SRC=/tmp/cardano-ledger \
+CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC=/tmp/cardano-ledger-dijkstra-golden \
 CARDANO_API_SRC=/tmp/cardano-api \
 CARDANO_NODE_SRC=/tmp/cardano-node \
 make download-upstream-fixtures
@@ -28,7 +29,8 @@ Current sources:
 - `ouroboros-consensus`: raw `Block_*`, `Header_*`, `GenTx_*`, and
   `GenTxId_*` fixtures from `ouroboros-consensus-cardano/golden/cardano/`
 - `cardano-ledger`: era protocol parameter goldens, a small Alonzo CBOR
-  fixture set, and four Byron SSC annotated CBOR dumps
+  fixture set, four Byron SSC annotated CBOR dumps, and the Dijkstra
+  transaction CBOR fixture
 - `cardano-api`: canonical JSON, protocol-parameter, genesis, and governance
   anchor fixtures, plus paired PlutusV1 hex and binary script captures
 - `cardano-node`: testnet genesis spec fixtures
@@ -74,8 +76,16 @@ Intentional exclusions:
 ### Curated source contracts
 
 The updater pins each upstream revision and copies selected files without
-rewriting them. Byron `ssc/CommitmentsMap`, `OpeningsMap`, `SharesMap` and
-`VssCertificatesMap` retain their original annotated hexadecimal text. The
+rewriting them. The Dijkstra transaction CBOR fixture comes from
+`IntersectMBO/cardano-ledger` revision
+`6d57bb507f256666695d94ea2f2ba1cf52f059ae`; it is imported separately because
+the existing ledger fixture revision predates it. Upstream's
+`eras/dijkstra/impl/golden/hashtx.hex` hashes `exampleDijkstraTx`, not the
+contents of `tx.cbor`, so that hash fixture is not paired with this transaction.
+The harness decodes `tx.cbor` and checks its Dijkstra account-balance interval
+fields and absent starting intervals. Byron `ssc/CommitmentsMap`,
+`OpeningsMap`, `SharesMap` and `VssCertificatesMap` retain their original
+annotated hexadecimal text. The
 decoder checks every hexadecimal offset and chunk before exposing CBOR bytes.
 These vectors exercise tag-258 sets and stakeholder-keyed maps used by Byron
 SSC decoding, accumulation and proof tests in `gouroboros`. The shared harness

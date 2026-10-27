@@ -5,10 +5,13 @@
 # http://www.apache.org/licenses/LICENSE-2.0
 """Exercise fixture maintenance without network or an installed Haskell oracle."""
 
+import io
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,10 +36,11 @@ class E34ToolsTests(unittest.TestCase):
             for name, variable in (
                 ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
                 ("cardano-ledger", "CARDANO_LEDGER_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC"),
                 ("cardano-api", "CARDANO_API_SRC"),
                 ("cardano-node", "CARDANO_NODE_SRC"),
             ):
-                source = root / "sources" / name
+                source = root / "sources" / variable
                 shutil.copytree(ROOT / "fixtures/upstream" / name, source)
                 env[variable] = str(source)
             subprocess.run(["bash", str(script)], env=env, check=True, capture_output=True)
@@ -44,6 +48,83 @@ class E34ToolsTests(unittest.TestCase):
             manifest = (root / "fixtures/upstream/manifest.txt").read_text().splitlines()
             for name in before:
                 self.assertIn("./e34/" + name, manifest)
+
+    def test_dijkstra_golden_ignores_ledger_override(self):
+        # CARDANO_LEDGER_SRC is pinned to a ledger revision without the Dijkstra
+        # tx.cbor golden, so the Dijkstra source must fall back to its own pin.
+        golden = "eras/dijkstra/impl/golden/tx.cbor"
+        script_text = (ROOT / "scripts/update-upstream-fixtures.sh").read_text()
+        revision = re.search(
+            r"CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION:-([0-9a-f]{40})", script_text
+        ).group(1)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            script = root / "scripts/update-upstream-fixtures.sh"
+            shutil.copyfile(ROOT / "scripts/update-upstream-fixtures.sh", script)
+            shutil.copytree(ROOT / "fixtures/upstream", root / "fixtures/upstream")
+            env = dict(os.environ)
+            env.pop("CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC", None)
+            # The curl stub serves only this revision; an inherited override would miss it.
+            env["CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION"] = revision
+            for name, variable in (
+                ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_SRC"),
+                ("cardano-api", "CARDANO_API_SRC"),
+                ("cardano-node", "CARDANO_NODE_SRC"),
+            ):
+                source = root / "sources" / name
+                shutil.copytree(ROOT / "fixtures/upstream" / name, source)
+                env[variable] = str(source)
+            (root / "sources/cardano-ledger" / golden).unlink()
+            pinned = b"pinned dijkstra golden"
+            archive = root / "dijkstra.tar.gz"
+            with tarfile.open(archive, "w:gz") as tar:
+                info = tarfile.TarInfo(f"cardano-ledger-{revision}/{golden}")
+                info.size = len(pinned)
+                tar.addfile(info, io.BytesIO(pinned))
+            stub = root / "bin/curl"
+            stub.parent.mkdir()
+            stub.write_text(
+                "#!/usr/bin/env bash\n"
+                f'[[ "${{!#}}" == */cardano-ledger/archive/{revision}.tar.gz ]] || exit 22\n'
+                f'cat "{archive}"\n'
+            )
+            stub.chmod(0o755)
+            env["PATH"] = f"{stub.parent}{os.pathsep}{env['PATH']}"
+            result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                pinned, (root / "fixtures/upstream/cardano-ledger" / golden).read_bytes()
+            )
+
+    def test_manifest_order_ignores_locale(self):
+        locales = subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split()
+        locale_name = next((n for n in locales if n.lower() in ("en_us.utf8", "en_us.utf-8")), None)
+        if locale_name is None:
+            self.skipTest("en_US.UTF-8 locale unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            script = root / "scripts/update-upstream-fixtures.sh"
+            shutil.copyfile(ROOT / "scripts/update-upstream-fixtures.sh", script)
+            shutil.copytree(ROOT / "fixtures/upstream", root / "fixtures/upstream")
+            env = dict(os.environ, LC_ALL=locale_name)
+            for name, variable in (
+                ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC"),
+                ("cardano-api", "CARDANO_API_SRC"),
+                ("cardano-node", "CARDANO_NODE_SRC"),
+            ):
+                source = root / "sources" / variable
+                shutil.copytree(ROOT / "fixtures/upstream" / name, source)
+                env[variable] = str(source)
+            subprocess.run(["bash", str(script)], env=env, check=True, capture_output=True)
+            self.assertEqual(
+                (ROOT / "fixtures/upstream/manifest.txt").read_text(),
+                (root / "fixtures/upstream/manifest.txt").read_text(),
+            )
 
     def test_verifier_rejects_changed_freeze_before_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:
