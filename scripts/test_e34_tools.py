@@ -98,6 +98,41 @@ class E34ToolsTests(unittest.TestCase):
                 pinned, (root / "fixtures/upstream/cardano-ledger" / golden).read_bytes()
             )
 
+    def test_dijkstra_golden_override_at_ledger_revision(self):
+        # Both ledger stages share a name, so equal revisions must not stage
+        # into one directory and take the golden from the base ledger tree.
+        golden = "eras/dijkstra/impl/golden/tx.cbor"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            script = root / "scripts/update-upstream-fixtures.sh"
+            shutil.copyfile(ROOT / "scripts/update-upstream-fixtures.sh", script)
+            shutil.copytree(ROOT / "fixtures/upstream", root / "fixtures/upstream")
+            env = dict(os.environ)
+            revision = "1" * 40
+            env["CARDANO_LEDGER_REVISION"] = revision
+            env["CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION"] = revision
+            for name, variable in (
+                ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC"),
+                ("cardano-api", "CARDANO_API_SRC"),
+                ("cardano-node", "CARDANO_NODE_SRC"),
+            ):
+                source = root / "sources" / variable
+                shutil.copytree(ROOT / "fixtures/upstream" / name, source)
+                env[variable] = str(source)
+            (root / "sources/CARDANO_LEDGER_SRC" / golden).write_bytes(b"base ledger golden")
+            (root / "sources/CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC" / golden).write_bytes(
+                b"dijkstra golden"
+            )
+            result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                b"dijkstra golden",
+                (root / "fixtures/upstream/cardano-ledger" / golden).read_bytes(),
+            )
+
     def test_manifest_order_ignores_locale(self):
         locales = subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split()
         locale_name = next((n for n in locales if n.lower() in ("en_us.utf8", "en_us.utf-8")), None)

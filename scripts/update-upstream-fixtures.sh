@@ -42,7 +42,11 @@ stage_repo() {
 	local url=$2
 	local revision=$3
 	local override_path=$4
-	local staged_path="${WORK_DIR}/${name}-${revision}"
+	# Each stage gets its own directory: two stages of one repository at the
+	# same revision would otherwise share a path, and cp -a into an existing
+	# directory nests the second tree instead of replacing the first.
+	local stage_dir
+	stage_dir=$(mktemp -d "${WORK_DIR}/${name}.XXXXXX")
 
 	if [[ -n "${override_path}" ]]; then
 		if [[ ! -d "${override_path}" ]]; then
@@ -50,9 +54,8 @@ stage_repo() {
 			exit 1
 		fi
 		revision=$(resolve_override_revision "${name}" "${override_path}" "${revision}")
-		staged_path="${WORK_DIR}/${name}-${revision}"
-		cp -a "${override_path}" "${staged_path}"
-		printf '%s\n' "${staged_path}"
+		cp -a "${override_path}" "${stage_dir}/${name}-${revision}"
+		printf '%s\n' "${stage_dir}/${name}-${revision}"
 		return
 	fi
 
@@ -62,8 +65,8 @@ stage_repo() {
 	fi
 
 	curl -fsSL "${url}/archive/${revision}.tar.gz" | \
-		tar xz -C "${WORK_DIR}"
-	printf '%s\n' "${staged_path}"
+		tar xz -C "${stage_dir}"
+	printf '%s\n' "${stage_dir}/${name}-${revision}"
 }
 
 copy_with_parents() {
