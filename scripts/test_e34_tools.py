@@ -65,6 +65,8 @@ class E34ToolsTests(unittest.TestCase):
             shutil.copytree(ROOT / "fixtures/upstream", root / "fixtures/upstream")
             env = dict(os.environ)
             env.pop("CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC", None)
+            # The curl stub serves only this revision; an inherited override would miss it.
+            env["CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION"] = revision
             for name, variable in (
                 ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
                 ("cardano-ledger", "CARDANO_LEDGER_SRC"),
