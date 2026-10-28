@@ -23,35 +23,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// lcommon.EpochState is a degrading capability: a state without it keeps
-// every POOL predicate except the retirement-epoch bound. The default mock
-// must not advertise the capability and then fail every lookup, which would
-// reject valid retirements.
-func TestDefaultStateAcceptsPoolRetirementWithoutEpochState(t *testing.T) {
-	operator := lcommon.PoolKeyHash{0x01}
-	state := ledger.NewLedgerStateBuilder().
-		WithPools([]*lcommon.PoolRegistrationCertificate{
-			{Operator: operator},
-		}).
-		Build()
-	tx := &shelley.ShelleyTransaction{
+func poolRetirementTx(operator lcommon.PoolKeyHash, epoch uint64) *shelley.ShelleyTransaction {
+	return &shelley.ShelleyTransaction{
 		Body: shelley.ShelleyTransactionBody{
 			TxCertificates: []lcommon.CertificateWrapper{{
 				Type: uint(lcommon.CertificateTypePoolRetirement),
 				Certificate: &lcommon.PoolRetirementCertificate{
 					CertType:    uint(lcommon.CertificateTypePoolRetirement),
 					PoolKeyHash: operator,
-					Epoch:       5,
+					Epoch:       epoch,
 				},
 			}},
 		},
 	}
+}
+
+// The Shelley POOL retirement bound needs the current epoch, so a state
+// without an epoch mapping must fail closed rather than skip the bound.
+func TestDefaultStateRejectsPoolRetirementWithoutEpochState(t *testing.T) {
+	operator := lcommon.PoolKeyHash{0x01}
+	state := ledger.NewLedgerStateBuilder().
+		WithPools([]*lcommon.PoolRegistrationCertificate{
+			{Operator: operator},
+		}).
+		Build()
 	pparams := &shelley.ShelleyProtocolParameters{
 		ProtocolMajor: 2,
 		MaxEpoch:      18,
 	}
-	require.NoError(
-		t,
-		shelley.UtxoValidatePoolCertificates(tx, 100, state, pparams),
+	err := shelley.UtxoValidatePoolCertificates(
+		poolRetirementTx(operator, 5),
+		100,
+		state,
+		pparams,
 	)
+	require.ErrorIs(t, err, lcommon.EpochStateUnavailableError{})
+}
+
+func TestConfiguredEpochStateEnforcesPoolRetirementBound(t *testing.T) {
+	operator := lcommon.PoolKeyHash{0x01}
+	state := ledger.NewLedgerStateBuilder().
+		WithPools([]*lcommon.PoolRegistrationCertificate{
+			{Operator: operator},
+		}).
+		WithEpochForSlot(func(slot uint64) (uint64, error) {
+			return slot / 100, nil
+		}).
+		Build()
+	pparams := &shelley.ShelleyProtocolParameters{
+		ProtocolMajor: 2,
+		MaxEpoch:      18,
+	}
+	// Slot 100 is in epoch 1, so the valid retirement epochs are 2 to 19.
+	for _, epoch := range []uint64{2, 19} {
+		require.NoError(
+			t,
+			shelley.UtxoValidatePoolCertificates(
+				poolRetirementTx(operator, epoch), 100, state, pparams,
+			),
+			"epoch %d",
+			epoch,
+		)
+	}
+	for _, epoch := range []uint64{1, 20} {
+		err := shelley.UtxoValidatePoolCertificates(
+			poolRetirementTx(operator, epoch), 100, state, pparams,
+		)
+		var wrong shelley.StakePoolRetirementWrongEpochError
+		require.ErrorAs(t, err, &wrong, "epoch %d", epoch)
+	}
 }

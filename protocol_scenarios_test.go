@@ -31,7 +31,6 @@ import (
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
-	"github.com/blinklabs-io/gouroboros/protocol/localtxmonitor"
 	"github.com/blinklabs-io/gouroboros/protocol/peersharing"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
@@ -115,6 +114,9 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 	require.NoError(t, err)
 	noBlocks, err := BlockFetchScenario(point, tip.Point, nil, nil)
 	require.NoError(t, err)
+	// LocalTxMonitor is absent: its Busy transitions match on a state context
+	// that only the gouroboros client and server construct, so it is covered by
+	// TestLocalTxMonitorBuildersServeGouroborosClient.
 	tests := []struct {
 		name    string
 		entries []ConversationEntry
@@ -221,27 +223,6 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 			txsubmission.StateMap,
 			"Init",
 			txsubmission.NewMsgFromCbor,
-		},
-		{
-			"mempool",
-			[]ConversationEntry{
-				LocalTxMonitorAcquire(),
-				LocalTxMonitorAcquired(42),
-				LocalTxMonitorHasTx(ids[0].TxId.TxId[:]),
-				LocalTxMonitorReplyHasTx(true),
-				LocalTxMonitorGetSizes(),
-				LocalTxMonitorReplyGetSizes(100, 1, 1),
-				LocalTxMonitorNextTx(),
-				LocalTxMonitorReplyNextTx(6, txs[0].TxBody),
-				LocalTxMonitorNextTx(),
-				LocalTxMonitorReplyNextTx(0, nil),
-				LocalTxMonitorRelease(),
-				LocalTxMonitorDone(),
-			},
-			9,
-			localtxmonitor.StateMap,
-			"Idle",
-			localtxmonitor.NewMsgFromCbor,
 		},
 		{
 			"query",

@@ -15,6 +15,7 @@
 package fixtures_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -229,11 +230,33 @@ func assertGeneratedChain(
 			)
 		}
 		blockType, err := ledger.DetermineBlockType(decoded.Header().Cbor())
-		if err != nil {
-			t.Fatalf("block %d determine type: %s", i, err)
-		}
-		if blockType != wantType {
-			t.Fatalf("block %d type = %d, want %d", i, blockType, wantType)
+		if wantType == ledger.BlockTypeDijkstra {
+			if err != nil {
+				t.Fatalf("block %d determine type: %s", i, err)
+			}
+			if blockType != wantType {
+				t.Fatalf("block %d type = %d, want %d", i, blockType, wantType)
+			}
+		} else {
+			// Only the Dijkstra header shape identifies its era; every
+			// other shape needs the hard-fork schedule to pick a decoder.
+			var ambiguous *ledger.AmbiguousBlockTypeError
+			if !errors.As(err, &ambiguous) {
+				t.Fatalf(
+					"block %d determine type: got (%d, %v), want ambiguous block type",
+					i,
+					blockType,
+					err,
+				)
+			}
+			if ambiguous.ProtocolMajor != wantProtocolMajor {
+				t.Fatalf(
+					"block %d ambiguous protocol major = %d, want %d",
+					i,
+					ambiguous.ProtocolMajor,
+					wantProtocolMajor,
+				)
+			}
 		}
 		if protocolMajor(decoded) != wantProtocolMajor {
 			t.Fatalf(
