@@ -5,6 +5,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0
 """Exercise fixture maintenance without network or an installed Haskell oracle."""
 
+import hashlib
 import io
 import os
 import re
@@ -21,6 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def tree_bytes(root):
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def tree_digests(root):
+    # Digests keep a failed comparison readable; a byte diff of the corpus is not.
+    return {name: hashlib.sha256(data).hexdigest() for name, data in tree_bytes(root).items()}
 
 
 class E34ToolsTests(unittest.TestCase):
@@ -97,6 +103,115 @@ class E34ToolsTests(unittest.TestCase):
             self.assertEqual(
                 pinned, (root / "fixtures/upstream/cardano-ledger" / golden).read_bytes()
             )
+
+    def test_dijkstra_golden_override_at_ledger_revision(self):
+        # Both ledger stages share a name, so equal revisions must not stage
+        # into one directory and take the golden from the base ledger tree.
+        golden = "eras/dijkstra/impl/golden/tx.cbor"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            script = root / "scripts/update-upstream-fixtures.sh"
+            shutil.copyfile(ROOT / "scripts/update-upstream-fixtures.sh", script)
+            shutil.copytree(ROOT / "fixtures/upstream", root / "fixtures/upstream")
+            env = dict(os.environ)
+            revision = "1" * 40
+            env["CARDANO_LEDGER_REVISION"] = revision
+            env["CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION"] = revision
+            for name, variable in (
+                ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_SRC"),
+                ("cardano-ledger", "CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC"),
+                ("cardano-api", "CARDANO_API_SRC"),
+                ("cardano-node", "CARDANO_NODE_SRC"),
+            ):
+                source = root / "sources" / variable
+                shutil.copytree(ROOT / "fixtures/upstream" / name, source)
+                env[variable] = str(source)
+            (root / "sources/CARDANO_LEDGER_SRC" / golden).write_bytes(b"base ledger golden")
+            (root / "sources/CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC" / golden).write_bytes(
+                b"dijkstra golden"
+            )
+            result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                b"dijkstra golden",
+                (root / "fixtures/upstream/cardano-ledger" / golden).read_bytes(),
+            )
+
+    def run_refresh_with_failed_stage(self, root, env):
+        # A stage that fails must stop the refresh before it clears the corpus.
+        before = tree_digests(root / "fixtures/upstream")
+        result = subprocess.run(
+            ["bash", str(root / "scripts/update-upstream-fixtures.sh")],
+            env=env, capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(before, tree_digests(root / "fixtures/upstream"))
+
+    def refresh_fixture(self, root, skip=()):
+        (root / "scripts").mkdir()
+        shutil.copyfile(
+            ROOT / "scripts/update-upstream-fixtures.sh",
+            root / "scripts/update-upstream-fixtures.sh",
+        )
+        shutil.copytree(ROOT / "fixtures/upstream", root / "fixtures/upstream")
+        env = dict(os.environ)
+        for name, variable in (
+            ("ouroboros-consensus", "OUROBOROS_CONSENSUS_SRC"),
+            ("cardano-ledger", "CARDANO_LEDGER_SRC"),
+            ("cardano-ledger", "CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC"),
+            ("cardano-api", "CARDANO_API_SRC"),
+            ("cardano-node", "CARDANO_NODE_SRC"),
+        ):
+            env.pop(variable, None)
+            if variable in skip:
+                continue
+            source = root / "sources" / variable
+            shutil.copytree(ROOT / "fixtures/upstream" / name, source)
+            env[variable] = str(source)
+        return env
+
+    def stub_command(self, root, env, name, body):
+        stub = root / "bin" / name
+        stub.parent.mkdir(exist_ok=True)
+        stub.write_text("#!/usr/bin/env bash\n" + body)
+        stub.chmod(0o755)
+        env["PATH"] = f"{stub.parent}{os.pathsep}{env['PATH']}"
+
+    def test_stage_allocation_failure_preserves_fixtures(self):
+        real_mktemp = shutil.which("mktemp")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = self.refresh_fixture(root)
+            self.stub_command(
+                root, env, "mktemp",
+                '[[ "${!#}" == */ouroboros-consensus.XXXXXX ]] && exit 1\n'
+                f'exec "{real_mktemp}" "$@"\n',
+            )
+            self.run_refresh_with_failed_stage(root, env)
+
+    def test_stage_download_failure_preserves_fixtures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = self.refresh_fixture(root, skip=("CARDANO_NODE_SRC",))
+            self.stub_command(root, env, "curl", "exit 22\n")
+            self.run_refresh_with_failed_stage(root, env)
+
+    def test_stage_copy_failure_preserves_fixtures(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads files regardless of mode")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = self.refresh_fixture(root)
+            unreadable = Path(env["CARDANO_API_SRC"]) / (
+                "cardano-api/test/cardano-api-golden/files/ShelleyGenesis.json"
+            )
+            unreadable.chmod(0)
+            try:
+                self.run_refresh_with_failed_stage(root, env)
+            finally:
+                unreadable.chmod(0o644)
 
     def test_manifest_order_ignores_locale(self):
         locales = subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split()

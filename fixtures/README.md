@@ -80,8 +80,11 @@ rewriting them. The Dijkstra transaction CBOR fixture comes from
 `IntersectMBO/cardano-ledger` revision
 `6d57bb507f256666695d94ea2f2ba1cf52f059ae`; it is imported separately because
 the existing ledger fixture revision predates it. Upstream's
-`eras/dijkstra/impl/golden/hashtx.hex` hashes `exampleDijkstraTx`, not the
-contents of `tx.cbor`, so that hash fixture is not paired with this transaction.
+`eras/dijkstra/impl/golden/hashtx.hex` is Dijkstra `hashTx` of this same
+transaction: Blake2b-256 over the body, witness and auxiliary-data hashes
+followed by the CBOR `isValid` flag. It is neither the transaction ID nor a
+hash of the whole `tx.cbor`, so it is not paired with this fixture as a
+transaction-ID check.
 The harness decodes `tx.cbor` and checks its Dijkstra account-balance interval
 fields and absent starting intervals. Byron `ssc/CommitmentsMap`,
 `OpeningsMap`, `SharesMap` and `VssCertificatesMap` retain their original

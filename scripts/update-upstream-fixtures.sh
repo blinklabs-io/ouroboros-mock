@@ -42,17 +42,24 @@ stage_repo() {
 	local url=$2
 	local revision=$3
 	local override_path=$4
-	local staged_path="${WORK_DIR}/${name}-${revision}"
+	# stage_repo runs in a command substitution, where errexit is off: every
+	# failure below must return non-zero itself, or the caller removes
+	# DEST_DIR before the bad stage surfaces.
+	#
+	# Each stage gets its own directory: two stages of one repository at the
+	# same revision would otherwise share a path, and cp -a into an existing
+	# directory nests the second tree instead of replacing the first.
+	local stage_dir
+	stage_dir=$(mktemp -d "${WORK_DIR}/${name}.XXXXXX") || return 1
 
 	if [[ -n "${override_path}" ]]; then
 		if [[ ! -d "${override_path}" ]]; then
 			echo "override path does not exist: ${override_path}" >&2
 			exit 1
 		fi
-		revision=$(resolve_override_revision "${name}" "${override_path}" "${revision}")
-		staged_path="${WORK_DIR}/${name}-${revision}"
-		cp -a "${override_path}" "${staged_path}"
-		printf '%s\n' "${staged_path}"
+		revision=$(resolve_override_revision "${name}" "${override_path}" "${revision}") || return 1
+		cp -a "${override_path}" "${stage_dir}/${name}-${revision}" || return 1
+		printf '%s\n' "${stage_dir}/${name}-${revision}"
 		return
 	fi
 
@@ -62,8 +69,8 @@ stage_repo() {
 	fi
 
 	curl -fsSL "${url}/archive/${revision}.tar.gz" | \
-		tar xz -C "${WORK_DIR}"
-	printf '%s\n' "${staged_path}"
+		tar xz -C "${stage_dir}" || return 1
+	printf '%s\n' "${stage_dir}/${name}-${revision}"
 }
 
 copy_with_parents() {
