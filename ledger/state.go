@@ -154,6 +154,9 @@ func FixedEpochProtocolParameterUpdateWindow(
 	}
 }
 
+// EpochForSlotFunc is a callback for mapping a slot to its epoch
+type EpochForSlotFunc func(uint64) (uint64, error)
+
 // PoolCurrentStateFunc is a callback for pool state lookups
 type PoolCurrentStateFunc func(lcommon.PoolKeyHash) (*lcommon.PoolRegistrationCertificate, *uint64, error)
 
@@ -218,6 +221,7 @@ type MockLedgerState struct {
 	SlotToTimeCallback                    SlotToTimeFunc
 	TimeToSlotCallback                    TimeToSlotFunc
 	ProtocolParameterUpdateWindowCallback ProtocolParameterUpdateWindowFunc
+	EpochForSlotCallback                  EpochForSlotFunc
 
 	// Genesis delegation state: genesis key hash -> delegate key hash. A nil
 	// map means the capability is not configured.
@@ -283,6 +287,19 @@ func (ls *MockLedgerState) ProtocolParameterUpdateWindow(
 		return 0, 0, lcommon.ClassicProtocolParameterUpdateWindowStateUnavailableError{}
 	}
 	return ls.ProtocolParameterUpdateWindowCallback(slot)
+}
+
+// EpochForSlot returns the epoch containing slot from the callback set with
+// WithEpochForSlot. Without one it returns
+// lcommon.EpochStateUnavailableError, which is how gouroboros rules that need
+// an epoch fail: the slot-to-epoch mapping depends on the epoch schedule, which
+// the mock does not otherwise carry, and a guessed epoch would silently decide
+// rule outcomes.
+func (ls *MockLedgerState) EpochForSlot(slot uint64) (uint64, error) {
+	if ls.EpochForSlotCallback == nil {
+		return 0, lcommon.EpochStateUnavailableError{}
+	}
+	return ls.EpochForSlotCallback(slot)
 }
 
 // GenesisDelegateKeyHashes returns the delegate key hashes configured with
@@ -759,6 +776,14 @@ func (b *LedgerStateBuilder) WithGenesisDelegation(
 	)
 	maps.Copy(b.state.genesisDelegates, delegates)
 	b.state.genesisUpdateQuorum = quorum
+	return b
+}
+
+// WithEpochForSlot sets the slot-to-epoch callback
+func (b *LedgerStateBuilder) WithEpochForSlot(
+	fn EpochForSlotFunc,
+) *LedgerStateBuilder {
+	b.state.EpochForSlotCallback = fn
 	return b
 }
 
