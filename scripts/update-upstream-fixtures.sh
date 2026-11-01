@@ -10,6 +10,10 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ouroboros-mock-fixtures.XXXXXX")
 
 OUROBOROS_CONSENSUS_REVISION=${OUROBOROS_CONSENSUS_REVISION:-259e00754b326a1e645b94c084815aab7f3797c2}
 CARDANO_LEDGER_REVISION=${CARDANO_LEDGER_REVISION:-82a4485f4b34da4752538cda7504aef346b9953b}
+CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION:-6d57bb507f256666695d94ea2f2ba1cf52f059ae}
+# Not inherited from CARDANO_LEDGER_SRC: that checkout is pinned to an older
+# ledger revision that predates the Dijkstra tx.cbor golden.
+CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC=${CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC:-}
 CARDANO_API_REVISION=${CARDANO_API_REVISION:-c57b8893544aca0855b70bc07330005b7b514054}
 CARDANO_NODE_REVISION=${CARDANO_NODE_REVISION:-126efd54008b8f0f33b236a2fab43a16a1f3b4f1}
 
@@ -38,17 +42,24 @@ stage_repo() {
 	local url=$2
 	local revision=$3
 	local override_path=$4
-	local staged_path="${WORK_DIR}/${name}-${revision}"
+	# stage_repo runs in a command substitution, where errexit is off: every
+	# failure below must return non-zero itself, or the caller removes
+	# DEST_DIR before the bad stage surfaces.
+	#
+	# Each stage gets its own directory: two stages of one repository at the
+	# same revision would otherwise share a path, and cp -a into an existing
+	# directory nests the second tree instead of replacing the first.
+	local stage_dir
+	stage_dir=$(mktemp -d "${WORK_DIR}/${name}.XXXXXX") || return 1
 
 	if [[ -n "${override_path}" ]]; then
 		if [[ ! -d "${override_path}" ]]; then
 			echo "override path does not exist: ${override_path}" >&2
 			exit 1
 		fi
-		revision=$(resolve_override_revision "${name}" "${override_path}" "${revision}")
-		staged_path="${WORK_DIR}/${name}-${revision}"
-		cp -a "${override_path}" "${staged_path}"
-		printf '%s\n' "${staged_path}"
+		revision=$(resolve_override_revision "${name}" "${override_path}" "${revision}") || return 1
+		cp -a "${override_path}" "${stage_dir}/${name}-${revision}" || return 1
+		printf '%s\n' "${stage_dir}/${name}-${revision}"
 		return
 	fi
 
@@ -58,8 +69,8 @@ stage_repo() {
 	fi
 
 	curl -fsSL "${url}/archive/${revision}.tar.gz" | \
-		tar xz -C "${WORK_DIR}"
-	printf '%s\n' "${staged_path}"
+		tar xz -C "${stage_dir}" || return 1
+	printf '%s\n' "${stage_dir}/${name}-${revision}"
 }
 
 copy_with_parents() {
@@ -91,6 +102,11 @@ ledger_root=$(
 		"${CARDANO_LEDGER_REVISION}" \
 		"${CARDANO_LEDGER_SRC:-}"
 )
+dijkstra_ledger_golden_root=$(stage_repo \
+	"cardano-ledger" \
+	"https://github.com/IntersectMBO/cardano-ledger" \
+	"${CARDANO_LEDGER_DIJKSTRA_GOLDEN_REVISION}" \
+	"${CARDANO_LEDGER_DIJKSTRA_GOLDEN_SRC}")
 api_root=$(
 	stage_repo \
 		"cardano-api" \
@@ -167,6 +183,9 @@ done
 
 copy_with_parents "${ledger_root}" "cardano-ledger" "${ledger_files[@]}"
 
+copy_with_parents "${dijkstra_ledger_golden_root}" "cardano-ledger" \
+	"eras/dijkstra/impl/golden/tx.cbor"
+
 api_files=(
 	"cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.bin"
 	"cardano-api/test/cardano-api-golden/files/Script/PlutusScriptV1/alwayssucceeds.txt"
@@ -191,7 +210,8 @@ copy_with_parents "${node_root}" "cardano-node" "${node_files[@]}"
 manifest_tmp=$(mktemp "${WORK_DIR}/manifest.XXXXXX")
 (
 	cd "${DEST_DIR}"
-	find . -type f ! -name 'manifest.txt' | sort > "${manifest_tmp}"
+	# Byte order, so the committed manifest does not depend on the caller's locale.
+	find . -type f ! -name 'manifest.txt' | LC_ALL=C sort > "${manifest_tmp}"
 )
 mv "${manifest_tmp}" "${DEST_DIR}/manifest.txt"
 

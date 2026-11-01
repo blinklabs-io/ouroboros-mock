@@ -15,6 +15,7 @@
 package fixtures_test
 
 import (
+	"encoding/hex"
 	"io/fs"
 	"maps"
 	"path/filepath"
@@ -22,9 +23,12 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/conway"
+	"github.com/blinklabs-io/gouroboros/ledger/dijkstra"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHarnessIntegration(t *testing.T) {
@@ -147,6 +151,52 @@ func TestHarnessIntegration(t *testing.T) {
 		if fixture.Kind != fixtures.KindTransaction {
 			t.Fatalf("expected transaction fixture, got %s", fixture.Kind)
 		}
+	})
+
+	t.Run("DijkstraCardanoLedgerGoldenTransaction", func(t *testing.T) {
+		const goldenDir = "cardano-ledger/eras/dijkstra/impl/golden/"
+		txFixture, err := harness.Fixture(goldenDir + "tx.cbor")
+		if err != nil {
+			t.Fatalf("Dijkstra ledger transaction fixture: %v", err)
+		}
+		if txFixture.Kind != fixtures.KindTransaction ||
+			txFixture.Era != "dijkstra" {
+			t.Fatalf("unexpected Dijkstra transaction metadata: %+v", txFixture)
+		}
+		tx, err := txFixture.DecodeLedgerTransaction()
+		if err != nil {
+			t.Fatalf("DecodeLedgerTransaction failed: %v", err)
+		}
+		if tx.Type() != int(ledger.TxTypeDijkstra) {
+			t.Fatalf("expected Dijkstra transaction type, got %d", tx.Type())
+		}
+		dijkstraTx, ok := tx.(*dijkstra.DijkstraTransaction)
+		if !ok {
+			t.Fatalf("expected Dijkstra transaction, got %T", tx)
+		}
+		decodeKey := func(value string) cbor.ByteString {
+			keyBytes, err := hex.DecodeString(value)
+			require.NoError(t, err)
+			return cbor.NewByteString(keyBytes)
+		}
+		fiveHundred := uint64(500)
+		tenThousand := uint64(10_000)
+		oneHundred := uint64(100)
+		fiveThousand := uint64(5_000)
+		require.Equal(t, dijkstra.DijkstraAccountBalanceIntervals{
+			decodeKey("e1415082a4d7a407bb3837bca2179336d8f9fa51fc4eecba911ead8407"): {
+				LowerBound: &fiveHundred,
+			},
+			decodeKey("e101a1d395abb1baa33c53d26889d484437301cbba548c0fa0d28b4bd7"): {
+				UpperBound: &tenThousand,
+			},
+			decodeKey("f1a9bfee58b8bda1a3df2861735baacb11b594c51dcfe49a4f2a6ea1c4"): {
+				LowerBound: &oneHundred,
+				UpperBound: &fiveThousand,
+			},
+		}, dijkstraTx.Body.TxBalanceIntervals)
+		require.Nil(t, dijkstraTx.Body.TxStartingBalanceIntervals)
+		harness.RunExecution(t, goldenDir+"tx.cbor")
 	})
 
 	t.Run("ExtractEmbeddedFixtures", func(t *testing.T) {
