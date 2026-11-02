@@ -3,7 +3,7 @@ module github.com/blinklabs-io/ouroboros-mock
 go 1.26.10
 
 require (
-	github.com/blinklabs-io/gouroboros v0.213.11
+	github.com/blinklabs-io/gouroboros v0.216.2
 	github.com/blinklabs-io/plutigo v0.10.1
 	github.com/stretchr/testify v1.12.1
 	github.com/utxorpc/go-codegen v0.19.2
