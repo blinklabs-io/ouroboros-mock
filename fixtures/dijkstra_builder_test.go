@@ -17,7 +17,6 @@ package fixtures_test
 import (
 	"bytes"
 	"math/big"
-	"strings"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
@@ -101,7 +100,7 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 	}
 }
 
-func TestDijkstraBlockBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
+func TestDijkstraBlockBuilderAcceptsPlutusV4WitnessScripts(t *testing.T) {
 	_, err := fixtures.NewDijkstraBlockBuilder().
 		WithTransactions(dijkstra.DijkstraTransaction{
 			WitnessSet: dijkstra.DijkstraTransactionWitnessSet{
@@ -112,11 +111,8 @@ func TestDijkstraBlockBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 			},
 		}).
 		Build()
-	if err == nil {
-		t.Fatal("expected Dijkstra block builder to reject Plutus V4 witness scripts")
-	}
-	if !strings.Contains(err.Error(), "does not support field 8") {
-		t.Fatalf("unexpected error: %s", err)
+	if err != nil {
+		t.Fatalf("Dijkstra block builder rejected Plutus V4 witness scripts: %s", err)
 	}
 }
 

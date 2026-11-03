@@ -83,7 +83,7 @@ func TestProtocolBuildersEncodeMessages(t *testing.T) {
 		TxSubmissionReplyTxs(nil),
 		LocalTxMonitorAcquire(),
 		LocalTxMonitorNextTx(),
-		LocalTxMonitorHasTx(make([]byte, common.Blake2b256Size)),
+		LocalTxMonitorHasTxForEra(6, make([]byte, common.Blake2b256Size)),
 		LocalTxMonitorGetSizes(),
 		LocalTxMonitorRelease(),
 		LocalStateQueryAcquire(point),
