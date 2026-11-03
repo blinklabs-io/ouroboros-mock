@@ -34,7 +34,7 @@ func TestLocalTxMonitorBuildersServeGouroborosClient(t *testing.T) {
 	tx := []byte{0x80}
 	entries := []ConversationEntry{
 		LocalTxMonitorAcquire(), LocalTxMonitorAcquired(456),
-		LocalTxMonitorHasTx(hash), LocalTxMonitorReplyHasTx(true),
+		LocalTxMonitorHasTxForEra(6, hash), LocalTxMonitorReplyHasTx(true),
 		LocalTxMonitorGetSizes(), LocalTxMonitorReplyGetSizes(1000, 20, 3),
 		LocalTxMonitorNextTx(), LocalTxMonitorReplyNextTx(6, tx),
 		LocalTxMonitorNextTx(), LocalTxMonitorReplyNextTx(0, nil),
@@ -43,7 +43,7 @@ func TestLocalTxMonitorBuildersServeGouroborosClient(t *testing.T) {
 	client, mock := newProtocolClientConnection(t, entries, false)
 	monitor := client.LocalTxMonitor().Client
 	require.NoError(t, monitor.Acquire())
-	present, err := monitor.HasTx(hash)
+	present, err := monitor.HasTxForEra(6, hash)
 	require.NoError(t, err)
 	require.True(t, present)
 	capacity, size, count, err := monitor.GetSizes()

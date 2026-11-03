@@ -343,11 +343,26 @@ func LocalTxMonitorNextTx() ConversationEntryInput {
 	}
 }
 
-// LocalTxMonitorHasTx builds a has-transaction input entry.
+// LocalTxMonitorHasTx builds a has-transaction input entry from an untagged
+// transaction ID. The node-to-client protocol tags the ID with its era, so the
+// entry's message cannot be encoded.
+//
+// Deprecated: use LocalTxMonitorHasTxForEra.
 func LocalTxMonitorHasTx(txID []byte) ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId:      localtxmonitor.ProtocolId,
-		Message:         localtxmonitor.NewMsgHasTx(cloneBytes(txID)),
+		Message:         localtxmonitor.NewMsgHasTx(cloneBytes(txID)), //nolint:staticcheck // deprecated wrapper for a deprecated constructor
+		MessageType:     localtxmonitor.MessageTypeHasTx,
+		MsgFromCborFunc: localtxmonitor.NewMsgFromCbor,
+	}
+}
+
+// LocalTxMonitorHasTxForEra builds a has-transaction input entry for a
+// transaction ID tagged with its hard-fork era.
+func LocalTxMonitorHasTxForEra(eraID uint8, txID []byte) ConversationEntryInput {
+	return ConversationEntryInput{
+		ProtocolId:      localtxmonitor.ProtocolId,
+		Message:         localtxmonitor.NewMsgHasTxForEra(eraID, cloneBytes(txID)),
 		MessageType:     localtxmonitor.MessageTypeHasTx,
 		MsgFromCborFunc: localtxmonitor.NewMsgFromCbor,
 	}

@@ -302,7 +302,7 @@ func TestProtocolBuildersOwnByteAndIPInputs(t *testing.T) {
 	tx := []byte{0x80}
 	peers := []peersharing.PeerAddress{{IP: net.IP{1, 2, 3, 4}, Port: 3001}}
 	blockEntry := BlockFetchBlock(block)
-	hasTxEntry := LocalTxMonitorHasTx(txID)
+	hasTxEntry := LocalTxMonitorHasTxForEra(6, txID)
 	nextTxEntry := LocalTxMonitorReplyNextTx(6, tx)
 	peersEntry := PeerSharingPeers(peers)
 
@@ -331,7 +331,7 @@ func TestProtocolBuildersIsolateConcurrentCallerMutation(t *testing.T) {
 	messages := []protocol.Message{
 		ChainSyncFindIntersect(false, []pcommon.Point{point}).Message,
 		TxSubmissionReplyTxs([]txsubmission.TxBody{{EraId: 6, TxBody: txBody}}).Message,
-		LocalTxMonitorHasTx(txID).Message,
+		LocalTxMonitorHasTxForEra(6, txID).Message,
 		PeerSharingPeers([]peersharing.PeerAddress{{IP: peerIP, Port: 3001}}).Messages[0],
 	}
 	stop := make(chan struct{})
