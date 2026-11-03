@@ -31,17 +31,14 @@ const (
 	dijkstraTxBodyFeeKey             = 2
 	dijkstraTxBodySubTransactionsKey = 23
 
-	dijkstraWitnessMaxKey             = 7
-	dijkstraWitnessPlutusV4ScriptsKey = 8
+	dijkstraWitnessMaxKey = 8
 )
 
 // DijkstraTransactionBuilder constructs Dijkstra block transactions with
 // guards, redeemers, metadata, subtransactions, and the validity flag. The
-// Dijkstra witness set has no Plutus V4 script field (the reference decoder
-// accepts keys 0-7). Dijkstra transactions can carry V4 scripts as output
-// reference scripts or in auxiliary_data_map key 5, but this builder only
-// exposes transaction metadata and does not construct script-bearing auxiliary
-// data.
+// Dijkstra witness set carries Plutus V4 scripts at key 8 (the reference
+// decoder accepts keys 0-8). This builder only exposes transaction metadata
+// and does not construct script-bearing auxiliary data.
 type DijkstraTransactionBuilder struct {
 	tx       dijkstra.DijkstraTransaction
 	metadata common.TransactionMetadatum
@@ -444,7 +441,7 @@ func decodeDijkstraBodyFields(
 	return fields, nil
 }
 
-// validateDijkstraWitnessSetKeys rejects witness set keys past 7, which the
+// validateDijkstraWitnessSetKeys rejects witness set keys past 8, which the
 // Dijkstra CDDL and the reference decoder do not accept. It covers witness
 // sets that carry original bytes, which gouroboros reuses without checking.
 func validateDijkstraWitnessSetKeys(encoded []byte) error {
@@ -453,11 +450,6 @@ func validateDijkstraWitnessSetKeys(encoded []byte) error {
 		return fmt.Errorf("decode witness set map: %w", err)
 	}
 	for _, key := range slices.Sorted(maps.Keys(fields)) {
-		if key == dijkstraWitnessPlutusV4ScriptsKey {
-			return errors.New(
-				"plutus V4 witness scripts are not part of the Dijkstra CDDL",
-			)
-		}
 		if key > dijkstraWitnessMaxKey {
 			return fmt.Errorf(
 				"witness set key %d is not part of the Dijkstra CDDL",

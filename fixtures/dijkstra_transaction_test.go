@@ -162,9 +162,9 @@ func TestDijkstraTransactionBuilderRejectsDecodedSubTransactionBodyMissingOutput
 	)
 }
 
-// A witness set that carries original bytes with key 8 reaches the builder's
-// key rule. The decoder rejects such bytes, so they are set directly.
-func TestDijkstraTransactionBuilderRejectsDecodedPlutusV4WitnessScripts(
+// The Dijkstra CDDL carries Plutus V4 scripts at witness set key 8, so
+// original bytes with key 8 pass the builder's key rule.
+func TestDijkstraTransactionBuilderAcceptsDecodedPlutusV4WitnessScripts(
 	t *testing.T,
 ) {
 	var witnesses dijkstra.DijkstraTransactionWitnessSet
@@ -172,14 +172,31 @@ func TestDijkstraTransactionBuilderRejectsDecodedPlutusV4WitnessScripts(
 		[]byte{0xa1, 0x08, 0xd9, 0x01, 0x02, 0x81, 0x41, 0x01},
 	)
 
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
+		WithWitnessSet(witnesses).
+		Build()
+	require.NoError(t, err)
+	require.Len(t, tx.WitnessSet.WsPlutusV4Scripts.Items(), 1)
+}
+
+// Witness set keys past 8 are outside the Dijkstra CDDL. The decoder rejects
+// such bytes, so they are set directly to reach the builder's key rule.
+func TestDijkstraTransactionBuilderRejectsDecodedWitnessSetKeyPastPlutusV4(
+	t *testing.T,
+) {
+	var witnesses dijkstra.DijkstraTransactionWitnessSet
+	witnesses.SetCbor(
+		[]byte{0xa1, 0x09, 0xd9, 0x01, 0x02, 0x81, 0x41, 0x01},
+	)
+
 	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(witnesses).
 		Build()
-	require.ErrorContains(t, err, "plutus V4 witness scripts are not part of the Dijkstra CDDL")
+	require.ErrorContains(t, err, "witness set key 9 is not part of the Dijkstra CDDL")
 }
 
-func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
-	_, err := fixtures.NewDijkstraTransactionBuilder().
+func TestDijkstraTransactionBuilderAcceptsPlutusV4WitnessScripts(t *testing.T) {
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(dijkstra.DijkstraTransactionWitnessSet{
 			WsPlutusV4Scripts: cbor.NewSetType(
 				[]common.PlutusV4Script{{0x01}},
@@ -187,13 +204,14 @@ func TestDijkstraTransactionBuilderRejectsPlutusV4WitnessScripts(t *testing.T) {
 			),
 		}).
 		Build()
-	require.ErrorContains(t, err, "does not support field 8")
+	require.NoError(t, err)
+	require.Len(t, tx.WitnessSet.WsPlutusV4Scripts.Items(), 1)
 }
 
-func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
+func TestDijkstraTransactionBuilderAcceptsSubTransactionPlutusV4WitnessScripts(
 	t *testing.T,
 ) {
-	_, err := fixtures.NewDijkstraTransactionBuilder().
+	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{
 			WitnessSet: dijkstra.DijkstraTransactionWitnessSet{
 				WsPlutusV4Scripts: cbor.NewSetType(
@@ -203,7 +221,8 @@ func TestDijkstraTransactionBuilderRejectsSubTransactionPlutusV4WitnessScripts(
 			},
 		}).
 		Build()
-	require.ErrorContains(t, err, "does not support field 8")
+	require.NoError(t, err)
+	require.NotNil(t, tx)
 }
 
 // The Dijkstra CDDL requires transaction_body keys 0 (inputs), 1 (outputs),
