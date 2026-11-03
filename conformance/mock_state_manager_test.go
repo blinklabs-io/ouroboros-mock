@@ -196,6 +196,7 @@ func TestMockStateManagerLoadsOriginalStakeCredentialDeposit(t *testing.T) {
 	require.NotNil(t, deposit)
 	assert.Equal(t, uint64(2), *deposit)
 }
+
 func TestApplyTransactionValidatesWithdrawalsBeforeMutatingState(t *testing.T) {
 	credential := common.Credential{
 		CredType:   common.CredentialTypeAddrKeyHash,
@@ -284,6 +285,7 @@ func TestApplyTransactionAllowsWithdrawalWithStakeDeregistration(t *testing.T) {
 	assert.NotContains(t, manager.rewardAccounts, key)
 	assert.NotContains(t, manager.stakeRegistrations, key)
 }
+
 func TestBuildLedgerStateFindsProposedCommitteeMember(t *testing.T) {
 	coldKey := common.Blake2b224{0x01}
 	coldCredential := common.Credential{
@@ -633,12 +635,11 @@ func TestCommitteeCertificateValidationUsesExactCredentialAcrossPhases(
 		unambiguousMember,
 	} {
 		stateManager.committeeMembers[coldKey] = 42
-		stateManager.govState.CommitteeMembersByCredential[coldKey] =
-			&CommitteeMemberInfo{
-				ColdCredential: coldKey.AsCredential(),
-				ColdKey:        coldKey.Credential,
-				ExpiryEpoch:    42,
-			}
+		stateManager.govState.CommitteeMembersByCredential[coldKey] = &CommitteeMemberInfo{
+			ColdCredential: coldKey.AsCredential(),
+			ColdKey:        coldKey.Credential,
+			ExpiryEpoch:    42,
+		}
 	}
 	stateManager.govState.syncLegacyCommitteeMembers()
 	txWithCertificate := func(
@@ -740,12 +741,11 @@ func TestCommitteeCertificateValidationUsesConfiguredLayers(t *testing.T) {
 				coldKey := ledger.NewRewardAccountKey(coldCredential)
 				stateManager := NewMockStateManager()
 				stateManager.committeeMembers[coldKey] = 42
-				stateManager.govState.CommitteeMembersByCredential[coldKey] =
-					&CommitteeMemberInfo{
-						ColdCredential: coldCredential,
-						ColdKey:        coldCredential.Credential,
-						ExpiryEpoch:    42,
-					}
+				stateManager.govState.CommitteeMembersByCredential[coldKey] = &CommitteeMemberInfo{
+					ColdCredential: coldCredential,
+					ColdKey:        coldCredential.Credential,
+					ExpiryEpoch:    42,
+				}
 				certificate := &common.AuthCommitteeHotCertificate{
 					CertType: uint(
 						common.CertificateTypeAuthCommitteeHot,
@@ -1037,12 +1037,11 @@ func TestCommitteeCertificateValidationIgnoresExpiredOnlyCurrentState(
 	stateManager.currentEpoch = currentEpoch
 	stateManager.govState.CurrentEpoch = currentEpoch
 	stateManager.committeeMembers[expiredKey] = currentEpoch - 1
-	stateManager.govState.CommitteeMembersByCredential[expiredKey] =
-		&CommitteeMemberInfo{
-			ColdCredential: expiredCredential,
-			ColdKey:        expiredCredential.Credential,
-			ExpiryEpoch:    currentEpoch - 1,
-		}
+	stateManager.govState.CommitteeMembersByCredential[expiredKey] = &CommitteeMemberInfo{
+		ColdCredential: expiredCredential,
+		ColdKey:        expiredCredential.Credential,
+		ExpiryEpoch:    currentEpoch - 1,
+	}
 	certificate := &common.AuthCommitteeHotCertificate{
 		CertType:       uint(common.CertificateTypeAuthCommitteeHot),
 		ColdCredential: targetCredential,
@@ -1814,8 +1813,9 @@ func TestDRepVoteRefreshPreservesLegacyRegistration(t *testing.T) {
 		DRepInactivityPeriod: activity,
 	}
 	stateManager.govState.DRepRegistrations[credential.Credential] = true
-	stateManager.govState.Proposals[formatGovActionIdFromPtr(actionID)] =
-		&ProposalState{GovActionInfo: GovActionInfo{ExpiresAfter: 20}}
+	stateManager.govState.Proposals[formatGovActionIdFromPtr(actionID)] = &ProposalState{
+		GovActionInfo: GovActionInfo{ExpiresAfter: 20},
+	}
 	tx := ledger.NewTransactionBuilder().WithVotingProcedures(
 		common.VotingProcedures{
 			&common.Voter{
@@ -2559,12 +2559,11 @@ func TestUpdateCommitteeEnactmentMergesCredentialViews(t *testing.T) {
 	}
 	stateManager := NewMockStateManager()
 	stateManager.committeeMembers[replacementScript] = 40
-	stateManager.govState.CommitteeMembersByCredential[replacementScript] =
-		&CommitteeMemberInfo{
-			ColdCredential: replacementScript.AsCredential(),
-			ColdKey:        replacementHash,
-			ExpiryEpoch:    40,
-		}
+	stateManager.govState.CommitteeMembersByCredential[replacementScript] = &CommitteeMemberInfo{
+		ColdCredential: replacementScript.AsCredential(),
+		ColdKey:        replacementHash,
+		ExpiryEpoch:    40,
+	}
 	stateManager.govState.syncLegacyCommitteeMembers()
 	ratifiedEpoch := uint64(1)
 	stateManager.govState.Proposals["update#0"] = &ProposalState{
@@ -2915,10 +2914,8 @@ func TestRatificationErrorIsDeterministicAndTransactional(t *testing.T) {
 		stateManager.committeeResignations[coldKey] = true
 		stateManager.govState.CommitteeMembers[coldCredential.Credential] = member
 		stateManager.govState.CommitteeMembersByCredential[coldKey] = member
-		stateManager.govState.HotKeyAuthorizations[coldCredential.Credential] =
-			hotCredential.Credential
-		stateManager.govState.HotKeyAuthorizationsByCredential[coldKey] =
-			hotCredential
+		stateManager.govState.HotKeyAuthorizations[coldCredential.Credential] = hotCredential.Credential
+		stateManager.govState.HotKeyAuthorizationsByCredential[coldKey] = hotCredential
 		stateManager.govState.CommitteeResignations[coldKey] = true
 
 		protocolRoot := "old-parameters#0"

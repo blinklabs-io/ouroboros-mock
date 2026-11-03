@@ -115,7 +115,6 @@ func TestUtxoBuilder_Build_Success(t *testing.T) {
 		WithAddress(addr).
 		WithLovelace(lovelace).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -169,7 +168,6 @@ func TestUtxoBuilder_WithMultipleAssets(t *testing.T) {
 		WithLovelace(2000000).
 		WithAssets(assets...).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -195,7 +193,6 @@ func TestUtxoBuilder_ChainedMethods(t *testing.T) {
 		WithDatumHash(nil).
 		WithScriptRef(nil).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Chained Build() returned error: %v", err)
 	}
@@ -762,7 +759,6 @@ func TestPoolBuilder_Build(t *testing.T) {
 		WithMargin(1, 100).
 		WithOwners(operatorHash).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -822,7 +818,6 @@ func TestAdaPotsBuilder_Build(t *testing.T) {
 		WithTreasury(treasury).
 		WithRewards(rewards).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -865,7 +860,6 @@ func TestRewardSnapshotBuilder_Build(t *testing.T) {
 	snapshot, err := ledger.NewRewardSnapshotBuilder().
 		WithTotalActiveStake(totalStake).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -935,7 +929,6 @@ func TestCommitteeMemberBuilder_Build_Success(t *testing.T) {
 		WithExpiryEpoch(expiryEpoch).
 		WithResigned(false).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1297,7 +1290,6 @@ func TestDRepRegistrationBuilder_Build_Success(t *testing.T) {
 		WithDeposit(deposit).
 		WithAnchor(anchorUrl, bytes.Repeat([]byte{0x55}, 32)).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1412,7 +1404,6 @@ func TestConstitutionBuilder_Build_Success(t *testing.T) {
 		WithAnchor(anchorUrl, dataHash).
 		WithScriptHash(scriptHash).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1476,7 +1467,6 @@ func TestGovAnchorBuilder_Build_Success(t *testing.T) {
 		WithURL(url).
 		WithDataHash(dataHash).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1531,7 +1521,6 @@ func TestVoterBuilder_Build_Success(t *testing.T) {
 		WithType(voterType).
 		WithHash(hash).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1586,7 +1575,6 @@ func TestVotingProcedureBuilder_Build_Success(t *testing.T) {
 		WithVote(vote).
 		WithAnchor(anchorUrl, bytes.Repeat([]byte{0x99}, 32)).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1614,7 +1602,6 @@ func TestVotingProcedureBuilder_Build_WithoutAnchor(t *testing.T) {
 	procedure, err := ledger.NewVotingProcedureBuilder().
 		WithVote(vote).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1744,7 +1731,6 @@ func TestTransactionBuilder_Build_Success(t *testing.T) {
 		WithTTL(ttl).
 		WithValid(true).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1805,7 +1791,6 @@ func TestTransactionInputBuilder_Build_Success(t *testing.T) {
 		WithTxId(txId).
 		WithIndex(index).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1877,7 +1862,6 @@ func TestTransactionOutputBuilder_Build_Success(t *testing.T) {
 		WithAddress(addr).
 		WithLovelace(lovelace).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -2121,7 +2105,6 @@ func TestNewSimpleTransaction(t *testing.T) {
 		[]lcommon.TransactionOutput{output},
 		fee,
 	)
-
 	if err != nil {
 		t.Fatalf("NewSimpleTransaction returned error: %v", err)
 	}

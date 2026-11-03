@@ -166,6 +166,7 @@ func TestFixtureManifestRequiresRegularFiles(t *testing.T) {
 		)
 	}
 }
+
 func TestFixtureRootConfinesSymlinkAdmissionAndReads(t *testing.T) {
 	for _, parentLink := range []bool{false, true} {
 		name := "file"
