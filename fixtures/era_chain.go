@@ -250,6 +250,10 @@ func GenerateDijkstraChain(
 					},
 					Signature: make([]byte, 448),
 				},
+				// leios_certified = false and no EB announcement. gouroboros
+				// encodes a header without the extension as the 10-field
+				// Praos body, whose era only the hard-fork schedule decides.
+				LeiosHeaderExtension: []cbor.RawMessage{{0xf4}, {0xf6}},
 			},
 			BlockBody: body,
 		}

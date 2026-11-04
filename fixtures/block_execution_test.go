@@ -102,8 +102,10 @@ func TestConsensusDijkstraPraosExampleUsesProducerCodec(t *testing.T) {
 	wrapped, err := fixture.ConsensusHeader()
 	require.NoError(t, err)
 	require.Equal(t, uint(7), wrapped.Era)
+	// gouroboros decodes the 10-field Praos body cardano-node forges for
+	// Dijkstra, leaving the Leios extension unset.
 	_, err = fixture.DecodeLedgerHeader()
-	require.ErrorContains(t, err, "expected exactly 12 fields, got 10")
+	require.NoError(t, err)
 
 	header := []cbor.RawMessage{}
 	_, err = cbor.Decode(wrapped.HeaderCbor(), &header)
