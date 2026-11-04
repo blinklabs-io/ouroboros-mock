@@ -272,7 +272,11 @@ func (b *DeregistrationBuilder) Build() (*lcommon.DeregistrationCertificate, err
 		return nil, err
 	}
 	return decodeCertificate(
-		[]any{uint(lcommon.CertificateTypeDeregistration), b.credential, amount},
+		[]any{
+			uint(lcommon.CertificateTypeDeregistration),
+			b.credential,
+			amount,
+		},
 		&lcommon.DeregistrationCertificate{},
 	)
 }
@@ -727,7 +731,9 @@ func (c *DRepDeregistrationCertificate) Utxorpc() (*utxorpc.Certificate, error) 
 	}
 	unregCert := result.GetUnregDrepCert()
 	if unregCert == nil {
-		return nil, errors.New("UTxORPC certificate is not a DRep deregistration")
+		return nil, errors.New(
+			"UTxORPC certificate is not a DRep deregistration",
+		)
 	}
 	unregCert.Coin = lcommon.BigIntToUtxorpcBigInt(c.DepositAmount())
 	return result, nil
@@ -849,7 +855,10 @@ func (b *DRepDeregistrationBuilder) Build() (*DRepDeregistrationCertificate, err
 		b.deposit,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("encode DRep deregistration certificate: %w", err)
+		return nil, fmt.Errorf(
+			"encode DRep deregistration certificate: %w",
+			err,
+		)
 	}
 	cert := &lcommon.DeregistrationDrepCertificate{
 		CertType:       uint(lcommon.CertificateTypeDeregistrationDrep),

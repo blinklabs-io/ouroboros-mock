@@ -446,9 +446,11 @@ func TestProcessOutputRejectsOversizedPayload(t *testing.T) {
 	msg := &protocol.MessageBase{}
 	msg.SetCbor(make([]byte, muxer.SegmentMaxPayloadLength+1))
 
-	err := (&Connection{muxer: testMuxer}).processOutputEntry(ConversationEntryOutput{
-		Messages: []protocol.Message{msg},
-	})
+	err := (&Connection{muxer: testMuxer}).processOutputEntry(
+		ConversationEntryOutput{
+			Messages: []protocol.Message{msg},
+		},
+	)
 
 	require.EqualError(
 		t,

@@ -135,22 +135,37 @@ func TxSubmissionScenario(
 	txs []txsubmission.TxBody,
 ) ([]ConversationEntry, error) {
 	if len(ids) != len(txs) {
-		return nil, errors.New("transaction IDs and bodies must have equal lengths")
+		return nil, errors.New(
+			"transaction IDs and bodies must have equal lengths",
+		)
 	}
 	count := len(ids)
 	if count > math.MaxUint16 {
-		return nil, errors.New("transaction count exceeds the protocol request limit")
+		return nil, errors.New(
+			"transaction count exceeds the protocol request limit",
+		)
 	}
 	for i, id := range ids {
 		if id.TxId.EraId != txs[i].EraId {
-			return nil, fmt.Errorf("transaction %d ID and body must have equal era IDs", i)
+			return nil, fmt.Errorf(
+				"transaction %d ID and body must have equal era IDs",
+				i,
+			)
 		}
 		encodedBody, err := txs[i].MarshalCBOR()
 		if err != nil {
-			return nil, fmt.Errorf("transaction %d: encode body for size validation: %w", i, err)
+			return nil, fmt.Errorf(
+				"transaction %d: encode body for size validation: %w",
+				i,
+				err,
+			)
 		}
-		if uint64(id.Size) != uint64(len(txs[i].TxBody)) && uint64(id.Size) != uint64(len(encodedBody)) {
-			return nil, fmt.Errorf("transaction %d advertised size must match its body or wire length", i)
+		if uint64(id.Size) != uint64(len(txs[i].TxBody)) &&
+			uint64(id.Size) != uint64(len(encodedBody)) {
+			return nil, fmt.Errorf(
+				"transaction %d advertised size must match its body or wire length",
+				i,
+			)
 		}
 	}
 	requestCount := uint16(count)
@@ -168,6 +183,10 @@ func TxSubmissionScenario(
 			TxSubmissionReplyTxs(txs),
 		)
 	}
-	entries = append(entries, TxSubmissionRequestTxIds(true, requestCount, 1), TxSubmissionDone())
+	entries = append(
+		entries,
+		TxSubmissionRequestTxIds(true, requestCount, 1),
+		TxSubmissionDone(),
+	)
 	return entries, nil
 }

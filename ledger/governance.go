@@ -227,7 +227,9 @@ func (b *drepRegistrationBuilder) Build() (*DRepRegistrationCertificate, error) 
 		}
 	}
 	certCBOR, err := cbor.Encode([]any{
-		uint(lcommon.CertificateTypeRegistrationDrep), credential, b.deposit, anchor,
+		uint(
+			lcommon.CertificateTypeRegistrationDrep,
+		), credential, b.deposit, anchor,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode DRep registration certificate: %w", err)

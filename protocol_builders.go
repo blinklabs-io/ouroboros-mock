@@ -71,7 +71,9 @@ func cloneTxIds(ids []txsubmission.TxId) []txsubmission.TxId {
 	return ret
 }
 
-func cloneTxIdsAndSizes(ids []txsubmission.TxIdAndSize) []txsubmission.TxIdAndSize {
+func cloneTxIdsAndSizes(
+	ids []txsubmission.TxIdAndSize,
+) []txsubmission.TxIdAndSize {
 	ret := make([]txsubmission.TxIdAndSize, len(ids))
 	copy(ret, ids)
 	return ret
@@ -220,8 +222,11 @@ func ChainSyncScenario(
 // BlockFetchRequestRange builds a block-fetch request input entry.
 func BlockFetchRequestRange(start, end pcommon.Point) ConversationEntryInput {
 	return ConversationEntryInput{
-		ProtocolId:      blockfetch.ProtocolId,
-		Message:         blockfetch.NewMsgRequestRange(clonePoint(start), clonePoint(end)),
+		ProtocolId: blockfetch.ProtocolId,
+		Message: blockfetch.NewMsgRequestRange(
+			clonePoint(start),
+			clonePoint(end),
+		),
 		MessageType:     blockfetch.MessageTypeRequestRange,
 		MsgFromCborFunc: blockfetch.NewMsgFromCbor,
 	}
@@ -350,8 +355,10 @@ func LocalTxMonitorNextTx() ConversationEntryInput {
 // Deprecated: use LocalTxMonitorHasTxForEra.
 func LocalTxMonitorHasTx(txID []byte) ConversationEntryInput {
 	return ConversationEntryInput{
-		ProtocolId:      localtxmonitor.ProtocolId,
-		Message:         localtxmonitor.NewMsgHasTx(cloneBytes(txID)), //nolint:staticcheck // deprecated wrapper for a deprecated constructor
+		ProtocolId: localtxmonitor.ProtocolId,
+		Message: localtxmonitor.NewMsgHasTx(
+			cloneBytes(txID),
+		), //nolint:staticcheck // deprecated wrapper for a deprecated constructor
 		MessageType:     localtxmonitor.MessageTypeHasTx,
 		MsgFromCborFunc: localtxmonitor.NewMsgFromCbor,
 	}
@@ -359,10 +366,16 @@ func LocalTxMonitorHasTx(txID []byte) ConversationEntryInput {
 
 // LocalTxMonitorHasTxForEra builds a has-transaction input entry for a
 // transaction ID tagged with its hard-fork era.
-func LocalTxMonitorHasTxForEra(eraID uint8, txID []byte) ConversationEntryInput {
+func LocalTxMonitorHasTxForEra(
+	eraID uint8,
+	txID []byte,
+) ConversationEntryInput {
 	return ConversationEntryInput{
-		ProtocolId:      localtxmonitor.ProtocolId,
-		Message:         localtxmonitor.NewMsgHasTxForEra(eraID, cloneBytes(txID)),
+		ProtocolId: localtxmonitor.ProtocolId,
+		Message: localtxmonitor.NewMsgHasTxForEra(
+			eraID,
+			cloneBytes(txID),
+		),
 		MessageType:     localtxmonitor.MessageTypeHasTx,
 		MsgFromCborFunc: localtxmonitor.NewMsgFromCbor,
 	}

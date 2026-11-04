@@ -49,7 +49,12 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 	)
 	headers := [][]byte{blocks[0].Header().Cbor(), blocks[1].Header().Cbor()}
 	rawBlocks := [][]byte{blocks[0].Cbor(), blocks[1].Cbor()}
-	forwardNtN, err := ChainSyncForwardScenarioNtN(conway.EraIdConway, 0, headers, tip)
+	forwardNtN, err := ChainSyncForwardScenarioNtN(
+		conway.EraIdConway,
+		0,
+		headers,
+		tip,
+	)
 	require.NoError(t, err)
 	forwardNtC, err := ChainSyncForwardScenarioNtC([]uint{7, 7}, rawBlocks, tip)
 	require.NoError(t, err)
@@ -60,7 +65,12 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 		tip,
 	)
 	require.NoError(t, err)
-	intersectionNtC, err := ChainSyncIntersectionScenario(true, []pcommon.Point{point}, &point, tip)
+	intersectionNtC, err := ChainSyncIntersectionScenario(
+		true,
+		[]pcommon.Point{point},
+		&point,
+		tip,
+	)
 	require.NoError(t, err)
 	noIntersection, err := ChainSyncIntersectionScenario(
 		true,
@@ -81,7 +91,10 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 	transactionCBOR := transaction.Cbor()
 	ids := []txsubmission.TxIdAndSize{
 		{
-			TxId: txsubmission.TxId{EraId: 6, TxId: [32]byte(transaction.Hash().Bytes())},
+			TxId: txsubmission.TxId{
+				EraId: 6,
+				TxId:  [32]byte(transaction.Hash().Bytes()),
+			},
 			Size: uint32(len(transactionCBOR)),
 		},
 	}
@@ -90,11 +103,18 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 	require.NoError(t, err)
 	emptySubmission, err := TxSubmissionScenario(nil, nil)
 	require.NoError(t, err)
-	query, err := LocalStateQueryQuery([]any{localstatequery.QueryTypeChainBlockNo})
+	query, err := LocalStateQueryQuery(
+		[]any{localstatequery.QueryTypeChainBlockNo},
+	)
 	require.NoError(t, err)
 	result, err := LocalStateQueryResult([]any{uint64(1), uint64(99)})
 	require.NoError(t, err)
-	emptyForwardNtN, err := ChainSyncForwardScenarioNtN(conway.EraIdConway, 0, nil, tip)
+	emptyForwardNtN, err := ChainSyncForwardScenarioNtN(
+		conway.EraIdConway,
+		0,
+		nil,
+		tip,
+	)
 	require.NoError(t, err)
 	emptyForwardNtC, err := ChainSyncForwardScenarioNtC(nil, nil, tip)
 	require.NoError(t, err)
@@ -157,8 +177,22 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 			"Idle",
 			chainsync.NewMsgFromCborNtC,
 		},
-		{"forward NtN", forwardNtN, 2, chainsync.StateMapNtN, "Idle", chainsync.NewMsgFromCborNtN},
-		{"forward NtC", forwardNtC, 5, chainsync.StateMapNtC, "Idle", chainsync.NewMsgFromCborNtC},
+		{
+			"forward NtN",
+			forwardNtN,
+			2,
+			chainsync.StateMapNtN,
+			"Idle",
+			chainsync.NewMsgFromCborNtN,
+		},
+		{
+			"forward NtC",
+			forwardNtC,
+			5,
+			chainsync.StateMapNtC,
+			"Idle",
+			chainsync.NewMsgFromCborNtC,
+		},
 		{
 			"rollback NtN",
 			ChainSyncRollbackScenario(false, point, tip),
@@ -215,7 +249,14 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 			"Idle",
 			blockfetch.NewMsgFromCbor,
 		},
-		{"submission", submission, 4, txsubmission.StateMap, "Init", txsubmission.NewMsgFromCbor},
+		{
+			"submission",
+			submission,
+			4,
+			txsubmission.StateMap,
+			"Init",
+			txsubmission.NewMsgFromCbor,
+		},
 		{
 			"no transactions",
 			emptySubmission,
@@ -245,7 +286,9 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 			"query failure",
 			[]ConversationEntry{
 				LocalStateQueryAcquire(point),
-				LocalStateQueryFailure(localstatequery.AcquireFailurePointNotOnChain),
+				LocalStateQueryFailure(
+					localstatequery.AcquireFailurePointNotOnChain,
+				),
 				LocalStateQueryDone(),
 			},
 			7,
@@ -255,7 +298,11 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 		},
 		{
 			"peer sharing",
-			[]ConversationEntry{PeerSharingRequest(1), PeerSharingPeers(nil), PeerSharingDone()},
+			[]ConversationEntry{
+				PeerSharingRequest(1),
+				PeerSharingPeers(nil),
+				PeerSharingDone(),
+			},
 			10,
 			peersharing.StateMap,
 			"Idle",
@@ -263,7 +310,11 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 		},
 		{
 			"keepalive",
-			[]ConversationEntry{KeepAliveRequest(27), KeepAliveResponse(27), KeepAliveDone()},
+			[]ConversationEntry{
+				KeepAliveRequest(27),
+				KeepAliveResponse(27),
+				KeepAliveDone(),
+			},
 			8,
 			keepalive.StateMap,
 			"Client",
@@ -272,7 +323,14 @@ func TestProtocolScenariosRunThroughMockConnection(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runProtocolScenario(t, test.entries, test.id, test.states, test.initial, test.decoder)
+			runProtocolScenario(
+				t,
+				test.entries,
+				test.id,
+				test.states,
+				test.initial,
+				test.decoder,
+			)
 		})
 	}
 }
@@ -314,7 +372,13 @@ func runProtocolScenario(
 			t.Fatalf("unexpected entry %T", entry)
 		}
 		for _, message := range messages {
-			require.Equal(t, agency, states[state].Agency, "agency before %T", message)
+			require.Equal(
+				t,
+				agency,
+				states[state].Agency,
+				"agency before %T",
+				message,
+			)
 			nextFound := false
 			for _, transition := range states[state].Transitions {
 				if transition.MsgType == message.Type() &&
@@ -324,10 +388,21 @@ func runProtocolScenario(
 					break
 				}
 			}
-			require.True(t, nextFound, "no transition for %T from %s", message, state)
+			require.True(
+				t,
+				nextFound,
+				"no transition for %T from %s",
+				message,
+				state,
+			)
 		}
 	}
-	require.Equal(t, protocol.AgencyNone, states[state].Agency, "scenario must finish the protocol")
+	require.Equal(
+		t,
+		protocol.AgencyNone,
+		states[state].Agency,
+		"scenario must finish the protocol",
+	)
 	mock := NewConnection(ProtocolRoleClient, entries).(*Connection)
 	clientMuxer := muxer.New(mock)
 	errors := make(chan error, 8)
@@ -449,7 +524,12 @@ func TestTxSubmissionScenarioAcceptsWrappedWireSize(t *testing.T) {
 	body := txsubmission.TxBody{EraId: 6, TxBody: []byte{0x80}}
 	encodedBody, err := body.MarshalCBOR()
 	require.NoError(t, err)
-	ids := []txsubmission.TxIdAndSize{{TxId: txsubmission.TxId{EraId: body.EraId}, Size: uint32(len(encodedBody))}}
+	ids := []txsubmission.TxIdAndSize{
+		{
+			TxId: txsubmission.TxId{EraId: body.EraId},
+			Size: uint32(len(encodedBody)),
+		},
+	}
 
 	entries, err := TxSubmissionScenario(ids, []txsubmission.TxBody{body})
 	require.NoError(t, err)
@@ -466,7 +546,10 @@ func TestTxSubmissionScenarioFollowsOutboundRequestRules(t *testing.T) {
 			txs := make([]txsubmission.TxBody, count)
 			for i := range count {
 				ids[i] = txsubmission.TxIdAndSize{
-					TxId: txsubmission.TxId{EraId: 6, TxId: [32]byte{byte(i + 1)}},
+					TxId: txsubmission.TxId{
+						EraId: 6,
+						TxId:  [32]byte{byte(i + 1)},
+					},
 				}
 				txs[i] = txsubmission.TxBody{EraId: 6}
 			}

@@ -43,13 +43,33 @@ var (
 	}
 	alonzoParameters = []boundedParameter{
 		{"maxValueSize", "MaxValueSize", "Word32", math.MaxUint32},
-		{"collateralPercentage", "CollateralPercentage", "Word16", math.MaxUint16},
-		{"maxCollateralInputs", "MaxCollateralInputs", "Word16", math.MaxUint16},
+		{
+			"collateralPercentage",
+			"CollateralPercentage",
+			"Word16",
+			math.MaxUint16,
+		},
+		{
+			"maxCollateralInputs",
+			"MaxCollateralInputs",
+			"Word16",
+			math.MaxUint16,
+		},
 	}
 	conwayParameters = []boundedParameter{
 		{"committeeMinSize", "MinCommitteeSize", "Word16", math.MaxUint16},
-		{"committeeMaxTermLength", "CommitteeTermLimit", "Word32", math.MaxUint32},
-		{"govActionLifetime", "GovActionValidityPeriod", "Word32", math.MaxUint32},
+		{
+			"committeeMaxTermLength",
+			"CommitteeTermLimit",
+			"Word32",
+			math.MaxUint32,
+		},
+		{
+			"govActionLifetime",
+			"GovActionValidityPeriod",
+			"Word32",
+			math.MaxUint32,
+		},
 		{"dRepActivity", "DRepInactivityPeriod", "Word32", math.MaxUint32},
 	}
 )
@@ -58,9 +78,15 @@ var (
 // (cardano-ledger PParams, and CDDL uint .size 2 / .size 4 or epoch_interval)
 // is narrower than the gouroboros field that receives them.
 func boundedParametersByEra() map[string][]boundedParameter {
-	shelley := append(append([]boundedParameter{}, word32Parameters...), word16Parameters...)
-	alonzo := append(append([]boundedParameter{}, shelley...), alonzoParameters...)
-	conway := append(append([]boundedParameter{}, alonzo...), conwayParameters...)
+	shelley := append(
+		append([]boundedParameter{}, word32Parameters...),
+		word16Parameters...)
+	alonzo := append(
+		append([]boundedParameter{}, shelley...),
+		alonzoParameters...)
+	conway := append(
+		append([]boundedParameter{}, alonzo...),
+		conwayParameters...)
 	return map[string][]boundedParameter{
 		"shelley":  shelley,
 		"alonzo":   alonzo,
@@ -88,7 +114,10 @@ func boundedParametersJSON(fields map[string]uint64, update bool) string {
 		)
 	}
 	for name, value := range fields {
-		parts = append(parts, strconv.Quote(name)+": "+strconv.FormatUint(value, 10))
+		parts = append(
+			parts,
+			strconv.Quote(name)+": "+strconv.FormatUint(value, 10),
+		)
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
 }
@@ -147,7 +176,12 @@ func TestDecodeProtocolParametersPreservesReferenceWidthMaximums(t *testing.T) {
 				for _, parameter := range parameters {
 					fields[parameter.jsonName] = parameter.limit
 				}
-				decoded, err := decodeBoundedParameterFixture(t, era, update, fields)
+				decoded, err := decodeBoundedParameterFixture(
+					t,
+					era,
+					update,
+					fields,
+				)
 				if err != nil {
 					t.Fatalf("decode failed: %v", err)
 				}
@@ -167,18 +201,30 @@ func TestDecodeProtocolParametersPreservesReferenceWidthMaximums(t *testing.T) {
 	}
 }
 
-func TestDecodeProtocolParametersRejectsValuesAboveReferenceWidth(t *testing.T) {
+func TestDecodeProtocolParametersRejectsValuesAboveReferenceWidth(
+	t *testing.T,
+) {
 	for era, parameters := range boundedParametersByEra() {
 		for _, update := range []bool{false, true} {
 			for _, parameter := range parameters {
-				name := fmt.Sprintf("%s/update=%t/%s", era, update, parameter.jsonName)
+				name := fmt.Sprintf(
+					"%s/update=%t/%s",
+					era,
+					update,
+					parameter.jsonName,
+				)
 				t.Run(name, func(t *testing.T) {
 					fields := make(map[string]uint64, len(parameters))
 					for _, other := range parameters {
 						fields[other.jsonName] = 1
 					}
 					fields[parameter.jsonName] = parameter.limit + 1
-					decoded, err := decodeBoundedParameterFixture(t, era, update, fields)
+					decoded, err := decodeBoundedParameterFixture(
+						t,
+						era,
+						update,
+						fields,
+					)
 					if err == nil {
 						t.Fatalf(
 							"decode accepted %s = %d into %T, want %s range error",
@@ -188,7 +234,10 @@ func TestDecodeProtocolParametersRejectsValuesAboveReferenceWidth(t *testing.T) 
 							parameter.width,
 						)
 					}
-					if !strings.Contains(err.Error(), "exceeds "+parameter.width+" range") {
+					if !strings.Contains(
+						err.Error(),
+						"exceeds "+parameter.width+" range",
+					) {
 						t.Fatalf(
 							"decode error = %v, want %s range error",
 							err,

@@ -30,9 +30,14 @@ import (
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
 	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(ctx, os.Args[1:], os.Stdout); err != nil &&
+		!errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -53,7 +58,11 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return err
 	}
 	listenConfig := net.ListenConfig{}
-	listener, err := listenConfig.Listen(ctx, string(cfg.Listener.Network), string(cfg.Listener.Address))
+	listener, err := listenConfig.Listen(
+		ctx,
+		string(cfg.Listener.Network),
+		string(cfg.Listener.Address),
+	)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -64,8 +73,17 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	return serve(ctx, listener, entries)
 }
 
-func serve(ctx context.Context, listener net.Listener, entries []mock.ConversationEntry) error {
-	return serveWithInitialMessageTimeout(ctx, listener, entries, handshake.ProposeTimeout)
+func serve(
+	ctx context.Context,
+	listener net.Listener,
+	entries []mock.ConversationEntry,
+) error {
+	return serveWithInitialMessageTimeout(
+		ctx,
+		listener,
+		entries,
+		handshake.ProposeTimeout,
+	)
 }
 
 func serveWithInitialMessageTimeout(
@@ -75,7 +93,10 @@ func serveWithInitialMessageTimeout(
 	timeout time.Duration,
 ) error {
 	acceptDone := make(chan struct{})
-	stopAccept := context.AfterFunc(ctx, func() { _ = listener.Close(); close(acceptDone) })
+	stopAccept := context.AfterFunc(
+		ctx,
+		func() { _ = listener.Close(); close(acceptDone) },
+	)
 	defer func() {
 		if !stopAccept() {
 			<-acceptDone
@@ -100,18 +121,27 @@ func serveWithInitialMessageTimeout(
 		FirstInputAccepted() <-chan struct{}
 	})
 	if !ok {
-		return errors.New("mock connection does not report conversation completion")
+		return errors.New(
+			"mock connection does not report conversation completion",
+		)
 	}
 	return bridge(
 		ctx,
 		conn,
 		mocked,
-		waitForInitialMessage(conn, conversation.FirstInputAccepted(), conversation.ErrorChan()),
+		waitForInitialMessage(
+			conn,
+			conversation.FirstInputAccepted(),
+			conversation.ErrorChan(),
+		),
 		handshake.ConfirmTimeout,
 	)
 }
 
-func withInitialMessageTimeout(conn net.Conn, timeout time.Duration) (net.Conn, error) {
+func withInitialMessageTimeout(
+	conn net.Conn,
+	timeout time.Duration,
+) (net.Conn, error) {
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, fmt.Errorf("set initial message deadline: %w", err)
 	}
@@ -179,7 +209,11 @@ func (r *observedReader) Read(data []byte) (int, error) {
 	return n, err
 }
 
-func copyConnection(destination io.Writer, source io.Reader, result chan<- copyResult) {
+func copyConnection(
+	destination io.Writer,
+	source io.Reader,
+	result chan<- copyResult,
+) {
 	reader := &observedReader{Reader: source}
 	_, err := io.Copy(destination, reader)
 	result <- copyResult{err: err, sourceErr: reader.err}
@@ -196,7 +230,10 @@ func bridge(
 	go copyConnection(mocked, conn, incoming)
 	go copyConnection(conn, mocked, outgoing)
 	canceled := make(chan struct{})
-	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close(); _ = mocked.Close(); close(canceled) })
+	stopCancel := context.AfterFunc(
+		ctx,
+		func() { _ = conn.Close(); _ = mocked.Close(); close(canceled) },
+	)
 	defer func() {
 		if !stopCancel() {
 			<-canceled
@@ -229,7 +266,9 @@ func bridge(
 		}
 	case outResult = <-outgoing:
 		outDone = true
-		if outResult.err != nil && !errors.Is(outResult.sourceErr, io.ErrClosedPipe) && !errors.Is(outResult.sourceErr, net.ErrClosed) {
+		if outResult.err != nil &&
+			!errors.Is(outResult.sourceErr, io.ErrClosedPipe) &&
+			!errors.Is(outResult.sourceErr, net.ErrClosed) {
 			result = fmt.Errorf("write response: %w", outResult.err)
 			break
 		}
@@ -250,7 +289,8 @@ func bridge(
 	if !outDone {
 		if result == nil {
 			if err := conn.SetWriteDeadline(time.Now().Add(drainTimeout)); err != nil &&
-				!errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, net.ErrClosed) {
+				!errors.Is(err, io.ErrClosedPipe) &&
+				!errors.Is(err, net.ErrClosed) {
 				result = fmt.Errorf("set response drain deadline: %w", err)
 				_ = conn.Close()
 			}
@@ -268,14 +308,22 @@ func bridge(
 		return ctx.Err()
 	}
 	if inResult.sourceErr != nil && !errors.Is(inResult.sourceErr, io.EOF) &&
-		!errors.Is(inResult.sourceErr, io.ErrClosedPipe) && !errors.Is(inResult.sourceErr, net.ErrClosed) &&
+		!errors.Is(
+			inResult.sourceErr,
+			io.ErrClosedPipe,
+		) && !errors.Is(inResult.sourceErr, net.ErrClosed) &&
 		!errors.Is(result, inResult.sourceErr) {
-		result = errors.Join(result, fmt.Errorf("read request: %w", inResult.sourceErr))
+		result = errors.Join(
+			result,
+			fmt.Errorf("read request: %w", inResult.sourceErr),
+		)
 	}
 	if result != nil {
 		return result
 	}
-	if outResult.err != nil && !errors.Is(outResult.sourceErr, io.ErrClosedPipe) && !errors.Is(outResult.sourceErr, net.ErrClosed) {
+	if outResult.err != nil &&
+		!errors.Is(outResult.sourceErr, io.ErrClosedPipe) &&
+		!errors.Is(outResult.sourceErr, net.ErrClosed) {
 		return fmt.Errorf("write response: %w", outResult.err)
 	}
 	return nil

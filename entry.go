@@ -193,9 +193,12 @@ func NewConversationHandshakeNtNAsClient(
 			},
 		},
 		ConversationEntryInput{
-			ProtocolId:      handshake.ProtocolId,
-			IsResponse:      true,
-			Message:         handshake.NewMsgAcceptVersion(version, expectedServerVersionData),
+			ProtocolId: handshake.ProtocolId,
+			IsResponse: true,
+			Message: handshake.NewMsgAcceptVersion(
+				version,
+				expectedServerVersionData,
+			),
 			MsgFromCborFunc: handshake.NewMsgFromCbor,
 		},
 	}

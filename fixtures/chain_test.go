@@ -314,8 +314,13 @@ func TestGenerateConwayChainWithTransactionsRejectsOverflow(t *testing.T) {
 				tc.increment,
 				2,
 			)
-			if err == nil || !strings.Contains(err.Error(), tc.message) || blocks != nil {
-				t.Fatalf("overflow returned %d blocks, error=%v", len(blocks), err)
+			if err == nil || !strings.Contains(err.Error(), tc.message) ||
+				blocks != nil {
+				t.Fatalf(
+					"overflow returned %d blocks, error=%v",
+					len(blocks),
+					err,
+				)
 			}
 		})
 	}

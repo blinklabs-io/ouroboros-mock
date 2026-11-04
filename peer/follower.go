@@ -229,7 +229,10 @@ func (f *Follower) rollBackward(
 	if keep < 0 {
 		if point.Slot >= f.base.Slot {
 			f.mu.Unlock()
-			return fmt.Errorf("rollback to unknown point at slot %d", point.Slot)
+			return fmt.Errorf(
+				"rollback to unknown point at slot %d",
+				point.Slot,
+			)
 		}
 		f.base = point
 		keep = 0

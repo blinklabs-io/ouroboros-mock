@@ -69,7 +69,9 @@ func TestConsensusDijkstraBlockExecutionValidatesFullBody(t *testing.T) {
 			require.NoError(t, os.WriteFile(
 				filepath.Join(root, "manifest.txt"), []byte(manifest), 0o600,
 			))
-			harness := fixtures.NewHarness(fixtures.HarnessConfig{FixturesRoot: root})
+			harness := fixtures.NewHarness(
+				fixtures.HarnessConfig{FixturesRoot: root},
+			)
 			result, err := harness.ExecuteFixture(relDir + "/Block_Dijkstra")
 			require.NoError(t, err)
 			require.Equal(t, tc.valid, result.Success)

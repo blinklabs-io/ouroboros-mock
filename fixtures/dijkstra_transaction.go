@@ -133,7 +133,9 @@ func (b *DijkstraTransactionBuilder) WithAccountBalanceInterval(
 		intervals = dijkstra.DijkstraAccountBalanceIntervals{}
 		b.tx.Body.TxBalanceIntervals = intervals
 	}
-	intervals[cbor.NewByteString(raw)] = cloneDijkstraAccountBalanceInterval(&interval)
+	intervals[cbor.NewByteString(raw)] = cloneDijkstraAccountBalanceInterval(
+		&interval,
+	)
 	b.tx.Body.TxBalanceIntervals = intervals
 	b.tx.Body.SetCbor(nil)
 	return b
@@ -505,7 +507,9 @@ func encodeDijkstraTransactionBody(
 	if raw := body.Cbor(); raw != nil {
 		return raw, nil
 	}
-	if subtransactions := body.TxSubTransactions.Items(); len(subtransactions) > 0 {
+	if subtransactions := body.TxSubTransactions.Items(); len(
+		subtransactions,
+	) > 0 {
 		normalized := make(
 			[]dijkstra.DijkstraSubTransaction,
 			len(subtransactions),

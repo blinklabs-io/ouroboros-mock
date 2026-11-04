@@ -48,7 +48,9 @@ type messageConfig struct {
 	Cookie       *yamlUint16 `yaml:"cookie"`
 }
 
-func loadConfiguration(reader io.Reader) (configuration, []mock.ConversationEntry, error) {
+func loadConfiguration(
+	reader io.Reader,
+) (configuration, []mock.ConversationEntry, error) {
 	var cfg configuration
 	decoder := yaml.NewDecoder(reader)
 	decoder.KnownFields(true)
@@ -63,11 +65,15 @@ func loadConfiguration(reader io.Reader) (configuration, []mock.ConversationEntr
 		if err != nil {
 			return cfg, nil, fmt.Errorf("decode trailing document: %w", err)
 		}
-		return cfg, nil, errors.New("configuration must contain exactly one YAML document")
+		return cfg, nil, errors.New(
+			"configuration must contain exactly one YAML document",
+		)
 	}
 	if (cfg.Listener.Network != "tcp" && cfg.Listener.Network != "unix") ||
 		cfg.Listener.Address == "" {
-		return cfg, nil, errors.New("listener requires network tcp or unix and an address")
+		return cfg, nil, errors.New(
+			"listener requires network tcp or unix and an address",
+		)
 	}
 	if len(cfg.Entries) == 0 {
 		return cfg, nil, errors.New("conversation requires entries")
@@ -79,7 +85,10 @@ func loadConfiguration(reader io.Reader) (configuration, []mock.ConversationEntr
 			return cfg, nil, fmt.Errorf("entry %d: %w", i+1, err)
 		}
 		if raw.Close != nil && i != len(cfg.Entries)-1 {
-			return cfg, nil, fmt.Errorf("entry %d: close must be the final entry", i+1)
+			return cfg, nil, fmt.Errorf(
+				"entry %d: close must be the final entry",
+				i+1,
+			)
 		}
 		entries = append(entries, entry)
 	}
@@ -94,7 +103,9 @@ func (e entryConfig) build() (mock.ConversationEntry, error) {
 		}
 	}
 	if count != 1 {
-		return nil, errors.New("exactly one of input, output, sleep, close is required")
+		return nil, errors.New(
+			"exactly one of input, output, sleep, close is required",
+		)
 	}
 	if e.Close != nil {
 		if !*e.Close {
@@ -121,15 +132,20 @@ func (e entryConfig) build() (mock.ConversationEntry, error) {
 func (m messageConfig) build(input bool) (mock.ConversationEntry, error) {
 	switch m.Type {
 	case "handshake.propose_versions":
-		if !input || m.Mode != "" || m.Version != nil || m.NetworkMagic != nil || m.Cookie != nil {
-			return nil, errors.New("handshake.propose_versions requires input and only type")
+		if !input || m.Mode != "" || m.Version != nil ||
+			m.NetworkMagic != nil ||
+			m.Cookie != nil {
+			return nil, errors.New(
+				"handshake.propose_versions requires input and only type",
+			)
 		}
 		return mock.ConversationEntryInput{
 			ProtocolId:  handshake.ProtocolId,
 			MessageType: handshake.MessageTypeProposeVersions,
 		}, nil
 	case "handshake.accept_version":
-		if input || m.Version == nil || m.NetworkMagic == nil || m.Cookie != nil {
+		if input || m.Version == nil || m.NetworkMagic == nil ||
+			m.Cookie != nil {
 			return nil, errors.New(
 				"handshake.accept_version requires output, mode, version, network-magic",
 			)
@@ -144,7 +160,9 @@ func (m messageConfig) build(input bool) (mock.ConversationEntry, error) {
 			version = uint16(*m.Version)
 			data = protocol.VersionDataNtN13andUp{
 				VersionDataNtN11to12: protocol.VersionDataNtN11to12{
-					CborNetworkMagic:                       uint32(*m.NetworkMagic),
+					CborNetworkMagic: uint32(
+						*m.NetworkMagic,
+					),
 					CborInitiatorAndResponderDiffusionMode: protocol.DiffusionModeInitiatorOnly,
 					CborPeerSharing:                        protocol.PeerSharingModeNoPeerSharing,
 					CborQuery:                              protocol.QueryModeDisabled,
@@ -152,20 +170,27 @@ func (m messageConfig) build(input bool) (mock.ConversationEntry, error) {
 			}
 		case "node-to-client":
 			if *m.Version != 14 {
-				return nil, errors.New("node-to-client demo supports version 14")
+				return nil, errors.New(
+					"node-to-client demo supports version 14",
+				)
 			}
 			version = uint16(*m.Version) + protocol.ProtocolVersionNtCOffset
 			data = protocol.VersionDataNtC9to14(*m.NetworkMagic)
 		default:
-			return nil, errors.New("handshake mode must be node-to-node or node-to-client")
+			return nil, errors.New(
+				"handshake mode must be node-to-node or node-to-client",
+			)
 		}
 		return mock.ConversationEntryOutput{
 			ProtocolId: handshake.ProtocolId,
 			IsResponse: true,
-			Messages:   []protocol.Message{handshake.NewMsgAcceptVersion(version, data)},
+			Messages: []protocol.Message{
+				handshake.NewMsgAcceptVersion(version, data),
+			},
 		}, nil
 	case "keepalive.request", "keepalive.response":
-		if m.Cookie == nil || m.Mode != "" || m.Version != nil || m.NetworkMagic != nil {
+		if m.Cookie == nil || m.Mode != "" || m.Version != nil ||
+			m.NetworkMagic != nil {
 			return nil, errors.New("keepalive requires only type and cookie")
 		}
 		if m.Type == "keepalive.request" && input {
@@ -179,7 +204,9 @@ func (m messageConfig) build(input bool) (mock.ConversationEntry, error) {
 			return mock.ConversationEntryOutput{
 				ProtocolId: keepalive.ProtocolId,
 				IsResponse: true,
-				Messages:   []protocol.Message{keepalive.NewMsgKeepAliveResponse(uint16(*m.Cookie))},
+				Messages: []protocol.Message{
+					keepalive.NewMsgKeepAliveResponse(uint16(*m.Cookie)),
+				},
 			}, nil
 		}
 		return nil, errors.New(

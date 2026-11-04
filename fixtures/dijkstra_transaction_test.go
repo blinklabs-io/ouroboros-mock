@@ -117,7 +117,9 @@ func TestDijkstraTransactionBuilderRejectsEmptySubTransactions(t *testing.T) {
 	require.ErrorContains(t, err, "sub-transactions must not be empty")
 }
 
-func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(t *testing.T) {
+func TestDijkstraTransactionBuilderRejectsDecodedEmptySubTransactions(
+	t *testing.T,
+) {
 	bodyCBOR, err := cbor.Encode(map[uint64]any{
 		0:  []any{},
 		1:  []any{},
@@ -192,7 +194,11 @@ func TestDijkstraTransactionBuilderRejectsDecodedWitnessSetKeyPastPlutusV4(
 	_, err := fixtures.NewDijkstraTransactionBuilder().
 		WithWitnessSet(witnesses).
 		Build()
-	require.ErrorContains(t, err, "witness set key 9 is not part of the Dijkstra CDDL")
+	require.ErrorContains(
+		t,
+		err,
+		"witness set key 9 is not part of the Dijkstra CDDL",
+	)
 }
 
 func TestDijkstraTransactionBuilderAcceptsPlutusV4WitnessScripts(t *testing.T) {
@@ -230,7 +236,9 @@ func TestDijkstraTransactionBuilderAcceptsSubTransactionPlutusV4WitnessScripts(
 func TestDijkstraTransactionBuilderEncodesRequiredBodyKeys(t *testing.T) {
 	tx, err := fixtures.NewDijkstraTransactionBuilder().
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{
-			Body: dijkstra.DijkstraSubTransactionBody{TxGuards: testDijkstraGuard()},
+			Body: dijkstra.DijkstraSubTransactionBody{
+				TxGuards: testDijkstraGuard(),
+			},
 		}).
 		Build()
 	require.NoError(t, err)
@@ -255,7 +263,12 @@ func TestDijkstraTransactionBuilderEncodesRequiredBodyKeys(t *testing.T) {
 	for _, key := range []uint64{0, 1} {
 		require.Contains(t, subBody, key, "subtransaction body key %d", key)
 	}
-	require.NotContains(t, subBody, uint64(2), "subtransaction bodies carry no fee")
+	require.NotContains(
+		t,
+		subBody,
+		uint64(2),
+		"subtransaction bodies carry no fee",
+	)
 }
 
 func TestDijkstraTransactionBuilderEncodesMetadata(t *testing.T) {
@@ -322,7 +335,9 @@ func TestDijkstraTransactionBuilderRebuildsDecodedBody(t *testing.T) {
 	tx, err = fixtures.NewDijkstraTransactionBuilder().
 		WithBody(base.Body).
 		WithSubTransactions(dijkstra.DijkstraSubTransaction{
-			Body: dijkstra.DijkstraSubTransactionBody{TxGuards: testDijkstraGuard()},
+			Body: dijkstra.DijkstraSubTransactionBody{
+				TxGuards: testDijkstraGuard(),
+			},
 		}).
 		Build()
 	require.NoError(t, err)
@@ -378,7 +393,9 @@ func TestDijkstraTransactionBuilderEncodesDirectDeposits(t *testing.T) {
 	require.Contains(t, body, uint64(25))
 }
 
-func TestDijkstraTransactionBuilderEncodesAccountBalanceIntervals(t *testing.T) {
+func TestDijkstraTransactionBuilderEncodesAccountBalanceIntervals(
+	t *testing.T,
+) {
 	t.Parallel()
 	first, second := testAccountAddress(t, 1), testAccountAddress(t, 2)
 	firstBytes, err := first.Bytes()
@@ -419,7 +436,10 @@ func TestDijkstraTransactionBuilderEncodesAccountBalanceIntervals(t *testing.T) 
 	require.NotNil(t, secondInterval)
 	require.Equal(
 		t,
-		dijkstra.DijkstraAccountBalanceInterval{LowerBound: &lower, UpperBound: &upper},
+		dijkstra.DijkstraAccountBalanceInterval{
+			LowerBound: &lower,
+			UpperBound: &upper,
+		},
 		*secondInterval,
 		"a later interval for the same account replaces the earlier one",
 	)
@@ -455,7 +475,11 @@ func TestDijkstraTransactionBuilderAccountSettersOwnMapChanges(t *testing.T) {
 	exact = 99
 	tx, err := builder.Build()
 	require.NoError(t, err)
-	require.Equal(t, uint64(5), tx.Body.TxDirectDeposits[cbor.NewByteString(firstBytes)])
+	require.Equal(
+		t,
+		uint64(5),
+		tx.Body.TxDirectDeposits[cbor.NewByteString(firstBytes)],
+	)
 	firstInterval, ok := tx.Body.TxBalanceIntervals[cbor.NewByteString(firstBytes)]
 	require.True(t, ok)
 	require.NotNil(t, firstInterval)
@@ -546,7 +570,11 @@ func TestDijkstraTransactionBuilderAccountFieldsReplaceDecodedBodyCBOR(
 			var body dijkstra.DijkstraTransactionBody
 			_, err = cbor.Decode(bodyCBOR, &body)
 			require.NoError(t, err)
-			require.NotEmpty(t, body.Cbor(), "test requires the decoded raw-CBOR path")
+			require.NotEmpty(
+				t,
+				body.Cbor(),
+				"test requires the decoded raw-CBOR path",
+			)
 
 			tx, err := test.set(
 				fixtures.NewDijkstraTransactionBuilder().WithBody(body),

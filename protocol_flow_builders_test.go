@@ -48,8 +48,20 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 		wire    []any
 		decoder protocol.MessageFromCborFunc
 	}{
-		{"NtN await", ChainSyncAwaitReply(false), 2, []any{1}, chainsync.NewMsgFromCborNtN},
-		{"NtC await", ChainSyncAwaitReply(true), 5, []any{1}, chainsync.NewMsgFromCborNtC},
+		{
+			"NtN await",
+			ChainSyncAwaitReply(false),
+			2,
+			[]any{1},
+			chainsync.NewMsgFromCborNtN,
+		},
+		{
+			"NtC await",
+			ChainSyncAwaitReply(true),
+			5,
+			[]any{1},
+			chainsync.NewMsgFromCborNtC,
+		},
 		{
 			"NtN intersect",
 			ChainSyncIntersectFound(false, point, tip),
@@ -78,9 +90,27 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 			[]any{6, tip},
 			chainsync.NewMsgFromCborNtC,
 		},
-		{"NtN done", ChainSyncDone(false), 2, []any{7}, chainsync.NewMsgFromCborNtN},
-		{"NtC done", ChainSyncDone(true), 5, []any{7}, chainsync.NewMsgFromCborNtC},
-		{"batch start", BlockFetchStartBatch(), 3, []any{2}, blockfetch.NewMsgFromCbor},
+		{
+			"NtN done",
+			ChainSyncDone(false),
+			2,
+			[]any{7},
+			chainsync.NewMsgFromCborNtN,
+		},
+		{
+			"NtC done",
+			ChainSyncDone(true),
+			5,
+			[]any{7},
+			chainsync.NewMsgFromCborNtC,
+		},
+		{
+			"batch start",
+			BlockFetchStartBatch(),
+			3,
+			[]any{2},
+			blockfetch.NewMsgFromCbor,
+		},
 		{
 			"single block",
 			blockResponse,
@@ -88,9 +118,27 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 			[]any{4, cbor.Tag{Number: 24, Content: []byte{0x82, 0x07, 0x80}}},
 			blockfetch.NewMsgFromCbor,
 		},
-		{"batch done", BlockFetchBatchDone(), 3, []any{5}, blockfetch.NewMsgFromCbor},
-		{"block fetch done", BlockFetchClientDone(), 3, []any{1}, blockfetch.NewMsgFromCbor},
-		{"tx submission done", TxSubmissionDone(), 4, []any{4}, txsubmission.NewMsgFromCbor},
+		{
+			"batch done",
+			BlockFetchBatchDone(),
+			3,
+			[]any{5},
+			blockfetch.NewMsgFromCbor,
+		},
+		{
+			"block fetch done",
+			BlockFetchClientDone(),
+			3,
+			[]any{1},
+			blockfetch.NewMsgFromCbor,
+		},
+		{
+			"tx submission done",
+			TxSubmissionDone(),
+			4,
+			[]any{4},
+			txsubmission.NewMsgFromCbor,
+		},
 		{
 			"mempool acquired",
 			LocalTxMonitorAcquired(456),
@@ -126,7 +174,13 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 			[]any{10, []any{100, 20, 3}},
 			localtxmonitor.NewMsgFromCbor,
 		},
-		{"mempool done", LocalTxMonitorDone(), 9, []any{0}, localtxmonitor.NewMsgFromCbor},
+		{
+			"mempool done",
+			LocalTxMonitorDone(),
+			9,
+			[]any{0},
+			localtxmonitor.NewMsgFromCbor,
+		},
 		{
 			"query volatile",
 			LocalStateQueryAcquireVolatileTip(),
@@ -155,7 +209,13 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 			[]any{11},
 			localstatequery.NewMsgFromCbor,
 		},
-		{"query acquired", LocalStateQueryAcquired(), 7, []any{1}, localstatequery.NewMsgFromCbor},
+		{
+			"query acquired",
+			LocalStateQueryAcquired(),
+			7,
+			[]any{1},
+			localstatequery.NewMsgFromCbor,
+		},
 		{
 			"query failure",
 			LocalStateQueryFailure(1),
@@ -163,12 +223,32 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 			[]any{2, 1},
 			localstatequery.NewMsgFromCbor,
 		},
-		{"query result", result, 7, []any{4, []any{9, 8}}, localstatequery.NewMsgFromCbor},
-		{"query done", LocalStateQueryDone(), 7, []any{7}, localstatequery.NewMsgFromCbor},
-		{"peer request", PeerSharingRequest(5), 10, []any{0, 5}, peersharing.NewMsgFromCbor},
+		{
+			"query result",
+			result,
+			7,
+			[]any{4, []any{9, 8}},
+			localstatequery.NewMsgFromCbor,
+		},
+		{
+			"query done",
+			LocalStateQueryDone(),
+			7,
+			[]any{7},
+			localstatequery.NewMsgFromCbor,
+		},
+		{
+			"peer request",
+			PeerSharingRequest(5),
+			10,
+			[]any{0, 5},
+			peersharing.NewMsgFromCbor,
+		},
 		{
 			"IPv4 peers",
-			PeerSharingPeers([]peersharing.PeerAddress{{IP: net.IP{1, 2, 3, 4}, Port: 3001}}),
+			PeerSharingPeers(
+				[]peersharing.PeerAddress{{IP: net.IP{1, 2, 3, 4}, Port: 3001}},
+			),
 			10,
 			[]any{1, []any{[]any{0, uint32(0x04030201), 3001}}},
 			peersharing.NewMsgFromCbor,
@@ -176,17 +256,61 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 		{
 			"IPv6 peers",
 			PeerSharingPeers(
-				[]peersharing.PeerAddress{{IP: net.ParseIP("2001:db8::1"), Port: 3002}},
+				[]peersharing.PeerAddress{
+					{IP: net.ParseIP("2001:db8::1"), Port: 3002},
+				},
 			),
 			10,
-			[]any{1, []any{[]any{1, uint32(0xb80d0120), 0, 0, uint32(0x01000000), 3002}}},
+			[]any{
+				1,
+				[]any{
+					[]any{
+						1,
+						uint32(0xb80d0120),
+						0,
+						0,
+						uint32(0x01000000),
+						3002,
+					},
+				},
+			},
 			peersharing.NewMsgFromCbor,
 		},
-		{"no peers", PeerSharingPeers(nil), 10, []any{1, []any{}}, peersharing.NewMsgFromCbor},
-		{"peer done", PeerSharingDone(), 10, []any{2}, peersharing.NewMsgFromCbor},
-		{"keepalive request", KeepAliveRequest(123), 8, []any{0, 123}, keepalive.NewMsgFromCbor},
-		{"keepalive response", KeepAliveResponse(123), 8, []any{1, 123}, keepalive.NewMsgFromCbor},
-		{"keepalive done", KeepAliveDone(), 8, []any{2}, keepalive.NewMsgFromCbor},
+		{
+			"no peers",
+			PeerSharingPeers(nil),
+			10,
+			[]any{1, []any{}},
+			peersharing.NewMsgFromCbor,
+		},
+		{
+			"peer done",
+			PeerSharingDone(),
+			10,
+			[]any{2},
+			peersharing.NewMsgFromCbor,
+		},
+		{
+			"keepalive request",
+			KeepAliveRequest(123),
+			8,
+			[]any{0, 123},
+			keepalive.NewMsgFromCbor,
+		},
+		{
+			"keepalive response",
+			KeepAliveResponse(123),
+			8,
+			[]any{1, 123},
+			keepalive.NewMsgFromCbor,
+		},
+		{
+			"keepalive done",
+			KeepAliveDone(),
+			8,
+			[]any{2},
+			keepalive.NewMsgFromCbor,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -232,7 +356,12 @@ func TestBlockFetchBuildersRejectMalformedRawBlocks(t *testing.T) {
 	for _, data := range [][]byte{nil, {}, {0xff}, {0x80, 0x80}} {
 		_, err := BlockFetchBlockResponse(7, data)
 		require.Error(t, err)
-		entries, err := BlockFetchScenario(OriginPoint(), OriginPoint(), []uint{7}, [][]byte{data})
+		entries, err := BlockFetchScenario(
+			OriginPoint(),
+			OriginPoint(),
+			[]uint{7},
+			[][]byte{data},
+		)
 		require.Error(t, err)
 		require.Nil(t, entries)
 	}
@@ -330,7 +459,9 @@ func TestProtocolBuildersIsolateConcurrentCallerMutation(t *testing.T) {
 	peerIP := net.IP{1, 2, 3, 4}
 	messages := []protocol.Message{
 		ChainSyncFindIntersect(false, []pcommon.Point{point}).Message,
-		TxSubmissionReplyTxs([]txsubmission.TxBody{{EraId: 6, TxBody: txBody}}).Message,
+		TxSubmissionReplyTxs(
+			[]txsubmission.TxBody{{EraId: 6, TxBody: txBody}},
+		).Message,
 		LocalTxMonitorHasTxForEra(6, txID).Message,
 		PeerSharingPeers([]peersharing.PeerAddress{{IP: peerIP, Port: 3001}}).Messages[0],
 	}

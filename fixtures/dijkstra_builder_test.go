@@ -55,7 +55,10 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 		)
 	}
 	if block.BlockHeader.Body.PrevHash != prevHash {
-		t.Fatalf("unexpected previous hash: %x", block.BlockHeader.Body.PrevHash)
+		t.Fatalf(
+			"unexpected previous hash: %x",
+			block.BlockHeader.Body.PrevHash,
+		)
 	}
 	if block.BlockHeader.Body.BlockBodyHash != block.BlockBody.Hash() {
 		t.Fatal("header body hash does not match encoded body")
@@ -70,9 +73,15 @@ func TestDijkstraBlockBuilderEncodesTransactionsAndCertificates(t *testing.T) {
 		t.Fatal("Dijkstra block transaction validity flag was not preserved")
 	}
 	if !bytes.Equal(block.BlockBody.PerasCertificate, perasCertificate) {
-		t.Fatalf("unexpected Peras certificate: %x", block.BlockBody.PerasCertificate)
+		t.Fatalf(
+			"unexpected Peras certificate: %x",
+			block.BlockBody.PerasCertificate,
+		)
 	}
-	decoded, err := ledger.NewBlockFromCbor(ledger.BlockTypeDijkstra, block.Cbor())
+	decoded, err := ledger.NewBlockFromCbor(
+		ledger.BlockTypeDijkstra,
+		block.Cbor(),
+	)
 	if err != nil {
 		t.Fatalf("decode built block through generic decoder: %s", err)
 	}
@@ -112,7 +121,10 @@ func TestDijkstraBlockBuilderAcceptsPlutusV4WitnessScripts(t *testing.T) {
 		}).
 		Build()
 	if err != nil {
-		t.Fatalf("Dijkstra block builder rejected Plutus V4 witness scripts: %s", err)
+		t.Fatalf(
+			"Dijkstra block builder rejected Plutus V4 witness scripts: %s",
+			err,
+		)
 	}
 }
 
@@ -297,7 +309,10 @@ func TestDijkstraBlockBuilderEncodesPinnedHeaderShape(t *testing.T) {
 		t.Fatalf("header body has %d fields, want 12", len(headerBody))
 	}
 	if !bytes.Equal(headerBody[10], []byte{0xf4}) {
-		t.Fatalf("block_body_contains_leios_cert = %x, want false", headerBody[10])
+		t.Fatalf(
+			"block_body_contains_leios_cert = %x, want false",
+			headerBody[10],
+		)
 	}
 	if !bytes.Equal(headerBody[11], []byte{0xf6}) {
 		t.Fatalf("eb_announcement = %x, want nil", headerBody[11])
@@ -305,8 +320,13 @@ func TestDijkstraBlockBuilderEncodesPinnedHeaderShape(t *testing.T) {
 	if len(signature) != 448 {
 		t.Fatalf("KES signature width = %d, want 448", len(signature))
 	}
-	if certified, present := plain.BlockHeader.LeiosCertified(); certified || !present {
-		t.Fatalf("LeiosCertified() = %t, %t, want false, true", certified, present)
+	if certified, present := plain.BlockHeader.LeiosCertified(); certified ||
+		!present {
+		t.Fatalf(
+			"LeiosCertified() = %t, %t, want false, true",
+			certified,
+			present,
+		)
 	}
 
 	ebHash := common.Blake2b256Hash([]byte("endorser block"))
@@ -325,9 +345,13 @@ func TestDijkstraBlockBuilderEncodesPinnedHeaderShape(t *testing.T) {
 		t.Fatalf("header body has %d fields, want 12", len(headerBody))
 	}
 	if !bytes.Equal(headerBody[10], []byte{0xf5}) {
-		t.Fatalf("block_body_contains_leios_cert = %x, want true", headerBody[10])
+		t.Fatalf(
+			"block_body_contains_leios_cert = %x, want true",
+			headerBody[10],
+		)
 	}
-	if flag, present := certified.BlockHeader.LeiosCertified(); !flag || !present {
+	if flag, present := certified.BlockHeader.LeiosCertified(); !flag ||
+		!present {
 		t.Fatalf("LeiosCertified() = %t, %t, want true, true", flag, present)
 	}
 	gotHash, gotSize, ok := certified.BlockHeader.LeiosAnnouncement()

@@ -105,7 +105,9 @@ func (b *DijkstraBlockBuilder) WithPreviousHash(
 func (b *DijkstraBlockBuilder) WithTransactions(
 	transactions ...dijkstra.DijkstraTransaction,
 ) *DijkstraBlockBuilder {
-	b.transactions = append([]dijkstra.DijkstraTransaction(nil), transactions...)
+	b.transactions = append(
+		[]dijkstra.DijkstraTransaction(nil),
+		transactions...)
 	return b
 }
 
@@ -243,7 +245,9 @@ func (b *DijkstraBlockBuilder) Build() (*dijkstra.DijkstraBlock, error) {
 		return nil, fmt.Errorf("decode Dijkstra block fixture: %w", err)
 	}
 	if !bytes.Equal(decoded.Cbor(), blockCBOR) {
-		return nil, errors.New("Dijkstra block fixture changed during round-trip")
+		return nil, errors.New(
+			"Dijkstra block fixture changed during round-trip",
+		)
 	}
 	return decoded, nil
 }

@@ -46,16 +46,22 @@ func TestByronConsensusGenTxFixturesAreUnpaired(t *testing.T) {
 		t.Fatalf("missing fixture %s", byronTxIDPath)
 	}
 	if _, ok := relatedFixture(fixtureMap, byronTx, KindTransactionID); ok {
-		t.Fatal("Byron GenTx fixture must not pair with the independent ID golden")
+		t.Fatal(
+			"Byron GenTx fixture must not pair with the independent ID golden",
+		)
 	}
 	if _, ok := relatedFixture(fixtureMap, byronTxID, KindTransaction); ok {
-		t.Fatal("Byron GenTxId fixture must not pair with the independent transaction golden")
+		t.Fatal(
+			"Byron GenTxId fixture must not pair with the independent transaction golden",
+		)
 	}
 
 	shelleyTxPath := consensusV2FixtureRoot + "GenTx_Shelley"
 	shelleyTx := fixtureMap[shelleyTxPath]
 	if _, ok := relatedFixture(fixtureMap, shelleyTx, KindTransactionID); !ok {
-		t.Fatal("expected Shelley GenTx fixture to pair with its transaction ID")
+		t.Fatal(
+			"expected Shelley GenTx fixture to pair with its transaction ID",
+		)
 	}
 }
 
@@ -207,7 +213,8 @@ func TestDijkstraConsensusHeaderChecksRelatedBlock(t *testing.T) {
 		header.RelPath: header,
 		relPath:        blockFixture,
 	})
-	if err == nil || !strings.Contains(err.Error(), "header/block hash mismatch") {
+	if err == nil ||
+		!strings.Contains(err.Error(), "header/block hash mismatch") {
 		t.Fatalf("expected header/block hash mismatch, got %v", err)
 	}
 }

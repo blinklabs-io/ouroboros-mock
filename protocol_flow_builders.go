@@ -43,8 +43,15 @@ func protocolInput(
 	}
 }
 
-func protocolOutput(id uint16, messages ...protocol.Message) ConversationEntryOutput {
-	return ConversationEntryOutput{ProtocolId: id, IsResponse: true, Messages: messages}
+func protocolOutput(
+	id uint16,
+	messages ...protocol.Message,
+) ConversationEntryOutput {
+	return ConversationEntryOutput{
+		ProtocolId: id,
+		IsResponse: true,
+		Messages:   messages,
+	}
 }
 
 // ChainSyncAwaitReply builds an await-reply response for the negotiated mode.
@@ -67,7 +74,10 @@ func ChainSyncIntersectFound(
 }
 
 // ChainSyncIntersectNotFound builds an unsuccessful intersection response.
-func ChainSyncIntersectNotFound(nodeToClient bool, tip chainsync.Tip) ConversationEntryOutput {
+func ChainSyncIntersectNotFound(
+	nodeToClient bool,
+	tip chainsync.Tip,
+) ConversationEntryOutput {
 	id, _ := chainSyncMode(nodeToClient)
 	return protocolOutput(id, chainsync.NewMsgIntersectNotFound(cloneTip(tip)))
 }
@@ -84,17 +94,28 @@ func BlockFetchStartBatch() ConversationEntryOutput {
 }
 
 // BlockFetchBlockResponse wraps raw ledger block CBOR with its wire block type and builds one response within an open batch.
-func BlockFetchBlockResponse(blockType uint, rawBlock []byte) (ConversationEntryOutput, error) {
+func BlockFetchBlockResponse(
+	blockType uint,
+	rawBlock []byte,
+) (ConversationEntryOutput, error) {
 	if len(rawBlock) == 0 {
-		return ConversationEntryOutput{}, errors.New("raw block CBOR is required")
+		return ConversationEntryOutput{}, errors.New(
+			"raw block CBOR is required",
+		)
 	}
 	wrapped, err := cbor.Encode(
-		blockfetch.WrappedBlock{Type: blockType, RawBlock: cbor.RawMessage(rawBlock)},
+		blockfetch.WrappedBlock{
+			Type:     blockType,
+			RawBlock: cbor.RawMessage(rawBlock),
+		},
 	)
 	if err != nil {
 		return ConversationEntryOutput{}, err
 	}
-	return protocolOutput(blockfetch.ProtocolId, blockfetch.NewMsgBlock(wrapped)), nil
+	return protocolOutput(
+		blockfetch.ProtocolId,
+		blockfetch.NewMsgBlock(wrapped),
+	), nil
 }
 
 // BlockFetchBatchDone builds the response that ends a block batch.
@@ -122,7 +143,10 @@ func TxSubmissionDone() ConversationEntryInput {
 
 // LocalTxMonitorAcquired builds a response identifying the acquired mempool snapshot.
 func LocalTxMonitorAcquired(slot uint64) ConversationEntryOutput {
-	return protocolOutput(localtxmonitor.ProtocolId, localtxmonitor.NewMsgAcquired(slot))
+	return protocolOutput(
+		localtxmonitor.ProtocolId,
+		localtxmonitor.NewMsgAcquired(slot),
+	)
 }
 
 // LocalTxMonitorReplyNextTx builds a next-transaction response; a nil transaction means none remain.
@@ -135,11 +159,16 @@ func LocalTxMonitorReplyNextTx(era uint8, tx []byte) ConversationEntryOutput {
 
 // LocalTxMonitorReplyHasTx builds a transaction-presence response.
 func LocalTxMonitorReplyHasTx(present bool) ConversationEntryOutput {
-	return protocolOutput(localtxmonitor.ProtocolId, localtxmonitor.NewMsgReplyHasTx(present))
+	return protocolOutput(
+		localtxmonitor.ProtocolId,
+		localtxmonitor.NewMsgReplyHasTx(present),
+	)
 }
 
 // LocalTxMonitorReplyGetSizes builds a mempool capacity, size, and transaction-count response.
-func LocalTxMonitorReplyGetSizes(capacity, size, count uint32) ConversationEntryOutput {
+func LocalTxMonitorReplyGetSizes(
+	capacity, size, count uint32,
+) ConversationEntryOutput {
 	return protocolOutput(
 		localtxmonitor.ProtocolId,
 		localtxmonitor.NewMsgReplyGetSizes(capacity, size, count),
@@ -193,12 +222,18 @@ func LocalStateQueryReAcquireImmutableTip() ConversationEntryInput {
 
 // LocalStateQueryAcquired builds a successful acquisition response.
 func LocalStateQueryAcquired() ConversationEntryOutput {
-	return protocolOutput(localstatequery.ProtocolId, localstatequery.NewMsgAcquired())
+	return protocolOutput(
+		localstatequery.ProtocolId,
+		localstatequery.NewMsgAcquired(),
+	)
 }
 
 // LocalStateQueryFailure builds an acquisition-failure response.
 func LocalStateQueryFailure(reason uint8) ConversationEntryOutput {
-	return protocolOutput(localstatequery.ProtocolId, localstatequery.NewMsgFailure(reason))
+	return protocolOutput(
+		localstatequery.ProtocolId,
+		localstatequery.NewMsgFailure(reason),
+	)
 }
 
 // LocalStateQueryDone builds a client termination entry in the idle state.
@@ -239,12 +274,19 @@ func KeepAliveRequest(cookie uint16) ConversationEntryInput {
 
 // KeepAliveResponse builds a response containing the supplied cookie.
 func KeepAliveResponse(cookie uint16) ConversationEntryOutput {
-	return protocolOutput(keepalive.ProtocolId, keepalive.NewMsgKeepAliveResponse(cookie))
+	return protocolOutput(
+		keepalive.ProtocolId,
+		keepalive.NewMsgKeepAliveResponse(cookie),
+	)
 }
 
 // KeepAliveDone builds a client termination entry.
 func KeepAliveDone() ConversationEntryInput {
-	return protocolInput(keepalive.ProtocolId, keepalive.NewMsgDone(), keepalive.NewMsgFromCbor)
+	return protocolInput(
+		keepalive.ProtocolId,
+		keepalive.NewMsgDone(),
+		keepalive.NewMsgFromCbor,
+	)
 }
 
 // LocalStateQueryResult builds a result response from a CBOR-encodable query result.
@@ -253,12 +295,18 @@ func LocalStateQueryResult(result any) (ConversationEntryOutput, error) {
 	if err != nil {
 		return ConversationEntryOutput{}, err
 	}
-	return protocolOutput(localstatequery.ProtocolId, localstatequery.NewMsgResult(data)), nil
+	return protocolOutput(
+		localstatequery.ProtocolId,
+		localstatequery.NewMsgResult(data),
+	), nil
 }
 
 // PeerSharingPeers builds a peer-address response. A nil slice describes no peers.
 func PeerSharingPeers(peers []peersharing.PeerAddress) ConversationEntryOutput {
-	return protocolOutput(peersharing.ProtocolId, peersharing.NewMsgSharePeers(clonePeers(peers)))
+	return protocolOutput(
+		peersharing.ProtocolId,
+		peersharing.NewMsgSharePeers(clonePeers(peers)),
+	)
 }
 
 func clonePeers(peers []peersharing.PeerAddress) []peersharing.PeerAddress {

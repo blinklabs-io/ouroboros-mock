@@ -46,7 +46,10 @@ func NewTachysChainScenario() (TachysChainScenario, error) {
 	genesis := common.Blake2b256Hash([]byte("Tachys chain genesis"))
 	babbageBlocks, err := GenerateBabbageChain(1, genesis, 90, 5, 2)
 	if err != nil {
-		return TachysChainScenario{}, fmt.Errorf("build Babbage prefix: %w", err)
+		return TachysChainScenario{}, fmt.Errorf(
+			"build Babbage prefix: %w",
+			err,
+		)
 	}
 	rollback := babbageBlocks[len(babbageBlocks)-1]
 	conwayBlocks, err := GenerateConwayChain(
@@ -67,7 +70,10 @@ func NewTachysChainScenario() (TachysChainScenario, error) {
 		2,
 	)
 	if err != nil {
-		return TachysChainScenario{}, fmt.Errorf("build competing branch: %w", err)
+		return TachysChainScenario{}, fmt.Errorf(
+			"build competing branch: %w",
+			err,
+		)
 	}
 	vectors, err := LoadTachysLeaderVectors()
 	if err != nil {
@@ -90,9 +96,11 @@ func NewTachysChainScenario() (TachysChainScenario, error) {
 		RollbackHash:        rollback.Hash(),
 		Epochs: []TachysEpochFixture{
 			{
-				Epoch:        0,
-				FirstSlot:    0,
-				EpochNonce:   common.Blake2b256Hash([]byte("Tachys epoch zero")),
+				Epoch:     0,
+				FirstSlot: 0,
+				EpochNonce: common.Blake2b256Hash(
+					[]byte("Tachys epoch zero"),
+				),
 				Distribution: vectors.Distribution,
 			},
 			{
