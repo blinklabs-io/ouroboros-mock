@@ -100,7 +100,11 @@ func TestChainOfRejectsUnknownRollbackAfterOriginRollback(t *testing.T) {
 	}
 	// The origin rollback empties the chain, which must not turn the
 	// unknown intersect point that follows into a valid anchor.
-	bad := append(append([]format.ServedMessage{}, served...), origin, served[0])
+	bad := append(
+		append([]format.ServedMessage{}, served...),
+		origin,
+		served[0],
+	)
 	_, err := chainOf(bad)
 	require.ErrorContains(t, err, "not in the reconstructed chain")
 }

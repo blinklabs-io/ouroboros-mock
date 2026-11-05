@@ -64,7 +64,9 @@ func TestLocalTxMonitorBuildersServeGouroborosClient(t *testing.T) {
 
 func TestLocalStateQueryBuildersServeGouroborosClient(t *testing.T) {
 	t.Cleanup(func() { goleak.VerifyNone(t) })
-	query, err := LocalStateQueryQuery([]any{localstatequery.QueryTypeChainBlockNo})
+	query, err := LocalStateQueryQuery(
+		[]any{localstatequery.QueryTypeChainBlockNo},
+	)
 	require.NoError(t, err)
 	response, err := LocalStateQueryResult([]any{uint64(1), uint64(99)})
 	require.NoError(t, err)
@@ -111,7 +113,9 @@ func newProtocolClientConnection(
 		options...)
 	client, err := ouroboros.New(options...)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close()); <-client.ErrorChan() })
+	t.Cleanup(
+		func() { require.NoError(t, client.Close()); <-client.ErrorChan() },
+	)
 	return client, mock
 }
 
@@ -153,13 +157,22 @@ func TestBlockFetchScenarioServesGouroborosClient(t *testing.T) {
 
 func TestTxSubmissionScenarioServesGouroborosClient(t *testing.T) {
 	t.Cleanup(func() { goleak.VerifyNone(t) })
-	blocks, err := fixtures.GenerateConwayChainWithTransactions(1, common.Blake2b256{}, 1, 1, 1)
+	blocks, err := fixtures.GenerateConwayChainWithTransactions(
+		1,
+		common.Blake2b256{},
+		1,
+		1,
+		1,
+	)
 	require.NoError(t, err)
 	transaction := blocks[0].Transactions()[0]
 	data := transaction.Cbor()
 	ids := []txsubmission.TxIdAndSize{
 		{
-			TxId: txsubmission.TxId{EraId: 6, TxId: [32]byte(transaction.Hash().Bytes())},
+			TxId: txsubmission.TxId{
+				EraId: 6,
+				TxId:  [32]byte(transaction.Hash().Bytes()),
+			},
 			Size: uint32(len(data)),
 		},
 	}

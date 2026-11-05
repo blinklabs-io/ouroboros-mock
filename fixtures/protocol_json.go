@@ -436,7 +436,10 @@ func (p protocolParametersJSON) toShelleyProtocolParameters() (*shelley.ShelleyP
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
+	nOpt, err := requireUintField(
+		"stakePoolTargetNum",
+		p.StakePoolTargetNum.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +530,10 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
+	nOpt, err := requireUintField(
+		"stakePoolTargetNum",
+		p.StakePoolTargetNum.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -565,32 +571,34 @@ func (p protocolParametersJSON) toAlonzoProtocolParameters() (*alonzo.AlonzoProt
 		return nil, err
 	}
 	pp := &alonzo.AlonzoProtocolParameters{
-		MinFeeA:              minFeeA,
-		MinFeeB:              minFeeB,
-		MaxBlockBodySize:     maxBlockBodySize,
-		MaxTxSize:            maxTxSize,
-		MaxBlockHeaderSize:   maxBlockHeaderSize,
-		KeyDeposit:           keyDeposit,
-		PoolDeposit:          poolDeposit,
-		MaxEpoch:             maxEpoch,
-		NOpt:                 nOpt,
-		A0:                   a0,
-		Rho:                  rho,
-		Tau:                  tau,
-		Decentralization:     cloneRat(p.Decentralization),
-		ExtraEntropy:         extraEntropy,
-		ProtocolMajor:        version.Major,
-		ProtocolMinor:        version.Minor,
-		MinUtxoValue:         optionalUintValue(p.MinUTxOValue),
-		MinPoolCost:          optionalUint64Value(p.MinPoolCost),
-		AdaPerUtxoByte:       optionalUint64Value(p.UtxoCostPerByte),
-		CostModels:           cloneCostModels(p.CostModels),
-		ExecutionCosts:       executionCosts,
-		MaxTxExUnits:         maxTxExUnits,
-		MaxBlockExUnits:      maxBlockExUnits,
-		MaxValueSize:         optionalUintValue(p.MaxValueSize.asUint()),
-		CollateralPercentage: optionalUintValue(p.CollateralPercentage.asUint()),
-		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs.asUint()),
+		MinFeeA:            minFeeA,
+		MinFeeB:            minFeeB,
+		MaxBlockBodySize:   maxBlockBodySize,
+		MaxTxSize:          maxTxSize,
+		MaxBlockHeaderSize: maxBlockHeaderSize,
+		KeyDeposit:         keyDeposit,
+		PoolDeposit:        poolDeposit,
+		MaxEpoch:           maxEpoch,
+		NOpt:               nOpt,
+		A0:                 a0,
+		Rho:                rho,
+		Tau:                tau,
+		Decentralization:   cloneRat(p.Decentralization),
+		ExtraEntropy:       extraEntropy,
+		ProtocolMajor:      version.Major,
+		ProtocolMinor:      version.Minor,
+		MinUtxoValue:       optionalUintValue(p.MinUTxOValue),
+		MinPoolCost:        optionalUint64Value(p.MinPoolCost),
+		AdaPerUtxoByte:     optionalUint64Value(p.UtxoCostPerByte),
+		CostModels:         cloneCostModels(p.CostModels),
+		ExecutionCosts:     executionCosts,
+		MaxTxExUnits:       maxTxExUnits,
+		MaxBlockExUnits:    maxBlockExUnits,
+		MaxValueSize:       optionalUintValue(p.MaxValueSize.asUint()),
+		CollateralPercentage: optionalUintValue(
+			p.CollateralPercentage.asUint(),
+		),
+		MaxCollateralInputs: optionalUintValue(p.MaxCollateralInputs.asUint()),
 	}
 	return pp, nil
 }
@@ -644,7 +652,10 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
+	nOpt, err := requireUintField(
+		"stakePoolTargetNum",
+		p.StakePoolTargetNum.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -682,29 +693,31 @@ func (p protocolParametersJSON) toBabbageProtocolParameters() (*babbage.BabbageP
 		return nil, err
 	}
 	pp := &babbage.BabbageProtocolParameters{
-		MinFeeA:              minFeeA,
-		MinFeeB:              minFeeB,
-		MaxBlockBodySize:     maxBlockBodySize,
-		MaxTxSize:            maxTxSize,
-		MaxBlockHeaderSize:   maxBlockHeaderSize,
-		KeyDeposit:           keyDeposit,
-		PoolDeposit:          poolDeposit,
-		MaxEpoch:             maxEpoch,
-		NOpt:                 nOpt,
-		A0:                   a0,
-		Rho:                  rho,
-		Tau:                  tau,
-		ProtocolMajor:        version.Major,
-		ProtocolMinor:        version.Minor,
-		MinPoolCost:          optionalUint64Value(p.MinPoolCost),
-		AdaPerUtxoByte:       optionalUint64Value(p.UtxoCostPerByte),
-		CostModels:           cloneCostModels(p.CostModels),
-		ExecutionCosts:       executionCosts,
-		MaxTxExUnits:         maxTxExUnits,
-		MaxBlockExUnits:      maxBlockExUnits,
-		MaxValueSize:         optionalUintValue(p.MaxValueSize.asUint()),
-		CollateralPercentage: optionalUintValue(p.CollateralPercentage.asUint()),
-		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs.asUint()),
+		MinFeeA:            minFeeA,
+		MinFeeB:            minFeeB,
+		MaxBlockBodySize:   maxBlockBodySize,
+		MaxTxSize:          maxTxSize,
+		MaxBlockHeaderSize: maxBlockHeaderSize,
+		KeyDeposit:         keyDeposit,
+		PoolDeposit:        poolDeposit,
+		MaxEpoch:           maxEpoch,
+		NOpt:               nOpt,
+		A0:                 a0,
+		Rho:                rho,
+		Tau:                tau,
+		ProtocolMajor:      version.Major,
+		ProtocolMinor:      version.Minor,
+		MinPoolCost:        optionalUint64Value(p.MinPoolCost),
+		AdaPerUtxoByte:     optionalUint64Value(p.UtxoCostPerByte),
+		CostModels:         cloneCostModels(p.CostModels),
+		ExecutionCosts:     executionCosts,
+		MaxTxExUnits:       maxTxExUnits,
+		MaxBlockExUnits:    maxBlockExUnits,
+		MaxValueSize:       optionalUintValue(p.MaxValueSize.asUint()),
+		CollateralPercentage: optionalUintValue(
+			p.CollateralPercentage.asUint(),
+		),
+		MaxCollateralInputs: optionalUintValue(p.MaxCollateralInputs.asUint()),
 	}
 	return pp, nil
 }
@@ -758,7 +771,10 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 	if err != nil {
 		return nil, err
 	}
-	nOpt, err := requireUintField("stakePoolTargetNum", p.StakePoolTargetNum.asUint())
+	nOpt, err := requireUintField(
+		"stakePoolTargetNum",
+		p.StakePoolTargetNum.asUint(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -796,28 +812,30 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 		return nil, err
 	}
 	pp := &conway.ConwayProtocolParameters{
-		MinFeeA:              minFeeA,
-		MinFeeB:              minFeeB,
-		MaxBlockBodySize:     maxBlockBodySize,
-		MaxTxSize:            maxTxSize,
-		MaxBlockHeaderSize:   maxBlockHeaderSize,
-		KeyDeposit:           keyDeposit,
-		PoolDeposit:          poolDeposit,
-		MaxEpoch:             maxEpoch,
-		NOpt:                 nOpt,
-		A0:                   a0,
-		Rho:                  rho,
-		Tau:                  tau,
-		ProtocolVersion:      *version,
-		MinPoolCost:          optionalUint64Value(p.MinPoolCost),
-		AdaPerUtxoByte:       optionalUint64Value(p.UtxoCostPerByte),
-		CostModels:           cloneCostModels(p.CostModels),
-		ExecutionCosts:       executionCosts,
-		MaxTxExUnits:         maxTxExUnits,
-		MaxBlockExUnits:      maxBlockExUnits,
-		MaxValueSize:         optionalUintValue(p.MaxValueSize.asUint()),
-		CollateralPercentage: optionalUintValue(p.CollateralPercentage.asUint()),
-		MaxCollateralInputs:  optionalUintValue(p.MaxCollateralInputs.asUint()),
+		MinFeeA:            minFeeA,
+		MinFeeB:            minFeeB,
+		MaxBlockBodySize:   maxBlockBodySize,
+		MaxTxSize:          maxTxSize,
+		MaxBlockHeaderSize: maxBlockHeaderSize,
+		KeyDeposit:         keyDeposit,
+		PoolDeposit:        poolDeposit,
+		MaxEpoch:           maxEpoch,
+		NOpt:               nOpt,
+		A0:                 a0,
+		Rho:                rho,
+		Tau:                tau,
+		ProtocolVersion:    *version,
+		MinPoolCost:        optionalUint64Value(p.MinPoolCost),
+		AdaPerUtxoByte:     optionalUint64Value(p.UtxoCostPerByte),
+		CostModels:         cloneCostModels(p.CostModels),
+		ExecutionCosts:     executionCosts,
+		MaxTxExUnits:       maxTxExUnits,
+		MaxBlockExUnits:    maxBlockExUnits,
+		MaxValueSize:       optionalUintValue(p.MaxValueSize.asUint()),
+		CollateralPercentage: optionalUintValue(
+			p.CollateralPercentage.asUint(),
+		),
+		MaxCollateralInputs: optionalUintValue(p.MaxCollateralInputs.asUint()),
 		PoolVotingThresholds: clonePoolVotingThresholdsValue(
 			p.PoolVotingThresholds,
 		),
@@ -828,10 +846,14 @@ func (p protocolParametersJSON) toConwayProtocolParameters() (*conway.ConwayProt
 		CommitteeTermLimit: optionalUint64Value(
 			p.CommitteeMaxTermLength.asUint64(),
 		),
-		GovActionValidityPeriod:    optionalUint64Value(p.GovActionLifetime.asUint64()),
-		GovActionDeposit:           optionalUint64Value(p.GovActionDeposit),
-		DRepDeposit:                optionalUint64Value(p.DRepDeposit),
-		DRepInactivityPeriod:       optionalUint64Value(p.DRepActivity.asUint64()),
+		GovActionValidityPeriod: optionalUint64Value(
+			p.GovActionLifetime.asUint64(),
+		),
+		GovActionDeposit: optionalUint64Value(p.GovActionDeposit),
+		DRepDeposit:      optionalUint64Value(p.DRepDeposit),
+		DRepInactivityPeriod: optionalUint64Value(
+			p.DRepActivity.asUint64(),
+		),
 		MinFeeRefScriptCostPerByte: cloneRat(p.MinFeeRefScriptCostPerByte),
 	}
 	return pp, nil
@@ -968,9 +990,13 @@ func (p protocolParametersJSON) toConwayProtocolParameterUpdate() *conway.Conway
 		DRepVotingThresholds: cloneDRepVotingThresholdsPtr(
 			p.DRepVotingThresholds,
 		),
-		MinCommitteeSize:           cloneUintPtr(p.CommitteeMinSize.asUint()),
-		CommitteeTermLimit:         cloneUint64Ptr(p.CommitteeMaxTermLength.asUint64()),
-		GovActionValidityPeriod:    cloneUint64Ptr(p.GovActionLifetime.asUint64()),
+		MinCommitteeSize: cloneUintPtr(p.CommitteeMinSize.asUint()),
+		CommitteeTermLimit: cloneUint64Ptr(
+			p.CommitteeMaxTermLength.asUint64(),
+		),
+		GovActionValidityPeriod: cloneUint64Ptr(
+			p.GovActionLifetime.asUint64(),
+		),
 		GovActionDeposit:           cloneUint64Ptr(p.GovActionDeposit),
 		DRepDeposit:                cloneUint64Ptr(p.DRepDeposit),
 		DRepInactivityPeriod:       cloneUint64Ptr(p.DRepActivity.asUint64()),

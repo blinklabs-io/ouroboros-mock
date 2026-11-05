@@ -220,13 +220,17 @@ func TestRatificationDRepAbstainAndInactiveStakeIsExcluded(t *testing.T) {
 	assert.True(t, f.ratified("constitution#0"))
 }
 
-func TestRatificationNoConfidenceDRepStakeCountsAsYesOnlyForNoConfidence(t *testing.T) {
+func TestRatificationNoConfidenceDRepStakeCountsAsYesOnlyForNoConfidence(
+	t *testing.T,
+) {
 	t.Parallel()
 	f := newGovFixture(t)
 	f.params().DRepVotingThresholds.MotionNoConfidence = cbor.Rat{
 		Rat: big.NewRat(3, 4),
 	}
-	f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+	f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{
+		Rat: new(big.Rat),
+	}
 	f.predefinedDRep(common.DrepTypeNoConfidence, 80)
 	f.drep(20)
 	f.committeeThreshold(1, 2)
@@ -295,7 +299,11 @@ func TestRatificationHardForkSPONonVotersCountAsNo(t *testing.T) {
 		Votes:      yes(voter, yesPool, cc),
 	})
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
-	assert.False(t, f.ratified("hardfork#0"), "50 of 100 pool stake is below 2/3")
+	assert.False(
+		t,
+		f.ratified("hardfork#0"),
+		"50 of 100 pool stake is below 2/3",
+	)
 }
 
 func TestRatificationParameterChangeUsesTouchedGroupThresholds(t *testing.T) {
@@ -335,8 +343,12 @@ func TestRatificationParameterChangeUsesTouchedGroupThresholds(t *testing.T) {
 			f.params().DRepVotingThresholds.PpTechnicalGroup = cbor.Rat{
 				Rat: big.NewRat(1, 2),
 			}
-			f.params().DRepVotingThresholds.PpNetworkGroup = cbor.Rat{Rat: new(big.Rat)}
-			f.params().DRepVotingThresholds.PpGovGroup = cbor.Rat{Rat: new(big.Rat)}
+			f.params().DRepVotingThresholds.PpNetworkGroup = cbor.Rat{
+				Rat: new(big.Rat),
+			}
+			f.params().DRepVotingThresholds.PpGovGroup = cbor.Rat{
+				Rat: new(big.Rat),
+			}
 			yesDRep := f.drep(40)
 			f.drep(60)
 			f.pool(100)
@@ -489,13 +501,19 @@ func TestRatificationRequiresParentToBeEnactedRoot(t *testing.T) {
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
 	assert.True(t, f.ratified("child#0"))
 	assert.False(t, f.ratified("orphan#0"), "parent is not the enacted root")
-	assert.False(t, f.ratified("rootless#0"), "a root exists, so a parent is required")
+	assert.False(
+		t,
+		f.ratified("rootless#0"),
+		"a root exists, so a parent is required",
+	)
 }
 
 func TestRatificationDelaysLaterActionsAfterDelayingAction(t *testing.T) {
 	t.Parallel()
 	f := newGovFixture(t)
-	f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+	f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{
+		Rat: new(big.Rat),
+	}
 	drep := f.drep(100)
 	cc := f.ccMember(10, true)
 	f.committeeThreshold(1, 2)
@@ -509,14 +527,19 @@ func TestRatificationDelaysLaterActionsAfterDelayingAction(t *testing.T) {
 	})
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
 	assert.True(t, f.ratified("noconfidence#0"))
-	assert.False(t, f.ratified("constitution#0"),
-		"a ratified no-confidence motion delays every later action in the epoch")
+	assert.False(
+		t,
+		f.ratified("constitution#0"),
+		"a ratified no-confidence motion delays every later action in the epoch",
+	)
 }
 
 func TestRatificationUpdatesCommitteeThresholdOnEnactment(t *testing.T) {
 	t.Parallel()
 	f := newGovFixture(t)
-	f.params().PoolVotingThresholds.CommitteeNormal = cbor.Rat{Rat: new(big.Rat)}
+	f.params().PoolVotingThresholds.CommitteeNormal = cbor.Rat{
+		Rat: new(big.Rat),
+	}
 	drep := f.drep(100)
 	f.ccMember(10, true)
 	f.committeeThreshold(1, 2)
@@ -542,7 +565,9 @@ func TestRatificationUpdatesCommitteeThresholdOnEnactment(t *testing.T) {
 		ParentActionId: ptr("update#0"),
 		Votes:          yes(drep),
 	})
-	f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+	f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{
+		Rat: new(big.Rat),
+	}
 	require.NoError(t, f.sm.ProcessEpochBoundary(3))
 	require.NoError(t, f.sm.ProcessEpochBoundary(4))
 	assert.Nil(t, f.sm.govState.CommitteeThreshold,
@@ -684,7 +709,11 @@ func TestEnactmentRejectsOverflowingTreasuryWithdrawalAtomically(t *testing.T) {
 	proposal.RatifiedEpoch = &ratifiedEpoch
 
 	err := f.sm.ProcessEpochBoundary(2)
-	require.ErrorContains(t, err, "treasury withdrawal exceeds available treasury")
+	require.ErrorContains(
+		t,
+		err,
+		"treasury withdrawal exceeds available treasury",
+	)
 	assert.Equal(t, uint64(10), f.sm.govState.Treasury)
 	assert.Equal(t, uint64(1), f.sm.rewardAccounts[first])
 	assert.Equal(t, uint64(2), f.sm.rewardAccounts[second])
@@ -709,7 +738,11 @@ func TestEnactmentRejectsRewardAccountOverflowAtomically(t *testing.T) {
 	proposal.RatifiedEpoch = &ratifiedEpoch
 
 	err := f.sm.ProcessEpochBoundary(2)
-	require.ErrorContains(t, err, "treasury withdrawal overflows reward account")
+	require.ErrorContains(
+		t,
+		err,
+		"treasury withdrawal overflows reward account",
+	)
 	assert.Equal(t, ^uint64(0), f.sm.rewardAccounts[recipient])
 	assert.Equal(t, uint64(1), f.sm.govState.Treasury)
 	assert.Contains(t, f.sm.govState.Proposals, "withdraw#0")
@@ -784,7 +817,11 @@ func TestProposalDepositRefundOverflowIsAtomic(t *testing.T) {
 		})
 
 		err := f.sm.ProcessEpochBoundary(2)
-		require.ErrorContains(t, err, "proposal deposit refund overflows reward account")
+		require.ErrorContains(
+			t,
+			err,
+			"proposal deposit refund overflows reward account",
+		)
 		assert.Equal(t, ^uint64(0), f.sm.rewardAccounts[account])
 		assert.Contains(t, f.sm.govState.Proposals, "expired#0")
 	})
@@ -802,7 +839,11 @@ func TestProposalDepositRefundOverflowIsAtomic(t *testing.T) {
 		})
 
 		err := f.sm.ProcessEpochBoundary(2)
-		require.ErrorContains(t, err, "proposal deposit refund overflows treasury")
+		require.ErrorContains(
+			t,
+			err,
+			"proposal deposit refund overflows treasury",
+		)
 		assert.Equal(t, ^uint64(0), f.sm.govState.Treasury)
 		assert.Contains(t, f.sm.govState.Proposals, "expired#0")
 	})
@@ -853,7 +894,10 @@ func TestParseInitialStateCarriesTreasuryAndCommitteeThreshold(t *testing.T) {
 	// AccountState is [treasury, reserves] and the committee is
 	// [[members, threshold]] with the threshold as tag 30.
 	account := "821903e81907d0"
-	committee := "8182a18200581c" + strings.Repeat("11", common.Blake2b224Size) +
+	committee := "8182a18200581c" + strings.Repeat(
+		"11",
+		common.Blake2b224Size,
+	) +
 		"1864d81e820304"
 	state := parseSyntheticInitialStateWithAccountAndCommittee(
 		t, "", "", "", "", account, committee,
@@ -868,7 +912,11 @@ func TestParseInitialStateCarriesTreasuryAndCommitteeThreshold(t *testing.T) {
 		&conway.ConwayProtocolParameters{},
 	))
 	assert.Equal(t, uint64(1000), manager.govState.Treasury)
-	assert.Equal(t, 0, manager.govState.CommitteeThreshold.Cmp(big.NewRat(3, 4)))
+	assert.Equal(
+		t,
+		0,
+		manager.govState.CommitteeThreshold.Cmp(big.NewRat(3, 4)),
+	)
 }
 
 func TestParseProposalCarriesCommitteeQuorumAndWithdrawals(t *testing.T) {
@@ -890,7 +938,11 @@ func TestParseProposalCarriesCommitteeQuorumAndWithdrawals(t *testing.T) {
 
 	withdrawInfo, ok := state.Proposals[txID+"#4"]
 	require.True(t, ok)
-	assert.Equal(t, common.GovActionTypeTreasuryWithdrawal, withdrawInfo.ActionType)
+	assert.Equal(
+		t,
+		common.GovActionTypeTreasuryWithdrawal,
+		withdrawInfo.ActionType,
+	)
 	assert.Equal(t, map[ledger.RewardAccountKey]uint64{
 		keyCredential(filledBlake2b224(0xaa)): 50,
 	}, withdrawInfo.Withdrawals)
@@ -962,7 +1014,9 @@ func TestRatificationSPODefaultVotesFollowRewardAccountDRep(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			f := newGovFixture(t)
-			f.params().DRepVotingThresholds.MotionNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+			f.params().DRepVotingThresholds.MotionNoConfidence = cbor.Rat{
+				Rat: new(big.Rat),
+			}
 			f.params().PoolVotingThresholds.MotionNoConfidence = cbor.Rat{
 				Rat: big.NewRat(1, 2),
 			}
@@ -985,7 +1039,9 @@ func TestRatificationSPODefaultVotesFollowRewardAccountDRep(t *testing.T) {
 func TestEnactmentHardForkSetsProtocolVersion(t *testing.T) {
 	t.Parallel()
 	f := newGovFixture(t)
-	f.params().PoolVotingThresholds.HardForkInitiation = cbor.Rat{Rat: new(big.Rat)}
+	f.params().PoolVotingThresholds.HardForkInitiation = cbor.Rat{
+		Rat: new(big.Rat),
+	}
 	drep := f.drep(100)
 	cc := f.ccMember(10, true)
 	f.committeeThreshold(1, 2)
@@ -1037,7 +1093,9 @@ func TestRatificationRejectsUpdateCommitteeBeyondTermLimit(t *testing.T) {
 			t.Parallel()
 			f := newGovFixture(t)
 			f.params().CommitteeTermLimit = 5
-			f.params().PoolVotingThresholds.CommitteeNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+			f.params().PoolVotingThresholds.CommitteeNoConfidence = cbor.Rat{
+				Rat: new(big.Rat),
+			}
 			drep := f.drep(100)
 			f.propose("update#0", GovActionInfo{
 				ActionType: common.GovActionTypeUpdateCommittee,
@@ -1098,16 +1156,27 @@ func TestRatificationCommitteeWithoutMembersUsesItsThreshold(t *testing.T) {
 		Votes:      yes(drep),
 	})
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
-	assert.True(t, f.ratified("constitution#0"),
-		"a zero committee threshold accepts with no eligible members when the minimum size is zero")
+	assert.True(
+		t,
+		f.ratified("constitution#0"),
+		"a zero committee threshold accepts with no eligible members when the minimum size is zero",
+	)
 }
 
-func TestRatificationUpdateCommitteeUsesNormalThresholdWhileCommitteeExists(t *testing.T) {
+func TestRatificationUpdateCommitteeUsesNormalThresholdWhileCommitteeExists(
+	t *testing.T,
+) {
 	t.Parallel()
 	f := newGovFixture(t)
-	f.params().DRepVotingThresholds.CommitteeNoConfidence = cbor.Rat{Rat: big.NewRat(1, 1)}
-	f.params().PoolVotingThresholds.CommitteeNormal = cbor.Rat{Rat: new(big.Rat)}
-	f.params().PoolVotingThresholds.CommitteeNoConfidence = cbor.Rat{Rat: new(big.Rat)}
+	f.params().DRepVotingThresholds.CommitteeNoConfidence = cbor.Rat{
+		Rat: big.NewRat(1, 1),
+	}
+	f.params().PoolVotingThresholds.CommitteeNormal = cbor.Rat{
+		Rat: new(big.Rat),
+	}
+	f.params().PoolVotingThresholds.CommitteeNoConfidence = cbor.Rat{
+		Rat: new(big.Rat),
+	}
 	drep := f.drep(60)
 	f.drep(40)
 	// Every member expired before the ratifying epoch, yet the committee
@@ -1119,6 +1188,9 @@ func TestRatificationUpdateCommitteeUsesNormalThresholdWhileCommitteeExists(t *t
 		Votes:      yes(drep),
 	})
 	require.NoError(t, f.sm.ProcessEpochBoundary(1))
-	assert.True(t, f.ratified("update#0"),
-		"an elected committee selects the normal threshold even when no member is active")
+	assert.True(
+		t,
+		f.ratified("update#0"),
+		"an elected committee selects the normal threshold even when no member is active",
+	)
 }

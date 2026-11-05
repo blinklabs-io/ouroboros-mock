@@ -235,7 +235,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*certificates.DRepRegistrationCertificate).Anchor.DataHash[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x03), cert.(*certificates.DRepRegistrationCertificate).Anchor.DataHash[0])
+				require.Equal(
+					t,
+					byte(0x03),
+					cert.(*certificates.DRepRegistrationCertificate).Anchor.DataHash[0],
+				)
 			},
 		},
 		{
@@ -250,7 +254,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*lcommon.UpdateDrepCertificate).Anchor.DataHash[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x03), cert.(*lcommon.UpdateDrepCertificate).Anchor.DataHash[0])
+				require.Equal(
+					t,
+					byte(0x03),
+					cert.(*lcommon.UpdateDrepCertificate).Anchor.DataHash[0],
+				)
 			},
 		},
 		{
@@ -265,7 +273,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*lcommon.ResignCommitteeColdCertificate).Anchor.DataHash[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x03), cert.(*lcommon.ResignCommitteeColdCertificate).Anchor.DataHash[0])
+				require.Equal(
+					t,
+					byte(0x03),
+					cert.(*lcommon.ResignCommitteeColdCertificate).Anchor.DataHash[0],
+				)
 			},
 		},
 		{
@@ -280,7 +292,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*lcommon.VoteDelegationCertificate).Drep.Credential[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x02), cert.(*lcommon.VoteDelegationCertificate).Drep.Credential[0])
+				require.Equal(
+					t,
+					byte(0x02),
+					cert.(*lcommon.VoteDelegationCertificate).Drep.Credential[0],
+				)
 			},
 		},
 		{
@@ -296,7 +312,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*lcommon.StakeVoteDelegationCertificate).Drep.Credential[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x03), cert.(*lcommon.StakeVoteDelegationCertificate).Drep.Credential[0])
+				require.Equal(
+					t,
+					byte(0x03),
+					cert.(*lcommon.StakeVoteDelegationCertificate).Drep.Credential[0],
+				)
 			},
 		},
 		{
@@ -311,7 +331,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*lcommon.VoteRegistrationDelegationCertificate).Drep.Credential[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x02), cert.(*lcommon.VoteRegistrationDelegationCertificate).Drep.Credential[0])
+				require.Equal(
+					t,
+					byte(0x02),
+					cert.(*lcommon.VoteRegistrationDelegationCertificate).Drep.Credential[0],
+				)
 			},
 		},
 		{
@@ -327,7 +351,11 @@ func TestGovernanceBuilderResultsOwnMutableState(t *testing.T) {
 				cert.(*lcommon.StakeVoteRegistrationDelegationCertificate).Drep.Credential[0] = 0xff
 			},
 			check: func(t *testing.T, cert lcommon.Certificate) {
-				require.Equal(t, byte(0x03), cert.(*lcommon.StakeVoteRegistrationDelegationCertificate).Drep.Credential[0])
+				require.Equal(
+					t,
+					byte(0x03),
+					cert.(*lcommon.StakeVoteRegistrationDelegationCertificate).Drep.Credential[0],
+				)
 			},
 		},
 	}

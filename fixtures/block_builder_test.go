@@ -606,11 +606,13 @@ func TestSequenceRejectsNumberAndSlotOverflow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if first.BlockNumber() != tc.number || first.SlotNumber() != tc.slot {
+			if first.BlockNumber() != tc.number ||
+				first.SlotNumber() != tc.slot {
 				t.Fatal("first representable block changed")
 			}
 			block, err := sequence.Next()
-			if err == nil || !strings.Contains(err.Error(), tc.message) || block != nil {
+			if err == nil || !strings.Contains(err.Error(), tc.message) ||
+				block != nil {
 				t.Fatalf("overflow returned block=%T error=%v", block, err)
 			}
 			sequence.WithStart(0, 0, common.Blake2b256{})
@@ -623,8 +625,13 @@ func TestSequenceRejectsNumberAndSlotOverflow(t *testing.T) {
 			}
 			blocks, err := fixtures.GenerateChain(ledger.GetEraById(1),
 				tc.number, common.Blake2b256{}, tc.slot, tc.increment, 2)
-			if err == nil || !strings.Contains(err.Error(), tc.message) || blocks != nil {
-				t.Fatalf("overflow bulk returned %d blocks error=%v", len(blocks), err)
+			if err == nil || !strings.Contains(err.Error(), tc.message) ||
+				blocks != nil {
+				t.Fatalf(
+					"overflow bulk returned %d blocks error=%v",
+					len(blocks),
+					err,
+				)
 			}
 		})
 	}

@@ -373,7 +373,10 @@ func TestEmptySSCFixturesReportZeroCases(t *testing.T) {
 			data, err := cbor.Encode(value)
 			require.NoError(t, err)
 			text := fmt.Sprintf("00: %x", data)
-			harness := fixtureHarness(t, map[string][]byte{sscRoot + name: []byte(text)})
+			harness := fixtureHarness(
+				t,
+				map[string][]byte{sscRoot + name: []byte(text)},
+			)
 			result, err := harness.ExecuteFixture(sscRoot + name)
 			require.NoError(t, err)
 			require.NoError(t, result.Error)

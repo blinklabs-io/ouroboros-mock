@@ -93,8 +93,16 @@ func TestBridgePreservesReadFailureAfterConversationCompletion(t *testing.T) {
 	for _, readErr := range []error{failure, io.EOF, io.ErrClosedPipe, net.ErrClosed} {
 		t.Run(readErr.Error(), func(t *testing.T) {
 			server, client := net.Pipe()
-			conn := &closeReleasedReaderConn{Conn: server, closed: make(chan struct{}), err: readErr}
-			mocked := &closeReleasedReaderConn{Conn: client, closed: make(chan struct{}), err: net.ErrClosed}
+			conn := &closeReleasedReaderConn{
+				Conn:   server,
+				closed: make(chan struct{}),
+				err:    readErr,
+			}
+			mocked := &closeReleasedReaderConn{
+				Conn:   client,
+				closed: make(chan struct{}),
+				err:    net.ErrClosed,
+			}
 			defer conn.Close()
 			defer mocked.Close()
 			conversation := make(chan error)
@@ -133,24 +141,48 @@ func TestConfigurationRejectsUnsupportedAndAmbiguousEntries(t *testing.T) {
 		strings.ReplaceAll(demoConfig, "cookie: 123", "cookie: 123.5"),
 		strings.ReplaceAll(demoConfig, "cookie: 123", "cookie: -1"),
 		strings.ReplaceAll(demoConfig, "version: 13", "version: 13.5"),
-		strings.ReplaceAll(demoConfig, "network-magic: 42", "network-magic: 42.5"),
-		strings.ReplaceAll(demoConfig, "network-magic: 42", "network-magic: 4294967296"),
+		strings.ReplaceAll(
+			demoConfig,
+			"network-magic: 42",
+			"network-magic: 42.5",
+		),
+		strings.ReplaceAll(
+			demoConfig,
+			"network-magic: 42",
+			"network-magic: 4294967296",
+		),
 		strings.ReplaceAll(demoConfig, "close: true", "close: yes"),
 		strings.ReplaceAll(demoConfig, "address: 127.0.0.1:0", "address: true"),
 		strings.ReplaceAll(demoConfig, "address: 127.0.0.1:0", "address: 123"),
-		strings.ReplaceAll(demoConfig, "handshake.propose_versions", "chainsync.request_next"),
+		strings.ReplaceAll(
+			demoConfig,
+			"handshake.propose_versions",
+			"chainsync.request_next",
+		),
 		strings.ReplaceAll(demoConfig, "version: 13", "version: 12"),
 		strings.ReplaceAll(demoConfig, "close: true", "close: false"),
 		strings.ReplaceAll(demoConfig, "close: true", "sleep: -1s"),
 		strings.ReplaceAll(demoConfig, "close: true", "sleep: nonsense"),
-		strings.ReplaceAll(demoConfig, "close: true", "close: true\n    sleep: 1s"),
-		strings.ReplaceAll(demoConfig, "cookie: 123", "cookie: 123\n      unrelated: true"),
+		strings.ReplaceAll(
+			demoConfig,
+			"close: true",
+			"close: true\n    sleep: 1s",
+		),
+		strings.ReplaceAll(
+			demoConfig,
+			"cookie: 123",
+			"cookie: 123\n      unrelated: true",
+		),
 		strings.ReplaceAll(
 			demoConfig,
 			"type: handshake.propose_versions",
 			"type: handshake.propose_versions\n      cookie: 1",
 		),
-		strings.ReplaceAll(demoConfig, "close: true", "close: true\n  - sleep: 1s"),
+		strings.ReplaceAll(
+			demoConfig,
+			"close: true",
+			"close: true\n  - sleep: 1s",
+		),
 		demoConfig + "---\nentries: []\n",
 	}
 	for _, text := range cases {
@@ -190,7 +222,11 @@ func TestTypedConfiguration(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, keepalive.NewMsgKeepAlive(123), input.Message)
 	ntc := strings.ReplaceAll(
-		strings.ReplaceAll(demoConfig, "mode: node-to-node", "mode: node-to-client"),
+		strings.ReplaceAll(
+			demoConfig,
+			"mode: node-to-node",
+			"mode: node-to-client",
+		),
 		"version: 13",
 		"version: 14",
 	)
@@ -231,20 +267,28 @@ func TestTCPConversationDrainsFinalResponse(t *testing.T) {
 		handshake.NewMsgProposeVersions(
 			protocol.ProtocolVersionMap{
 				13: protocol.VersionDataNtN13andUp{
-					VersionDataNtN11to12: protocol.VersionDataNtN11to12{CborNetworkMagic: 42},
+					VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+						CborNetworkMagic: 42,
+					},
 				},
 			},
 		),
 	)
 	payload := readMessage(t, client, handshake.ProtocolId)
-	decoded, err := handshake.NewMsgFromCbor(handshake.MessageTypeAcceptVersion, payload)
+	decoded, err := handshake.NewMsgFromCbor(
+		handshake.MessageTypeAcceptVersion,
+		payload,
+	)
 	require.NoError(t, err)
 	accepted, ok := decoded.(*handshake.MsgAcceptVersion)
 	require.True(t, ok)
 	require.Equal(t, uint16(13), accepted.Version)
 	sendMessage(t, client, keepalive.ProtocolId, keepalive.NewMsgKeepAlive(123))
 	payload = readMessage(t, client, keepalive.ProtocolId)
-	decoded, err = keepalive.NewMsgFromCbor(keepalive.MessageTypeKeepAliveResponse, payload)
+	decoded, err = keepalive.NewMsgFromCbor(
+		keepalive.MessageTypeKeepAliveResponse,
+		payload,
+	)
 	require.NoError(t, err)
 	require.Equal(
 		t,
@@ -282,7 +326,9 @@ func TestTCPConversationPreservesResponseAfterCloseWrite(t *testing.T) {
 		handshake.NewMsgProposeVersions(
 			protocol.ProtocolVersionMap{
 				13: protocol.VersionDataNtN13andUp{
-					VersionDataNtN11to12: protocol.VersionDataNtN11to12{CborNetworkMagic: 42},
+					VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+						CborNetworkMagic: 42,
+					},
 				},
 			},
 		),
@@ -291,9 +337,16 @@ func TestTCPConversationPreservesResponseAfterCloseWrite(t *testing.T) {
 	sendMessage(t, client, keepalive.ProtocolId, keepalive.NewMsgKeepAlive(123))
 	require.NoError(t, client.CloseWrite())
 	payload := readMessage(t, client, keepalive.ProtocolId)
-	decoded, err := keepalive.NewMsgFromCbor(keepalive.MessageTypeKeepAliveResponse, payload)
+	decoded, err := keepalive.NewMsgFromCbor(
+		keepalive.MessageTypeKeepAliveResponse,
+		payload,
+	)
 	require.NoError(t, err)
-	require.Equal(t, uint16(123), decoded.(*keepalive.MsgKeepAliveResponse).Cookie)
+	require.Equal(
+		t,
+		uint16(123),
+		decoded.(*keepalive.MsgKeepAliveResponse).Cookie,
+	)
 	var one [1]byte
 	_, err = client.Read(one[:])
 	require.ErrorIs(t, err, io.EOF)
@@ -301,7 +354,9 @@ func TestTCPConversationPreservesResponseAfterCloseWrite(t *testing.T) {
 	case err := <-result:
 		require.NoError(t, err)
 	case <-time.After(time.Second):
-		t.Fatal("listener did not finish after draining the half-closed client response")
+		t.Fatal(
+			"listener did not finish after draining the half-closed client response",
+		)
 	}
 }
 
@@ -399,7 +454,10 @@ func TestInitialMessageDeadlineFollowsAcceptance(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
-	recorder := &readDeadlineRecorder{Conn: server, set: make(chan time.Time, 2)}
+	recorder := &readDeadlineRecorder{
+		Conn: server,
+		set:  make(chan time.Time, 2),
+	}
 	conn, err := withInitialMessageTimeout(recorder, time.Second)
 	require.NoError(t, err)
 	require.False(t, (<-recorder.set).IsZero())
@@ -424,7 +482,10 @@ func TestInitialMessageDeadlineFollowsAcceptance(t *testing.T) {
 			server, client := net.Pipe()
 			defer server.Close()
 			defer client.Close()
-			recorder := &readDeadlineRecorder{Conn: server, set: make(chan time.Time, 2)}
+			recorder := &readDeadlineRecorder{
+				Conn: server,
+				set:  make(chan time.Time, 2),
+			}
 			conn, err := withInitialMessageTimeout(recorder, time.Second)
 			require.NoError(t, err)
 			require.False(t, (<-recorder.set).IsZero())
@@ -476,19 +537,36 @@ func TestInitialMessageTimeoutClearsAfterCompleteSegment(t *testing.T) {
 		handshake.NewMsgProposeVersions(
 			protocol.ProtocolVersionMap{
 				13: protocol.VersionDataNtN13andUp{
-					VersionDataNtN11to12: protocol.VersionDataNtN11to12{CborNetworkMagic: 42},
+					VersionDataNtN11to12: protocol.VersionDataNtN11to12{
+						CborNetworkMagic: 42,
+					},
 				},
 			},
 		),
 	)
 	header := make([]byte, 8)
 	_, err = io.ReadFull(client, header)
-	require.NoError(t, err, "initial message deadline remained active after a complete segment")
-	require.Equal(t, uint16(handshake.ProtocolId|0x8000), binary.BigEndian.Uint16(header[4:6]))
+	require.NoError(
+		t,
+		err,
+		"initial message deadline remained active after a complete segment",
+	)
+	require.Equal(
+		t,
+		uint16(handshake.ProtocolId|0x8000),
+		binary.BigEndian.Uint16(header[4:6]),
+	)
 	payload := make([]byte, binary.BigEndian.Uint16(header[6:8]))
 	_, err = io.ReadFull(client, payload)
-	require.NoError(t, err, "initial message deadline remained active after a complete segment")
-	decoded, err := handshake.NewMsgFromCbor(handshake.MessageTypeAcceptVersion, payload)
+	require.NoError(
+		t,
+		err,
+		"initial message deadline remained active after a complete segment",
+	)
+	decoded, err := handshake.NewMsgFromCbor(
+		handshake.MessageTypeAcceptVersion,
+		payload,
+	)
 	require.NoError(t, err)
 	accepted, ok := decoded.(*handshake.MsgAcceptVersion)
 	require.True(t, ok)
@@ -503,7 +581,12 @@ func TestInitialMessageTimeoutClearsAfterCompleteSegment(t *testing.T) {
 	}
 }
 
-func sendMessage(t *testing.T, conn net.Conn, protocolID uint16, message protocol.Message) {
+func sendMessage(
+	t *testing.T,
+	conn net.Conn,
+	protocolID uint16,
+	message protocol.Message,
+) {
 	t.Helper()
 	payload, err := cbor.Encode(message)
 	require.NoError(t, err)
@@ -529,29 +612,32 @@ func readMessage(t *testing.T, conn net.Conn, protocolID uint16) []byte {
 
 func TestCancelListenerAndSleepingConversation(t *testing.T) {
 	for _, connect := range []bool{false, true} {
-		t.Run(map[bool]string{false: "accept", true: "sleep"}[connect], func(t *testing.T) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			require.NoError(t, err)
-			defer listener.Close()
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			result := make(chan error, 1)
-			go func() {
-				result <- serve(ctx, listener, []mock.ConversationEntry{mock.ConversationEntrySleep{Duration: time.Hour}})
-			}()
-			if connect {
-				conn, err := net.Dial("tcp", listener.Addr().String())
+		t.Run(
+			map[bool]string{false: "accept", true: "sleep"}[connect],
+			func(t *testing.T) {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
 				require.NoError(t, err)
-				defer conn.Close()
-			}
-			cancel()
-			select {
-			case err := <-result:
-				require.ErrorIs(t, err, context.Canceled)
-			case <-time.After(time.Second):
-				t.Fatal("cancellation did not join listener and copies")
-			}
-		})
+				defer listener.Close()
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				result := make(chan error, 1)
+				go func() {
+					result <- serve(ctx, listener, []mock.ConversationEntry{mock.ConversationEntrySleep{Duration: time.Hour}})
+				}()
+				if connect {
+					conn, err := net.Dial("tcp", listener.Addr().String())
+					require.NoError(t, err)
+					defer conn.Close()
+				}
+				cancel()
+				select {
+				case err := <-result:
+					require.ErrorIs(t, err, context.Canceled)
+				case <-time.After(time.Second):
+					t.Fatal("cancellation did not join listener and copies")
+				}
+			},
+		)
 	}
 }
 

@@ -29,24 +29,38 @@ func TestNodeToNodeHandshakeConversationBuilders(t *testing.T) {
 		},
 	}
 
-	serverEntries := mock.NewConversationHandshakeNtNAsServer(version, versionData)
+	serverEntries := mock.NewConversationHandshakeNtNAsServer(
+		version,
+		versionData,
+	)
 	if len(serverEntries) != 2 {
-		t.Fatalf("server conversation has %d entries, want 2", len(serverEntries))
+		t.Fatalf(
+			"server conversation has %d entries, want 2",
+			len(serverEntries),
+		)
 	}
 	if _, ok := serverEntries[0].(mock.ConversationEntryInput); !ok {
 		t.Fatalf("server request entry has type %T", serverEntries[0])
 	}
 	serverResponse, ok := serverEntries[1].(mock.ConversationEntryOutput)
 	if !ok || len(serverResponse.Messages) != 1 {
-		t.Fatalf("server response entry has unexpected shape: %#v", serverEntries[1])
+		t.Fatalf(
+			"server response entry has unexpected shape: %#v",
+			serverEntries[1],
+		)
 	}
 	accepted, ok := serverResponse.Messages[0].(*handshake.MsgAcceptVersion)
 	wantServerData, err := cbor.Encode(&versionData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || accepted.Version != version || !bytes.Equal(accepted.VersionData, wantServerData) {
-		t.Fatalf("server accepted %#v, want version %d", serverResponse.Messages[0], version)
+	if !ok || accepted.Version != version ||
+		!bytes.Equal(accepted.VersionData, wantServerData) {
+		t.Fatalf(
+			"server accepted %#v, want version %d",
+			serverResponse.Messages[0],
+			version,
+		)
 	}
 
 	expectedServerData := protocol.VersionDataNtN13andUp{
@@ -56,29 +70,50 @@ func TestNodeToNodeHandshakeConversationBuilders(t *testing.T) {
 			CborPeerSharing:                        protocol.PeerSharingModePeerSharingPublic,
 		},
 	}
-	clientEntries := mock.NewConversationHandshakeNtNAsClient(version, versionData, expectedServerData)
+	clientEntries := mock.NewConversationHandshakeNtNAsClient(
+		version,
+		versionData,
+		expectedServerData,
+	)
 	if len(clientEntries) != 2 {
-		t.Fatalf("client conversation has %d entries, want 2", len(clientEntries))
+		t.Fatalf(
+			"client conversation has %d entries, want 2",
+			len(clientEntries),
+		)
 	}
 	clientProposal, ok := clientEntries[0].(mock.ConversationEntryOutput)
 	if !ok || len(clientProposal.Messages) != 1 {
-		t.Fatalf("client proposal entry has unexpected shape: %#v", clientEntries[0])
+		t.Fatalf(
+			"client proposal entry has unexpected shape: %#v",
+			clientEntries[0],
+		)
 	}
 	proposal, ok := clientProposal.Messages[0].(*handshake.MsgProposeVersions)
 	if !ok {
-		t.Fatalf("client proposed message has type %T", clientProposal.Messages[0])
+		t.Fatalf(
+			"client proposed message has type %T",
+			clientProposal.Messages[0],
+		)
 	}
 	wantProposedData, err := cbor.Encode(&versionData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposed, ok := proposal.VersionMap[version]; !ok || !bytes.Equal(proposed, wantProposedData) {
-		t.Fatalf("client proposed version data = %#v, want %#v", proposed, versionData)
+	if proposed, ok := proposal.VersionMap[version]; !ok ||
+		!bytes.Equal(proposed, wantProposedData) {
+		t.Fatalf(
+			"client proposed version data = %#v, want %#v",
+			proposed,
+			versionData,
+		)
 	}
 	clientAccept, ok := clientEntries[1].(mock.ConversationEntryInput)
 	if !ok || clientAccept.Message == nil ||
 		clientAccept.Message.Type() != handshake.MessageTypeAcceptVersion {
-		t.Fatalf("client accept entry has unexpected shape: %#v", clientEntries[1])
+		t.Fatalf(
+			"client accept entry has unexpected shape: %#v",
+			clientEntries[1],
+		)
 	}
 	acceptedClientData, ok := clientAccept.Message.(*handshake.MsgAcceptVersion)
 	wantAcceptedClientData, err := cbor.Encode(&expectedServerData)
@@ -87,7 +122,12 @@ func TestNodeToNodeHandshakeConversationBuilders(t *testing.T) {
 	}
 	if !ok || acceptedClientData.Version != version ||
 		!bytes.Equal(acceptedClientData.VersionData, wantAcceptedClientData) {
-		t.Fatalf("client expected accept data = %#v, want version %d with %#v", clientAccept.Message, version, expectedServerData)
+		t.Fatalf(
+			"client expected accept data = %#v, want version %d with %#v",
+			clientAccept.Message,
+			version,
+			expectedServerData,
+		)
 	}
 }
 

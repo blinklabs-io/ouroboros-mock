@@ -550,7 +550,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(
+				regCert.DepositAmount(),
+			)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 		}
@@ -561,7 +563,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(
+				regCert.DepositAmount(),
+			)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetPoolDelegation(credential, regCert.PoolKeyHash)
@@ -573,7 +577,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(
+				regCert.DepositAmount(),
+			)
 			m.rewardAccounts[ledger.NewRewardAccountKey(credential)] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -588,7 +594,9 @@ func (m *MockStateManager) processCertificate(cert common.Certificate) {
 			credential := regCert.StakeCredential
 			key := ledger.NewRewardAccountKey(credential)
 			m.stakeRegistrations[key] = 0
-			m.stakeCredentialDeposits[key] = nonNegativeDeposit(regCert.DepositAmount())
+			m.stakeCredentialDeposits[key] = nonNegativeDeposit(
+				regCert.DepositAmount(),
+			)
 			m.rewardAccounts[key] = 0
 			m.govState.RegisterStakeCredential(credential)
 			m.govState.SetDRepDelegation(
@@ -870,7 +878,8 @@ func drepRegistrationCertificateDepositAmount(
 		return cert.DepositAmount()
 	}
 	var fields []cbor.RawMessage
-	if _, err := cbor.Decode(certCbor, &fields); err != nil || len(fields) != 4 {
+	if _, err := cbor.Decode(certCbor, &fields); err != nil ||
+		len(fields) != 4 {
 		return nil
 	}
 	var certType uint
@@ -1017,7 +1026,9 @@ func (m *MockStateManager) removeProposal(id string) error {
 			balance := m.rewardAccounts[*proposal.ReturnAccount]
 			refunded, ok := checkedAddCoin(balance, proposal.Deposit)
 			if !ok {
-				return errors.New("proposal deposit refund overflows reward account")
+				return errors.New(
+					"proposal deposit refund overflows reward account",
+				)
 			}
 			delete(m.govState.Proposals, id)
 			m.rewardAccounts[*proposal.ReturnAccount] = refunded
@@ -1281,7 +1292,9 @@ func (m *MockStateManager) enactProposal(
 			}
 			credited, ok := checkedAddCoin(m.rewardAccounts[account], amount)
 			if !ok {
-				return errors.New("treasury withdrawal overflows reward account")
+				return errors.New(
+					"treasury withdrawal overflows reward account",
+				)
 			}
 			creditedBalances[account] = credited
 		}
@@ -1316,7 +1329,8 @@ func (m *MockStateManager) enactProposal(
 		}
 	case common.GovActionTypeHardForkInitiation:
 		if conwayPP, ok := m.protocolParams.(*conway.ConwayProtocolParameters); ok &&
-			conwayPP != nil && proposal.ProtocolVersion != nil {
+			conwayPP != nil &&
+			proposal.ProtocolVersion != nil {
 			conwayPP.ProtocolVersion = common.ProtocolParametersProtocolVersion{
 				Major: proposal.ProtocolVersion.Major,
 				Minor: proposal.ProtocolVersion.Minor,

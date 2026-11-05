@@ -154,7 +154,9 @@ func (m *MockStateManager) ratifyProposals(currentEpoch uint64) error {
 		if proposal == nil {
 			return fmt.Errorf("ratify proposal %s: proposal is missing", id)
 		}
-		withdrawalTotal, withdrawalsFit := proposal.withdrawalTotalWithin(treasury)
+		withdrawalTotal, withdrawalsFit := proposal.withdrawalTotalWithin(
+			treasury,
+		)
 		if stake == nil {
 			stake = m.credentialVotingStake(currentEpoch)
 		}

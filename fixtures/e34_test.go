@@ -52,7 +52,12 @@ func TestE34EmbeddedIntegrity(t *testing.T) {
 		require.False(t, checked[name], "duplicate checksum: %s", name)
 		payload, err := embedded.ReadFile(root + name)
 		require.NoError(t, err)
-		require.Equal(t, digest, fmt.Sprintf("%x", sha256.Sum256(payload)), name)
+		require.Equal(
+			t,
+			digest,
+			fmt.Sprintf("%x", sha256.Sum256(payload)),
+			name,
+		)
 		checked[name] = true
 	}
 	require.Len(t, checked, 16)
@@ -90,5 +95,9 @@ func TestE34ReferenceDataIsNotExecutable(t *testing.T) {
 	result, err := harness.ExecuteFixture("e34/pallas/node-vectors.tsv")
 	require.NoError(t, err)
 	require.False(t, result.Success)
-	require.ErrorContains(t, result.Error, "reference-data fixture is not executable")
+	require.ErrorContains(
+		t,
+		result.Error,
+		"reference-data fixture is not executable",
+	)
 }

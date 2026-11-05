@@ -23,7 +23,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func poolRetirementTx(operator lcommon.PoolKeyHash, epoch uint64) *shelley.ShelleyTransaction {
+func poolRetirementTx(
+	operator lcommon.PoolKeyHash,
+	epoch uint64,
+) *shelley.ShelleyTransaction {
 	return &shelley.ShelleyTransaction{
 		Body: shelley.ShelleyTransactionBody{
 			TxCertificates: []lcommon.CertificateWrapper{{

@@ -328,9 +328,14 @@ func TestConcurrentOversizedSendsStayWhole(t *testing.T) {
 			case <-baselineDecoded:
 			case err, ok := <-h.ServerErrors():
 				if !ok {
-					t.Fatal("server closed before decoding the baseline request")
+					t.Fatal(
+						"server closed before decoding the baseline request",
+					)
 				}
-				t.Fatalf("server failed before decoding the baseline request: %v", err)
+				t.Fatalf(
+					"server failed before decoding the baseline request: %v",
+					err,
+				)
 			case <-time.After(5 * time.Second):
 				t.Fatal("server did not decode the baseline request")
 			}
