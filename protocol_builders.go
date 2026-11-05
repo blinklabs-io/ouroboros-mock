@@ -356,9 +356,9 @@ func LocalTxMonitorNextTx() ConversationEntryInput {
 func LocalTxMonitorHasTx(txID []byte) ConversationEntryInput {
 	return ConversationEntryInput{
 		ProtocolId: localtxmonitor.ProtocolId,
-		Message: localtxmonitor.NewMsgHasTx(
+		Message: localtxmonitor.NewMsgHasTx( //nolint:staticcheck // deprecated wrapper for a deprecated constructor
 			cloneBytes(txID),
-		), //nolint:staticcheck // deprecated wrapper for a deprecated constructor
+		),
 		MessageType:     localtxmonitor.MessageTypeHasTx,
 		MsgFromCborFunc: localtxmonitor.NewMsgFromCbor,
 	}
