@@ -28,6 +28,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 https://github.com/actions/setup-go/releases/tag/v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
+          check-latest: true
       - name: prepare conformance data
         run: make prepare-blueprint-testdata
       - name: go-test
@@ -49,6 +50,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 https://github.com/actions/setup-go/releases/tag/v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
+          check-latest: true
       - name: prepare conformance data
         run: make prepare-blueprint-testdata
       - name: conformance
