@@ -4,7 +4,7 @@ go 1.26.11
 
 require (
 	github.com/blinklabs-io/gouroboros v0.220.1
-	github.com/blinklabs-io/plutigo v0.12.2
+	github.com/blinklabs-io/plutigo v0.13.1
 	github.com/stretchr/testify v1.12.1
 	github.com/utxorpc/go-codegen v0.19.2
 	go.uber.org/goleak v1.3.0
