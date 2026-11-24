@@ -16,6 +16,7 @@ package ouroboros_mock
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/muxer"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 // ProtocolRole is an enum of the protocol roles
@@ -141,11 +143,13 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 }
 
 // Close closes both sides of the connection. This is needed to satisfy the net.Conn interface
+//
+//nolint:contextcheck // io.Closer has no context to pass on; lifecycle bounds the wait.
 func (c *Connection) Close() error {
 	var retErr error
 	c.onceClose.Do(func() {
 		close(c.doneChan)
-		c.muxer.Stop()
+		_ = lifecycle.Stop(context.Background(), c.muxer)
 		// Close both halves unconditionally and report both outcomes.
 		// sync.Once never runs this body a second time, so giving up on
 		// the first error would strand the other half of the pipe for the

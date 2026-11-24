@@ -16,6 +16,7 @@ package peer
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -27,6 +28,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 // FollowerConfig configures a [Follower].
@@ -161,7 +163,7 @@ func (f *Follower) Err() error {
 func (f *Follower) Close() error {
 	var err error
 	if f.conn != nil {
-		err = f.conn.Close()
+		err = lifecycle.Close(context.Background(), f.conn)
 	}
 	f.events.close()
 	return err
