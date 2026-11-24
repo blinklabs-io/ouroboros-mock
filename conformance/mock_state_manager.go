@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"math/big"
 	"slices"
 	"sort"
@@ -75,6 +76,50 @@ type MockStateManager struct {
 	// committeeResignations tracks current and pending committee credentials
 	// that have resigned.
 	committeeResignations map[ledger.RewardAccountKey]bool
+
+	// scheduleStartSlot, scheduleEpoch and scheduleEpochLength map slots to
+	// epochs as SetEpochSchedule received them. A zero length means no
+	// schedule was set; see defaultEpochLength.
+	scheduleStartSlot   uint64
+	scheduleEpoch       uint64
+	scheduleEpochLength uint64
+}
+
+// defaultEpochLength is the Shelley mainnet epoch length, used to place a
+// governance action's expiry when no epoch schedule has been set.
+const defaultEpochLength = 432000
+
+// SetEpochSchedule implements EpochScheduleReceiver.
+func (m *MockStateManager) SetEpochSchedule(
+	startSlot, initialEpoch, epochLength uint64,
+) {
+	m.scheduleStartSlot = startSlot
+	m.scheduleEpoch = initialEpoch
+	m.scheduleEpochLength = epochLength
+}
+
+// lastSlotOfEpoch returns the last slot of epoch under the epoch schedule.
+// Without a schedule, epochs are defaultEpochLength slots from slot 0. An
+// epoch that ended before the schedule's start slot maps to the slot before
+// it, or to 0 when the schedule starts at slot 0, which gouroboros reads as an
+// unknown expiry and refuses the vote.
+func (m *MockStateManager) lastSlotOfEpoch(epoch uint64) uint64 {
+	start, first, length := m.scheduleStartSlot, m.scheduleEpoch,
+		m.scheduleEpochLength
+	if length == 0 {
+		start, first, length = 0, 0, defaultEpochLength
+	}
+	if epoch < first {
+		if start == 0 {
+			return 0
+		}
+		return start - 1
+	}
+	epochs := epoch - first + 1
+	if epochs > (math.MaxUint64-start)/length {
+		return math.MaxUint64
+	}
+	return start + epochs*length - 1
 }
 
 // drepSeedDeposit returns the deposit the initial state records for a DRep
@@ -1531,6 +1576,7 @@ func (m *MockStateManager) Reset() error {
 	m.hotKeyAuthorizations = make(map[ledger.RewardAccountKey]common.Credential)
 	m.committeeResignations = make(map[ledger.RewardAccountKey]bool)
 	m.govState = NewGovernanceState()
+	m.SetEpochSchedule(0, 0, 0)
 	return nil
 }
 
@@ -1748,9 +1794,12 @@ func (m *MockStateManager) buildLedgerState() *ledger.MockLedgerState {
 	if len(m.govState.Proposals) > 0 {
 		actions := make(map[string]*common.GovActionState)
 		for id, proposal := range m.govState.Proposals {
+			// Votes are accepted through the whole of epoch ExpiresAfter
+			// (checkVotesAreNotForExpiredActions in the Conway GOV rule),
+			// and gouroboros refuses a vote at any slot past ExpirySlot.
 			actions[id] = &common.GovActionState{
 				ActionType: proposal.ActionType,
-				ExpirySlot: proposal.ExpiresAfter * 432000, // Approximate: epoch * slots per epoch
+				ExpirySlot: m.lastSlotOfEpoch(proposal.ExpiresAfter),
 			}
 		}
 		builder.WithGovActions(actions)

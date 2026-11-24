@@ -51,6 +51,16 @@ type StateSnapshotProvider interface {
 	GetStateSnapshot() *StateSnapshot
 }
 
+// EpochScheduleReceiver is an optional StateManager extension for a manager
+// that needs the vector's slot-to-epoch mapping, for example to place the
+// last slot of a governance action's expiry epoch. After loading a vector's
+// initial state, including the reload a rollback performs, the harness calls
+// SetEpochSchedule: epoch initialEpoch begins at startSlot and every epoch is
+// epochLength slots long.
+type EpochScheduleReceiver interface {
+	SetEpochSchedule(startSlot, initialEpoch, epochLength uint64)
+}
+
 // StateManager handles state mutations during test execution.
 // Implementations manage the full lifecycle of ledger state for a test vector.
 type StateManager interface {

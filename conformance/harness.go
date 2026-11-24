@@ -239,6 +239,7 @@ func (h *Harness) runVector(t *testing.T, vector *TestVector) {
 	h.currentEpoch = initialState.CurrentEpoch
 	h.initialEpoch = initialState.CurrentEpoch
 	h.currentSlot = h.startSlot
+	h.sendEpochSchedule()
 
 	// Process events
 	for i, event := range vector.Events {
@@ -827,6 +828,7 @@ func (h *Harness) runVectorWithResult(vectorPath string) VectorResult {
 	h.currentEpoch = initialState.CurrentEpoch
 	h.initialEpoch = initialState.CurrentEpoch
 	h.currentSlot = h.startSlot
+	h.sendEpochSchedule()
 
 	// Process events
 	for i, event := range vector.Events {
@@ -973,6 +975,7 @@ func (h *Harness) rollback(targetSlot uint64) error {
 	); err != nil {
 		return fmt.Errorf("rollback: reload initial state failed: %w", err)
 	}
+	h.sendEpochSchedule()
 
 	h.protocolParams = h.initialProtocolParams
 	h.currentEpoch = h.initialEpoch
@@ -1173,6 +1176,14 @@ func skipCborItem(data []byte, pos int) int {
 		return pos + 1
 	}
 	return pos + 1
+}
+
+// sendEpochSchedule passes the active vector's slot-to-epoch mapping to a
+// state manager that implements EpochScheduleReceiver.
+func (h *Harness) sendEpochSchedule() {
+	if receiver, ok := h.stateManager.(EpochScheduleReceiver); ok {
+		receiver.SetEpochSchedule(h.startSlot, h.initialEpoch, h.epochLength)
+	}
 }
 
 // parseEpochLength extracts the epoch_length from the config array.
