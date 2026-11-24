@@ -357,6 +357,14 @@ explicit callers, but are not called by the harness. Credential-aware callers
 can use `RewardAccountBalanceSetter` with `ledger.RewardAccountKey` to preserve
 both credential type and hash.
 
+A state manager that needs the vector's slot-to-epoch mapping can implement
+`EpochScheduleReceiver`. After loading a vector's initial state, including the
+reload a rollback performs, the harness calls
+`SetEpochSchedule(startSlot, initialEpoch, epochLength)` with the vector
+config's start slot and epoch length. `MockStateManager` uses it to set a
+governance action's `ExpirySlot` to the last slot of its `ExpiresAfter` epoch,
+the last slot in which the Conway GOV rule accepts a vote on it.
+
 ---
 
 ## Implementation Notes
