@@ -16,6 +16,7 @@ package ouroboros_mock
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -27,6 +28,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/muxer"
 	"github.com/blinklabs-io/gouroboros/protocol"
 	"github.com/blinklabs-io/gouroboros/protocol/keepalive"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 	"github.com/stretchr/testify/require"
 )
 
@@ -438,7 +440,7 @@ func TestProcessOutputRejectsOversizedPayload(t *testing.T) {
 	defer client.Close()
 	testMuxer := muxer.New(server)
 	defer func() {
-		testMuxer.Stop()
+		_ = lifecycle.Stop(context.Background(), testMuxer)
 		for range testMuxer.ErrorChan() {
 		}
 	}()
