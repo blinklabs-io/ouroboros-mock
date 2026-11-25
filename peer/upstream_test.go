@@ -16,6 +16,7 @@ package peer_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -31,6 +32,7 @@ import (
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
 	csmock "github.com/blinklabs-io/ouroboros-mock/chainsync"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 	"github.com/blinklabs-io/ouroboros-mock/peer"
 	"github.com/stretchr/testify/require"
 )
@@ -99,7 +101,7 @@ func newTestClient(t *testing.T, up *peer.Upstream) *testClient {
 	)
 	require.NoError(t, err)
 	tc.conn = conn
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { _ = lifecycle.Close(context.Background(), conn) })
 	return tc
 }
 

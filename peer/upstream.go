@@ -16,6 +16,7 @@ package peer
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -27,6 +28,7 @@ import (
 	gchainsync "github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 const maxRetiredRelayCount = 8
@@ -193,7 +195,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
-		_ = oConn.Close()
+		_ = lifecycle.Close(context.Background(), oConn)
 		return ErrClosed
 	}
 	s.conn = oConn
@@ -315,7 +317,7 @@ func (u *Upstream) Close() error {
 		_ = c.Close()
 	}
 	for _, s := range sessions {
-		_ = s.conn.Close()
+		_ = lifecycle.Close(context.Background(), s.conn)
 	}
 	u.events.close()
 	u.wg.Wait()

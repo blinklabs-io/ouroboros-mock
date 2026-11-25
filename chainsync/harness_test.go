@@ -31,6 +31,7 @@ import (
 	"go.uber.org/goleak"
 
 	csmock "github.com/blinklabs-io/ouroboros-mock/chainsync"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 // serverAction performs a single outbound send from within a RequestNext
@@ -809,7 +810,7 @@ func TestServerConnectionCloseIsSafeFromCallerAndHarness(t *testing.T) {
 
 		conn := h.ServerConnection()
 		require.NotNil(t, conn)
-		require.NoError(t, conn.Close())
+		require.NoError(t, lifecycle.Close(context.Background(), conn))
 		require.NoError(t, h.Close())
 	})
 
@@ -821,6 +822,6 @@ func TestServerConnectionCloseIsSafeFromCallerAndHarness(t *testing.T) {
 		conn := h.ServerConnection()
 		require.NotNil(t, conn)
 		require.NoError(t, h.Close())
-		require.NoError(t, conn.Close())
+		require.NoError(t, lifecycle.Close(context.Background(), conn))
 	})
 }

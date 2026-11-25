@@ -30,6 +30,7 @@ import (
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/gouroboros/protocol/handshake"
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 // Mode selects the chain-sync protocol variant the harness negotiates.
@@ -198,7 +199,7 @@ func (h *Harness) abort(sutCh <-chan sutResult, sutConn net.Conn) {
 	_ = sutConn.Close()
 	res := <-sutCh
 	if res.conn != nil {
-		_ = res.conn.Close()
+		_ = lifecycle.Close(context.Background(), res.conn)
 	}
 }
 
@@ -404,7 +405,7 @@ func (h *Harness) Close() error {
 	h.closeOnce.Do(func() {
 		close(h.doneChan)
 		if h.sut != nil {
-			_ = h.sut.Close()
+			_ = lifecycle.Close(context.Background(), h.sut)
 		}
 		h.teardownDriver()
 		h.wg.Wait()
@@ -416,7 +417,7 @@ func (h *Harness) Close() error {
 // drain (signalled by the muxer error channel closing), so a subsequent
 // goleak check sees no lingering goroutines.
 func (h *Harness) teardownDriver() {
-	h.muxer.Stop()
+	_ = lifecycle.Stop(context.Background(), h.muxer)
 	// The muxer closes its error channel only after its internal goroutines
 	// have exited and the connection is closed; draining to closure guarantees
 	// a clean teardown.

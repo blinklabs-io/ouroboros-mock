@@ -31,6 +31,7 @@ import (
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	"github.com/blinklabs-io/ouroboros-mock/consensus/format"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 // Config drives a single capture run. Mirrors the cmd/capture-sidecar
@@ -193,16 +194,19 @@ func (s *Sidecar) Vector() format.TestVector {
 
 // Close stops the gouroboros protocol clients and releases the TCP
 // connection. Safe to call multiple times.
+//
+//nolint:contextcheck // io.Closer has no context to pass on; lifecycle bounds the wait.
 func (s *Sidecar) Close() error {
 	var firstErr error
 	if s.conn != nil {
 		// Best-effort: Stop the chainsync client cleanly so the
 		// MsgDone is sent. Errors are recorded but do not prevent
 		// further cleanup.
-		if err := s.conn.ChainSync().Client.Stop(); err != nil {
+		if err := lifecycle.Stop(context.Background(), s.conn.ChainSync().Client); err != nil {
 			firstErr = fmt.Errorf("chainsync stop: %w", err)
 		}
-		if err := s.conn.Close(); err != nil && firstErr == nil {
+		if err := lifecycle.Close(context.Background(), s.conn); err != nil &&
+			firstErr == nil {
 			firstErr = fmt.Errorf("conn close: %w", err)
 		}
 		s.conn = nil

@@ -25,6 +25,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/muxer"
 	gchainsync "github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,8 +44,8 @@ func VerifyConcurrentOversizedSends(t *testing.T) {
 	driver.Start()
 	receiver.Start()
 	defer func() {
-		driver.Stop()
-		receiver.Stop()
+		_ = lifecycle.Stop(context.Background(), driver)
+		_ = lifecycle.Stop(context.Background(), receiver)
 		for range driver.ErrorChan() {
 		}
 		for range receiver.ErrorChan() {

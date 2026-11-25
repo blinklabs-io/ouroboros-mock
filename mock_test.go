@@ -15,11 +15,13 @@
 package ouroboros_mock_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"go.uber.org/goleak"
@@ -50,7 +52,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf("unexpected error when creating Ouroboros object: %s", err)
 	}
 	// Close Ouroboros connection
-	if err := oConn.Close(); err != nil {
+	if err := lifecycle.Close(context.Background(), oConn); err != nil {
 		t.Fatalf("unexpected error when closing Ouroboros object: %s", err)
 	}
 	// Wait for connection shutdown

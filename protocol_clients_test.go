@@ -16,6 +16,7 @@ package ouroboros_mock
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -58,7 +60,7 @@ func TestLocalTxMonitorBuildersServeGouroborosClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got)
 	require.NoError(t, monitor.Release())
-	require.NoError(t, monitor.Stop())
+	require.NoError(t, lifecycle.Stop(context.Background(), monitor))
 	waitProtocolConversation(t, mock)
 }
 
@@ -114,7 +116,7 @@ func newProtocolClientConnection(
 	client, err := ouroboros.New(options...)
 	require.NoError(t, err)
 	t.Cleanup(
-		func() { require.NoError(t, client.Close()); <-client.ErrorChan() },
+		func() { require.NoError(t, lifecycle.Close(context.Background(), client)); <-client.ErrorChan() },
 	)
 	return client, mock
 }
@@ -149,7 +151,7 @@ func TestBlockFetchScenarioServesGouroborosClient(t *testing.T) {
 			require.Equal(t, block.Type(), got.Type())
 			require.Equal(t, block.Hash(), got.Hash())
 			require.Equal(t, block.Cbor(), got.Cbor())
-			require.NoError(t, client.BlockFetch().Client.Stop())
+			require.NoError(t, lifecycle.Stop(context.Background(), client.BlockFetch().Client))
 			waitProtocolConversation(t, mock)
 		})
 	}

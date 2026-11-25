@@ -34,6 +34,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/peersharing"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -426,7 +427,12 @@ func runProtocolScenario(
 		},
 	)
 	t.Cleanup(
-		func() { client.Stop(); clientMuxer.Stop(); require.NoError(t, mock.Close()); <-client.DoneChan() },
+		func() {
+			_ = lifecycle.Stop(context.Background(), client)
+			_ = lifecycle.Stop(context.Background(), clientMuxer)
+			require.NoError(t, mock.Close())
+			<-client.DoneChan()
+		},
 	)
 	client.Start()
 	clientMuxer.Start()

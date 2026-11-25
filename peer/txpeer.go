@@ -15,6 +15,7 @@
 package peer
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	ouroboros_mock "github.com/blinklabs-io/ouroboros-mock"
+	"github.com/blinklabs-io/ouroboros-mock/internal/lifecycle"
 )
 
 // TxPeerConfig configures a [TxPeer].
@@ -123,7 +125,7 @@ func (p *TxPeer) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.done)
 		if p.conn != nil {
-			p.closeErr = p.conn.Close()
+			p.closeErr = lifecycle.Close(context.Background(), p.conn)
 		}
 		p.events.close()
 	})
