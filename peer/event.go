@@ -33,7 +33,14 @@
 package peer
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"slices"
 	"sync"
+	"time"
 
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
 )
@@ -93,10 +100,35 @@ const (
 	// EventTxsRequested is published by a [TxPeer] when the node asked for
 	// transaction bodies; TxIds holds the requested ids.
 	EventTxsRequested
+	// EventBlockSent records a body-send call, with its start time and result.
+	EventBlockSent
+	// EventFetchRequested records the start of a client range operation, not a wire write.
+	EventFetchRequested
+	// EventFetchCompleted records terminal range completion.
+	EventFetchCompleted
+	// EventTxsOffered records actual local insertion into a transaction offer queue.
+	EventTxsOffered
+	// EventTxsReturned records the prepared reply to a transaction-body request.
+	EventTxsReturned
 )
 
 // Event describes one observable step of a peer.
 type Event struct {
+	// OccurredAt is captured at the observed operation, before queueing.
+	OccurredAt time.Time
+	// Sequence orders publication attempts, including dropped observations.
+	Sequence uint64
+	// Request identifies a range or transaction exchange within Session.
+	Request uint64
+	// Connection is the actual local endpoint followed by the remote endpoint.
+	Connection string
+	// Count is the actual operation population, never a slot difference.
+	Count uint64
+	// BlockNumber and Parent identify an observed header independently of the tip.
+	BlockNumber uint64
+	Parent      []byte
+	// Size is the serialized payload size when the operation exposes it.
+	Size uint64
 	Kind EventKind
 	// Session identifies the connection the event belongs to.
 	Session uint64
@@ -108,22 +140,45 @@ type Event struct {
 	Err error
 }
 
+// ObservationStats accounts for every attempted observation and its disposition.
+type ObservationStats struct {
+	Produced  uint64 `json:"produced"`
+	Delivered uint64 `json:"delivered"`
+	Dropped   uint64 `json:"dropped"`
+	Discarded uint64 `json:"discarded"`
+	Finalized bool   `json:"finalized"`
+}
+
+// Complete reports whether finalization delivered every observation.
+func (s ObservationStats) Complete() bool {
+	return s.Finalized && s.Produced == s.Delivered && s.Dropped == 0 && s.Discarded == 0
+}
+
+// ErrIncompleteObservations indicates loss or interrupted observation finalization.
+var ErrIncompleteObservations = errors.New("incomplete peer observations")
+
 const eventQueueCapacity = 256
 
 // eventStream is a bounded, ordered event queue drained onto a channel.
 type eventStream struct {
-	mu      sync.Mutex
-	queue   []Event
-	dropped uint64
-	wake    chan struct{}
-	out     chan Event
-	done    chan struct{}
-	stopped chan struct{}
-	closed  bool
-	once    sync.Once
+	connection string
+	mu         sync.Mutex
+	queue      []Event
+	dropped    uint64
+	produced   uint64
+	delivered  uint64
+	discarded  uint64
+	draining   bool
+	finalized  bool
+	wake       chan struct{}
+	out        chan Event
+	done       chan struct{}
+	stopped    chan struct{}
+	closed     bool
+	once       sync.Once
 }
 
-func newEventStream() *eventStream {
+func newEventStream(connection ...string) *eventStream {
 	s := &eventStream{
 		queue:   make([]Event, 0, eventQueueCapacity),
 		wake:    make(chan struct{}, 1),
@@ -131,13 +186,35 @@ func newEventStream() *eventStream {
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
+	if len(connection) > 0 {
+		s.connection = connection[0]
+	}
 	go s.pump()
 	return s
 }
 
 func (s *eventStream) publish(e Event) {
+	if e.OccurredAt.IsZero() {
+		e.OccurredAt = time.Now()
+	}
+	e.Parent = bytes.Clone(e.Parent)
+	e.Points = slices.Clone(e.Points)
+	for i := range e.Points {
+		e.Points[i].Hash = bytes.Clone(e.Points[i].Hash)
+	}
+	e.TxIds = slices.Clone(e.TxIds)
+	e.Txs = cloneTxs(e.Txs)
 	s.mu.Lock()
+	s.produced++
+	e.Sequence = s.produced
+	if e.Connection == "" {
+		e.Connection = s.connection
+		if s.connection != "" && e.Session == 0 {
+			e.Session = 1
+		}
+	}
 	if s.closed {
+		s.discarded++
 		s.mu.Unlock()
 		return
 	}
@@ -174,6 +251,15 @@ func (s *eventStream) pump() {
 		}
 		s.mu.Unlock()
 		if !have {
+			s.mu.Lock()
+			finished := s.draining && len(s.queue) == 0
+			if finished {
+				s.finalized = true
+			}
+			s.mu.Unlock()
+			if finished {
+				return
+			}
 			select {
 			case <-s.wake:
 				continue
@@ -184,6 +270,7 @@ func (s *eventStream) pump() {
 		select {
 		case s.out <- e:
 			s.mu.Lock()
+			s.delivered++
 			s.queue[0] = Event{}
 			s.queue = s.queue[1:]
 			s.mu.Unlock()
@@ -203,7 +290,53 @@ func (s *eventStream) close() {
 		close(s.done)
 		<-s.stopped
 		s.mu.Lock()
+		s.discarded += uint64(len(s.queue))
 		s.queue = nil
 		s.mu.Unlock()
 	})
+}
+
+func (s *eventStream) stats() ObservationStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return ObservationStats{Produced: s.produced, Delivered: s.delivered, Dropped: s.dropped, Discarded: s.discarded, Finalized: s.finalized}
+}
+
+func (s *eventStream) finish(ctx context.Context) (ObservationStats, error) {
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		s.draining = true
+	}
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	select {
+	case <-s.stopped:
+		stats := s.stats()
+		if !stats.Complete() {
+			return stats, ErrIncompleteObservations
+		}
+		return stats, nil
+	case <-ctx.Done():
+		s.close()
+		return s.stats(), errors.Join(ctx.Err(), ErrIncompleteObservations)
+	}
+}
+
+func connectionName(conn net.Conn) string {
+	if conn == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s %s", conn.LocalAddr(), conn.RemoteAddr())
+}
+
+func cloneTxs(txs []Tx) []Tx {
+	out := slices.Clone(txs)
+	for i := range out {
+		out[i].Raw = bytes.Clone(out[i].Raw)
+	}
+	return out
 }

@@ -208,3 +208,9 @@ exactly and responses send the configured cookie. Unknown fields, unsupported
 messages, multiple YAML documents, and ambiguous entries are rejected before
 opening the listener. Numeric settings require unsigned YAML integers, string
 settings require YAML strings, and close requires the literal boolean `true`.
+
+## Benchmark experiments
+
+The existing executable also runs [checksummed reactive peer experiments](benchmark/README.md),
+with a reference-validated corpus, complete measurement contracts and explicit
+observation finalization.

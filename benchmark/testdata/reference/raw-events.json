@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "events": [
+    {
+      "Kind": 14,
+      "OccurredAt": "2026-01-01T00:00:00.200000001Z",
+      "Sequence": 1,
+      "Session": 2,
+      "Request": 7,
+      "Connection": "fetcher node",
+      "Points": [
+        {
+          "Slot": 5,
+          "Hash": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      ],
+      "Parent": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "BlockNumber": 2,
+      "Size": 100,
+      "Count": 1
+    },
+    {
+      "Kind": 14,
+      "OccurredAt": "2026-01-01T00:00:00.100000001Z",
+      "Sequence": 2,
+      "Session": 3,
+      "Request": 7,
+      "Connection": "other-fetcher node",
+      "Points": [
+        {
+          "Slot": 5,
+          "Hash": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      ],
+      "Parent": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "BlockNumber": 2,
+      "Size": 100,
+      "Count": 1
+    }
+  ]
+}

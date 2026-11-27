@@ -1,0 +1,577 @@
+{
+  "version": 1,
+  "observables": [
+    {
+      "name": "BlockFetch.Client.CompletedBlockFetch",
+      "source": "node",
+      "unit": "full hash; serialized bytes; occurrence time",
+      "boundary": "Complete successful body receive and decode before ledger delivery",
+      "native_meaning": "Raw arrival, failed decode and downstream span end are not completion",
+      "cases": [
+        "metric-12",
+        "lost-observations",
+        "missing-finalization",
+        "decode-failure"
+      ]
+    },
+    {
+      "name": "BlockFetch.Client.SendFetchRequest",
+      "source": "node",
+      "unit": "actual range block count; endpoints; request/peer identity",
+      "boundary": "Start of the actual source connection write for the request",
+      "native_meaning": "API admission/enqueue and physical NIC departure are different boundaries",
+      "cases": [
+        "metric-11",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "BlockFetch.Server.SendBlock",
+      "source": "node",
+      "unit": "full hash; peer; occurrence time",
+      "boundary": "Per-block source body-send-call start, with eventual call result",
+      "native_meaning": "Do not substitute end of the whole batch or peer receipt",
+      "cases": [
+        "metric-09",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "ChainDB.AddBlockEvent.AddedToCurrentChain",
+      "source": "node",
+      "unit": "full selected/applied point; publication identity",
+      "boundary": "Authoritative validated selected-chain extension; applied publication retains its own authority/time",
+      "native_meaning": "Shared commit-chunk publication is not each block independent validation duration",
+      "cases": [
+        "metric-14",
+        "lost-observations",
+        "missing-finalization",
+        "batch-publication"
+      ]
+    },
+    {
+      "name": "ChainDB.AddBlockEvent.SwitchedToAFork",
+      "source": "node",
+      "unit": "ancestor and old/new full points; branch/generation",
+      "boundary": "Successful preferred-branch installation/publication",
+      "native_meaning": "Candidate detection, preferred peer change and rollback start are not successful replacement",
+      "cases": [
+        "metric-14",
+        "lost-observations",
+        "missing-finalization",
+        "fork-reinclusion"
+      ]
+    },
+    {
+      "name": "ChainDB.LedgerEvent.Snapshot.TookSnapshot",
+      "source": "node",
+      "unit": "successful local count; elapsed seconds; tip",
+      "boundary": "Successful local snapshot write after its promised artifact finalization",
+      "native_meaning": "Scheduling/no-op/retry/upload/prune spans do not count as completed local writes",
+      "cases": [
+        "metric-17",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "ChainSync.Client.DownloadedHeader",
+      "source": "node",
+      "unit": "slot/block number; full hash; peer",
+      "boundary": "Decoded-header ingress before downstream validation/admission",
+      "native_meaning": "Preserve duplicate notices and each peer; analysis selects first notice",
+      "cases": [
+        "metric-10",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "ChainSync.ServerHeader.Update",
+      "source": "node",
+      "unit": "full point; peer; blockingRead/risingEdge",
+      "boundary": "Before actual header/rollback send, including immediate and post-AwaitReply paths",
+      "native_meaning": "Identify the transmitted point rather than the server tip; distinguish waited announcements from catch-up",
+      "cases": [
+        "metric-09",
+        "lost-observations",
+        "missing-finalization",
+        "actual-header-not-tip"
+      ]
+    },
+    {
+      "name": "Forge.Loop.AdoptedBlock",
+      "source": "node",
+      "unit": "absolute slot; full hash; serialized bytes",
+      "boundary": "Successful own-block adoption at its source authority",
+      "native_meaning": "Keep signing, publication notification and applied adoption distinct",
+      "cases": [
+        "metric-09",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.BlockContext",
+      "source": "node",
+      "unit": "target block number; parent; generation; seconds",
+      "boundary": "Actual parent/context acquisition for the attempt, including re-resolution",
+      "native_meaning": "Do not backdate final context into an earlier reference stage",
+      "cases": [
+        "metric-02",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.ForgeTickedLedgerState",
+      "source": "node",
+      "unit": "actual state/generation; seconds",
+      "boundary": "Actual completed native state advance with documented correspondence",
+      "native_meaning": "Integrated or differently ordered work is not a fictitious post-decision reference interval",
+      "cases": [
+        "metric-06",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.ForgedBlock",
+      "source": "node",
+      "unit": "slot/block number; full hashes; bytes",
+      "boundary": "Successful signed construction completed before admission",
+      "native_meaning": "Retain signed candidates even when subsequent selection/adoption loses",
+      "cases": [
+        "metric-08",
+        "lost-observations",
+        "missing-finalization",
+        "losing-signed-candidate"
+      ]
+    },
+    {
+      "name": "Forge.Loop.ForgingMempoolSnapshot",
+      "source": "node",
+      "unit": "selection/generation; seconds",
+      "boundary": "Consistent transaction snapshot acquisition, distinct from selection/revalidation/retry",
+      "native_meaning": "Retain discarded/rebuilt attempts; the entire build interval is not snapshotting",
+      "cases": [
+        "metric-07",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.LedgerState",
+      "source": "node",
+      "unit": "state/generation; seconds",
+      "boundary": "Actual consistent ledger/build-view acquisition",
+      "native_meaning": "A nonleader path need not acquire a view simply to manufacture a phase",
+      "cases": [
+        "metric-03",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.LedgerView",
+      "source": "node",
+      "unit": "preparation/decision interval seconds; generation",
+      "boundary": "Actual native forecast/leadership-input preparation interval",
+      "native_meaning": "Record cache/precomputation at its real time, not synthetic work in the current slot",
+      "cases": [
+        "metric-04",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.NodeIsLeader",
+      "source": "node",
+      "unit": "absolute slot; occurrence time",
+      "boundary": "Actual completed positive leader decision before later gates",
+      "native_meaning": "Retain attempt/pool/generation and actual decision completion",
+      "cases": [
+        "metric-05",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Forge.Loop.NodeNotLeader",
+      "source": "node",
+      "unit": "absolute slot; occurrence time",
+      "boundary": "Actual completed negative leader decision",
+      "native_meaning": "Checker panic, unavailable state or early refusal is not an ordinary nonleader decision",
+      "cases": [
+        "metric-05",
+        "lost-observations",
+        "missing-finalization",
+        "nonleader",
+        "leader-check-panic"
+      ]
+    },
+    {
+      "name": "Forge.Loop.StartLeadershipCheck",
+      "source": "node",
+      "unit": "absolute slot; occurrence time",
+      "boundary": "Entry to every actual slot attempt, including later refusal/error",
+      "native_meaning": "Never substitute a future leader schedule for executed work",
+      "cases": [
+        "metric-01",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "LedgerMetrics",
+      "source": "node",
+      "unit": "absolute slot; UTxO cardinality; selected-fragment density",
+      "boundary": "Same published state/generation for cardinality, density and slot",
+      "native_meaning": "Preserve selected-fragment window/fallback provenance and rollback/epoch semantics",
+      "cases": [
+        "metric-23",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Mempool.AddedTx",
+      "source": "node",
+      "unit": "post-mutation count and standalone transaction CBOR bytes",
+      "boundary": "Successful addition under mutation authority",
+      "native_meaning": "Retained overlay/capacity memory is a separate native byte measure; duplicates do not add occupancy",
+      "cases": [
+        "metric-22",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Mempool.RejectedTx",
+      "source": "node",
+      "unit": "validation verdict count; full transaction identity if known",
+      "boundary": "Actual mempool validation rejection",
+      "native_meaning": "Capacity, duplicate, transient, infrastructure and transport outcomes retain distinct causes",
+      "cases": [
+        "metric-22",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "Mempool.RemoveTxs",
+      "source": "node",
+      "unit": "post-mutation count/CBOR bytes; IDs/cause",
+      "boundary": "Actual removal mutation caused by inclusion/conflicting ledger invalidation",
+      "native_meaning": "Expiry/capacity eviction remain separately classified native causes",
+      "cases": [
+        "metric-22",
+        "lost-observations",
+        "missing-finalization",
+        "mempool-removal-causes"
+      ]
+    },
+    {
+      "name": "Resources",
+      "source": "process",
+      "unit": "CPU seconds cumulative; RSS bytes; current OS threads",
+      "boundary": "Sample the actual node process at 1000 ms plus or minus 10 percent; retain actual measurement time/process generation",
+      "native_meaning": "Go heap/goroutines/threads-created are not RSS/current OS threads",
+      "cases": [
+        "metric-15",
+        "lost-observations",
+        "missing-finalization",
+        "sampler-deadline",
+        "process-restart"
+      ]
+    },
+    {
+      "name": "TxSubmission.TxInbound.Collected",
+      "source": "node",
+      "unit": "transaction count; peer/batch identity",
+      "boundary": "Actual group handed to admission before processing",
+      "native_meaning": "A transport reply and a retried admission attempt are not automatically a new input group",
+      "cases": [
+        "metric-19",
+        "lost-observations",
+        "missing-finalization"
+      ]
+    },
+    {
+      "name": "TxSubmission.TxInbound.Processed",
+      "source": "node",
+      "unit": "accepted/rejected/duplicate/new counts; peer/batch",
+      "boundary": "Terminal completion/cancellation of the declared submitted group",
+      "native_meaning": "Common accepted counts newly added transactions only; duplicate/already-known transactions count among not-added/rejected. Preserve native nil returns separately; rejected equals submitted minus newly added.",
+      "cases": [
+        "metric-19",
+        "lost-observations",
+        "missing-finalization",
+        "missing-batch-start",
+        "duplicate-batch-start",
+        "peer-and-batch-pairing",
+        "intake-count-mismatch"
+      ]
+    }
+  ],
+  "derived": [
+    {
+      "name": "Forge-loop tardiness",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(4000000 - 0) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-01",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Block-context acquisition",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(4200000 - 4000000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-02",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Ledger-state acquisition",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(5000000 - 4200000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-03",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Ledger-view acquisition",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(-1000000 - -2000000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-04",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Leadership-check duration",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(6000000 - 5000000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-05",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Ledger ticking",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(7000000 - 6000000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-06",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Mempool snapshotting",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(8000000 - 7000000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-07",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Leadership/mempool to signed block",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "(10000000 - 8000000) / 1000000000; precomputation retains its original interval",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-08",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Forged \u2192 announced / sending / self-adopted",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Subtract signing completion from each actual endpoint; root span end is not signing",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-09",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "First peer notice / first fetch",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Minimum peer observation in each declared population relative to slot start",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-10",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Notice \u2192 request",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Use actual write, excluding the earlier API/enqueue timestamp",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-11",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Fetch duration",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Each decode uses the common range request start; slots 1 and 5 contain two blocks",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-12",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "Fetched \u2192 announced / sending / adopted",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Subtract actual decode completion, not pre-decode receipt",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-13",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "End-to-end propagation to fraction p",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Nearest rank uses all four eligible nodes; rank three is censored, not renormalized",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-14",
+        "negative-interval"
+      ]
+    },
+    {
+      "name": "CPU and optional resource rates",
+      "source": "analysis",
+      "unit": "CPU percent of one core; bytes; current OS thread count",
+      "boundary": "(14-10)/2 * 100; RSS and current OS threads are gauges",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-15",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Snapshot count",
+      "source": "analysis",
+      "unit": "count",
+      "boundary": "Count successful completed local writes only",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-16",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Snapshot duration",
+      "source": "analysis",
+      "unit": "seconds",
+      "boundary": "Actual local-write intervals, excluding scheduling/upload/prune",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-17",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Live after major GC inside/outside snapshot windows (R)",
+      "source": "analysis",
+      "unit": "runtime-specific live bytes",
+      "boundary": "Observe live bytes only on a major-count increment after the initial baseline; no Go major/minor substitution",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-18",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Processed / accepted / rejected totals",
+      "source": "analysis",
+      "unit": "transaction counts",
+      "boundary": "The common specification counts only newly added transactions as accepted: 2. Of 4 submitted, one duplicate and one validation failure are not added: rejected=4-2=2. Three native nil returns do not imply three new admissions.",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-19",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Reject ratio",
+      "source": "analysis",
+      "unit": "ratio",
+      "boundary": "2 / 4 with aligned submitted/newly-admitted populations; duplicates count among transactions not added",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-20",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "CPU per processed transaction",
+      "source": "analysis",
+      "unit": "CPU seconds per processed transaction",
+      "boundary": "(14-10)/4 in the same window; whole-node index, not isolated validation CPU",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-21",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Mempool occupancy / rejection count",
+      "source": "analysis",
+      "unit": "transaction counts and common CBOR bytes",
+      "boundary": "Use atomic post-mutation common CBOR byte snapshots; duplicates do not grow occupancy",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-22",
+        "source-writer-error"
+      ]
+    },
+    {
+      "name": "Optional ledger size/density",
+      "source": "analysis",
+      "unit": "UTxO cardinality and selected-fragment density",
+      "boundary": "Rollback publishes a new generation; each count/density pair is same-state",
+      "native_meaning": "Use declared source authorities and populations; native-phase correspondence and runtime scope are explicit in the observable definitions",
+      "cases": [
+        "metric-23",
+        "source-writer-error"
+      ]
+    }
+  ],
+  "schema": "common-schema",
+  "envelope": "common-envelope",
+  "examples": "common-examples"
+}

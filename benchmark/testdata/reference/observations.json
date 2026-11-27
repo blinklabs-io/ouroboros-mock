@@ -1,0 +1,574 @@
+{
+  "version": 1,
+  "cases": {
+    "metric-01": {
+      "family": "Forge-loop tardiness",
+      "input": {
+        "start_ns": 0,
+        "end_ns": 4000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-02": {
+      "family": "Block-context acquisition",
+      "input": {
+        "start_ns": 4000000,
+        "end_ns": 4200000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-03": {
+      "family": "Ledger-state acquisition",
+      "input": {
+        "start_ns": 4200000,
+        "end_ns": 5000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-04": {
+      "family": "Ledger-view acquisition",
+      "input": {
+        "start_ns": -2000000,
+        "end_ns": -1000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": true
+      }
+    },
+    "metric-05": {
+      "family": "Leadership-check duration",
+      "input": {
+        "start_ns": 5000000,
+        "end_ns": 6000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-06": {
+      "family": "Ledger ticking",
+      "input": {
+        "start_ns": 6000000,
+        "end_ns": 7000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-07": {
+      "family": "Mempool snapshotting",
+      "input": {
+        "start_ns": 7000000,
+        "end_ns": 8000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-08": {
+      "family": "Leadership/mempool to signed block",
+      "input": {
+        "start_ns": 8000000,
+        "end_ns": 10000000,
+        "operation": "actual-native-operation",
+        "slot_start_ns": 0,
+        "precomputed": false
+      }
+    },
+    "metric-09": {
+      "family": "Forged \u2192 announced / sending / self-adopted",
+      "input": {
+        "signed_ns": 10000000,
+        "announced_ns": 12000000,
+        "send_call_ns": 13000000,
+        "self_adopted_ns": 14000000
+      }
+    },
+    "metric-10": {
+      "family": "First peer notice / first fetch",
+      "input": {
+        "slot_start_ns": 0,
+        "notices_ns": {
+          "p1": 3000000,
+          "p2": 2000000
+        },
+        "decoded_ns": {
+          "p1": 9000000,
+          "p2": 8000000
+        }
+      }
+    },
+    "metric-11": {
+      "family": "Notice \u2192 request",
+      "input": {
+        "notice_ns": 2000000,
+        "request_write_ns": 4000000,
+        "request_api_ns": 2100000
+      }
+    },
+    "metric-12": {
+      "family": "Fetch duration",
+      "input": {
+        "write_ns": 4000000,
+        "blocks": [
+          {
+            "slot": 1,
+            "decoded_ns": 8000000
+          },
+          {
+            "slot": 5,
+            "decoded_ns": 10000000
+          }
+        ],
+        "range_length": 2
+      }
+    },
+    "metric-13": {
+      "family": "Fetched \u2192 announced / sending / adopted",
+      "input": {
+        "decoded_ns": 10000000,
+        "announced_ns": 12000000,
+        "send_call_ns": 13000000,
+        "adopted_ns": 14000000
+      }
+    },
+    "metric-14": {
+      "family": "End-to-end propagation to fraction p",
+      "input": {
+        "eligible": [
+          "n1",
+          "n2",
+          "n3",
+          "n4"
+        ],
+        "adoptions_ns": {
+          "n1": 1000000,
+          "n2": 2000000
+        },
+        "slot_start_ns": 0,
+        "policy": "nonadopters-censored"
+      }
+    },
+    "metric-15": {
+      "family": "CPU and optional resource rates",
+      "input": {
+        "samples": [
+          {
+            "at_ns": 0,
+            "cpu_seconds": 10,
+            "rss_bytes": 1000,
+            "threads": 4
+          },
+          {
+            "at_ns": 1000000000,
+            "cpu_seconds": 12,
+            "rss_bytes": 1100,
+            "threads": 4
+          },
+          {
+            "at_ns": 2000000000,
+            "cpu_seconds": 14,
+            "rss_bytes": 1200,
+            "threads": 5
+          }
+        ]
+      }
+    },
+    "metric-16": {
+      "family": "Snapshot count",
+      "input": {
+        "operations": [
+          {
+            "kind": "scheduler"
+          },
+          {
+            "kind": "local_write",
+            "success": true
+          },
+          {
+            "kind": "upload"
+          },
+          {
+            "kind": "local_write",
+            "success": false
+          },
+          {
+            "kind": "local_write",
+            "success": true
+          }
+        ]
+      }
+    },
+    "metric-17": {
+      "family": "Snapshot duration",
+      "input": {
+        "local_writes": [
+          {
+            "start_ns": 100000000,
+            "end_ns": 300000000
+          },
+          {
+            "start_ns": 500000000,
+            "end_ns": 900000000
+          }
+        ]
+      }
+    },
+    "metric-18": {
+      "family": "Live after major GC inside/outside snapshot windows (R)",
+      "input": {
+        "runtime": "GHC",
+        "snapshot_ns": [
+          200000000,
+          400000000
+        ],
+        "samples": [
+          {
+            "at_ns": 100000000,
+            "major": 1,
+            "live": 1024
+          },
+          {
+            "at_ns": 300000000,
+            "major": 2,
+            "live": 2048
+          },
+          {
+            "at_ns": 500000000,
+            "major": 2,
+            "live": 2048
+          },
+          {
+            "at_ns": 600000000,
+            "major": 3,
+            "live": 4096
+          }
+        ]
+      }
+    },
+    "metric-19": {
+      "family": "Processed / accepted / rejected totals",
+      "input": {
+        "peer": "p1",
+        "batch": "b1",
+        "collected": 4,
+        "accepted": 2,
+        "newly_admitted": 2,
+        "duplicate_successes": 1,
+        "rejected": 2,
+        "native_nil_results": 3,
+        "validation_rejected": 1
+      }
+    },
+    "metric-20": {
+      "family": "Reject ratio",
+      "input": {
+        "processed": 4,
+        "rejected": 2
+      }
+    },
+    "metric-21": {
+      "family": "CPU per processed transaction",
+      "input": {
+        "window_ns": [
+          0,
+          2000000000
+        ],
+        "cpu_seconds": [
+          10,
+          14
+        ],
+        "processed": 4
+      }
+    },
+    "metric-22": {
+      "family": "Mempool occupancy / rejection count",
+      "input": {
+        "mutations": [
+          {
+            "sequence": 1,
+            "count": 1,
+            "bytes": 200,
+            "cause": "add"
+          },
+          {
+            "sequence": 2,
+            "count": 2,
+            "bytes": 500,
+            "cause": "add"
+          },
+          {
+            "sequence": 3,
+            "count": 1,
+            "bytes": 300,
+            "cause": "included"
+          }
+        ],
+        "duplicates": 1,
+        "validation_rejections": 1
+      }
+    },
+    "metric-23": {
+      "family": "Optional ledger size/density",
+      "input": {
+        "samples": [
+          {
+            "generation": 1,
+            "slot": 5,
+            "utxo_size": 10,
+            "density": 0.8,
+            "window": "selected-fragment"
+          },
+          {
+            "generation": 2,
+            "slot": 4,
+            "utxo_size": 9,
+            "density": 0.75,
+            "window": "selected-fragment"
+          }
+        ]
+      }
+    },
+    "zero-denominator": {
+      "family": "measurement-quality",
+      "input": {
+        "processed": 0,
+        "rejected": 0
+      }
+    },
+    "negative-interval": {
+      "family": "measurement-quality",
+      "input": {
+        "start_ns": 10,
+        "end_ns": 9
+      }
+    },
+    "missing-batch-start": {
+      "family": "measurement-quality",
+      "input": {
+        "processed": {
+          "peer": "p",
+          "batch": "b",
+          "accepted": 1
+        }
+      }
+    },
+    "duplicate-batch-start": {
+      "family": "measurement-quality",
+      "input": {
+        "collected": [
+          {
+            "peer": "p",
+            "batch": "b",
+            "count": 1
+          },
+          {
+            "peer": "p",
+            "batch": "b",
+            "count": 2
+          }
+        ]
+      }
+    },
+    "lost-observations": {
+      "family": "measurement-quality",
+      "input": {
+        "source_sequence": [
+          1,
+          3
+        ],
+        "produced": 3,
+        "delivered": 2,
+        "finalized": true
+      }
+    },
+    "missing-finalization": {
+      "family": "measurement-quality",
+      "input": {
+        "produced": 2,
+        "delivered": 2,
+        "finalized": false
+      }
+    },
+    "source-writer-error": {
+      "family": "measurement-quality",
+      "input": {
+        "produced": 3,
+        "delivered": 2,
+        "writer_error": "broken pipe"
+      }
+    },
+    "process-restart": {
+      "family": "measurement-quality",
+      "input": {
+        "cpu_samples": [
+          {
+            "generation": 1,
+            "cpu": 10
+          },
+          {
+            "generation": 2,
+            "cpu": 1
+          }
+        ]
+      }
+    },
+    "decode-failure": {
+      "family": "measurement-quality",
+      "input": {
+        "raw_received_ns": 10,
+        "decode_error": "invalid CBOR"
+      }
+    },
+    "leader-check-panic": {
+      "family": "measurement-quality",
+      "input": {
+        "returned_leader": false,
+        "outcome": "checker-panic"
+      }
+    },
+    "nonleader": {
+      "family": "measurement-quality",
+      "input": {
+        "returned_leader": false,
+        "outcome": "decision-complete"
+      }
+    },
+    "losing-signed-candidate": {
+      "family": "measurement-quality",
+      "input": {
+        "signed_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "signed_ns": 10,
+        "adopted": false
+      }
+    },
+    "fork-reinclusion": {
+      "family": "measurement-quality",
+      "input": {
+        "branches": {
+          "old": [
+            "a",
+            "b"
+          ],
+          "new": [
+            "a",
+            "c",
+            "d"
+          ]
+        },
+        "included": {
+          "b": [
+            "tx1"
+          ],
+          "d": [
+            "tx1"
+          ]
+        },
+        "selected_tip": "d"
+      }
+    },
+    "actual-header-not-tip": {
+      "family": "measurement-quality",
+      "input": {
+        "sent_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "tip_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "batch-publication": {
+      "family": "measurement-quality",
+      "input": {
+        "block_hashes": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ],
+        "published_ns": 20
+      }
+    },
+    "peer-and-batch-pairing": {
+      "family": "measurement-quality",
+      "input": {
+        "collected": [
+          {
+            "peer": "p1",
+            "batch": "b1",
+            "at_ns": 1
+          },
+          {
+            "peer": "p2",
+            "batch": "b2",
+            "at_ns": 2
+          }
+        ],
+        "processed": [
+          {
+            "peer": "p2",
+            "batch": "b2",
+            "at_ns": 4
+          },
+          {
+            "peer": "p1",
+            "batch": "b1",
+            "at_ns": 5
+          }
+        ]
+      }
+    },
+    "out-of-order-serialization": {
+      "family": "measurement-quality",
+      "input": {
+        "events": [
+          {
+            "source_sequence": 2,
+            "at_ns": 20
+          },
+          {
+            "source_sequence": 1,
+            "at_ns": 10
+          }
+        ]
+      }
+    },
+    "mempool-removal-causes": {
+      "family": "measurement-quality",
+      "input": {
+        "removals": [
+          "included",
+          "conflict",
+          "expired",
+          "capacity"
+        ]
+      }
+    },
+    "clock-uncertainty": {
+      "family": "measurement-quality",
+      "input": {
+        "duration_ns": -1,
+        "uncertainty_ns": 2
+      }
+    },
+    "sampler-deadline": {
+      "family": "measurement-quality",
+      "input": {
+        "interval_ns": 1200000000,
+        "target_ns": 1000000000,
+        "tolerance_ns": 100000000
+      }
+    },
+    "intake-count-mismatch": {
+      "family": "measurement-quality",
+      "input": {
+        "latest_reply_count": 3,
+        "submitted_count": 4,
+        "collected_count": 3,
+        "accepted": 2,
+        "emitted_rejected": 1
+      }
+    }
+  }
+}

@@ -37,13 +37,23 @@ func main() {
 	)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout); err != nil &&
-		!errors.Is(err, context.Canceled) {
+		(!errors.Is(err, context.Canceled) || (len(os.Args) > 1 && os.Args[1] == "benchmark")) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func run(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) > 0 && args[0] == "benchmark" {
+		// Own a pollable control descriptor so Close interrupts a blocked read.
+		// The inherited standard-input descriptor can be in blocking mode.
+		input, err := benchmarkInput()
+		if err != nil {
+			return fmt.Errorf("open benchmark control input: %w", err)
+		}
+		defer input.Close()
+		return runBenchmark(ctx, args[1:], input, output)
+	}
 	if len(args) != 1 {
 		return errors.New("usage: ouroboros-mock <configuration.yaml>")
 	}

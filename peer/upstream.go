@@ -151,6 +151,14 @@ func (u *Upstream) SwitchFork(fork []ledger.Block) (pcommon.Point, error) {
 // once the handshake has completed or failed; the mini-protocols then run in
 // the background until the connection ends or the peer is closed.
 func (u *Upstream) Serve(conn net.Conn) error {
+	return u.ServeContext(context.Background(), conn)
+}
+
+// ServeContext serves a connection with a context-bounded handshake.
+// After startup, the connection is owned by Upstream until Close or Finish.
+func (u *Upstream) ServeContext(ctx context.Context, conn net.Conn) error {
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
@@ -158,8 +166,9 @@ func (u *Upstream) Serve(conn net.Conn) error {
 		return ErrClosed
 	}
 	u.nextID++
-	s := &session{up: u, id: u.nextID}
+	s := &session{up: u, id: u.nextID, connection: connectionName(conn)}
 	s.relay = newRelay(u.events, s.id)
+	s.relay.connection = s.connection
 	u.wg.Add(1)
 	u.handshaking[conn] = struct{}{}
 	u.mu.Unlock()
@@ -195,7 +204,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
-		_ = lifecycle.Close(context.Background(), oConn)
+		_ = lifecycle.Close(ctx, oConn)
 		return ErrClosed
 	}
 	s.conn = oConn
@@ -204,7 +213,7 @@ func (u *Upstream) Serve(conn net.Conn) error {
 	u.mu.Unlock()
 	s.relay.attach(oConn.TxSubmission().Server)
 
-	u.events.publish(Event{Kind: EventSessionStarted, Session: s.id})
+	u.events.publish(Event{Kind: EventSessionStarted, Session: s.id, Connection: s.connection})
 	go s.watch()
 	return nil
 }
@@ -234,17 +243,25 @@ func (u *Upstream) Pipe() net.Conn {
 
 // Accept serves connections from l until the peer is closed. Close closes l.
 func (u *Upstream) Accept(l net.Listener) error {
+	return u.AcceptContext(context.Background(), l)
+}
+
+// AcceptContext accepts until ctx ends or the peer closes. The context also
+// bounds handshakes; established sessions are quiesced by Close or Finish.
+func (u *Upstream) AcceptContext(ctx context.Context, l net.Listener) error {
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
 		_ = l.Close()
 		return ErrClosed
 	}
+	stop := context.AfterFunc(ctx, func() { _ = l.Close() })
 	u.listeners = append(u.listeners, l)
 	u.wg.Add(1)
 	u.mu.Unlock()
 	go func() {
 		defer u.wg.Done()
+		defer stop()
 		for {
 			conn, err := l.Accept()
 			if err != nil {
@@ -260,7 +277,7 @@ func (u *Upstream) Accept(l net.Listener) error {
 			u.mu.Unlock()
 			go func() {
 				defer u.wg.Done()
-				if err := u.Serve(conn); err != nil &&
+				if err := u.ServeContext(ctx, conn); err != nil &&
 					!errors.Is(err, ErrClosed) {
 					u.events.publish(
 						Event{Kind: EventSessionClosed, Err: err},
@@ -290,10 +307,7 @@ func (u *Upstream) RelayedTxs() []Tx {
 	return out
 }
 
-// Close ends every connection, closes accepted listeners and waits for the
-// peer's goroutines. The event channel is closed; events not yet received are
-// discarded.
-func (u *Upstream) Close() error {
+func (u *Upstream) stop(ctx context.Context) error {
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
@@ -317,9 +331,8 @@ func (u *Upstream) Close() error {
 		_ = c.Close()
 	}
 	for _, s := range sessions {
-		_ = lifecycle.Close(context.Background(), s.conn)
+		_ = lifecycle.Close(ctx, s.conn)
 	}
-	u.events.close()
 	u.wg.Wait()
 	return nil
 }
@@ -355,4 +368,19 @@ func (u *Upstream) removeSession(id uint64) {
 	u.retiredRelays.Remove(oldest)
 	u.relays.Remove(retired.relayElement)
 	retired.relayElement = nil
+}
+
+// Close ends connections and discards unread observations.
+func (u *Upstream) Close() error {
+	err := u.stop(context.Background())
+	u.events.close()
+	return err
+}
+
+// Finish quiesces connections and drains observations while Events is consumed.
+func (u *Upstream) Finish(ctx context.Context) (ObservationStats, error) {
+	err := u.stop(ctx)
+	u.wg.Wait()
+	stats, drainErr := u.events.finish(ctx)
+	return stats, errors.Join(err, drainErr)
 }

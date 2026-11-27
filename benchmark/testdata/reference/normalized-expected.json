@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "cases": {
+    "peer-normalization": {
+      "records": [
+        {
+          "version": 1,
+          "run": "",
+          "experiment": "",
+          "kind": "block_fetched",
+          "at": "2026-01-01T00:00:00.200000001Z",
+          "sequence": 1,
+          "session": 2,
+          "request": 7,
+          "connection": "fetcher node",
+          "points": [
+            {
+              "slot": 5,
+              "hash": "0100000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "parent": "0100000000000000000000000000000000000000000000000000000000000000",
+          "number": 2,
+          "size": 100,
+          "count": 1
+        },
+        {
+          "version": 1,
+          "run": "",
+          "experiment": "",
+          "kind": "block_fetched",
+          "at": "2026-01-01T00:00:00.100000001Z",
+          "sequence": 2,
+          "session": 3,
+          "request": 7,
+          "connection": "other-fetcher node",
+          "points": [
+            {
+              "slot": 5,
+              "hash": "0100000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "parent": "0100000000000000000000000000000000000000000000000000000000000000",
+          "number": 2,
+          "size": 100,
+          "count": 1
+        }
+      ],
+      "serialization_order": [
+        1,
+        2
+      ],
+      "occurrence_order": [
+        2,
+        1
+      ],
+      "unique_blocks": 1,
+      "eligible_peers": 2
+    }
+  }
+}
