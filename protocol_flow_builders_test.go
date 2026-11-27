@@ -266,10 +266,10 @@ func TestProtocolFlowBuildersPreserveWireFields(t *testing.T) {
 				[]any{
 					[]any{
 						1,
-						uint32(0xb80d0120),
+						uint32(0x20010db8),
 						0,
 						0,
-						uint32(0x01000000),
+						1,
 						3002,
 					},
 				},
