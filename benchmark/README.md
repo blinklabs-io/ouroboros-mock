@@ -124,6 +124,8 @@ Boundaries describe what is observable at this layer:
   prepared body reply and its actual item population. It is not a wire-write
   completion.
   `tx_ids_offered` and `txs_received` describe the upstream relay side.
+  `tx_receive_failed` retains the body-request error and wanted identities when
+  protocol validation prevents a successful body reply.
   Serving a body is distinct from target mempool acceptance or inclusion.
 
 Wire-write, target admission, chain selection and native forging phases belong

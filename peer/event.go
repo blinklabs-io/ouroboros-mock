@@ -110,6 +110,8 @@ const (
 	EventTxsOffered
 	// EventTxsReturned records the prepared reply to a transaction-body request.
 	EventTxsReturned
+	// EventTxReceiveFailed reports a failed body request with its requested identities.
+	EventTxReceiveFailed
 )
 
 // Event describes one observable step of a peer.

@@ -257,12 +257,13 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 		for len(failures) > 0 {
 			resultErr = errors.Join(resultErr, <-failures)
 		}
+		resultErr = errors.Join(resultErr, ctx.Err())
 		complete := resultErr == nil
 		r := Record{Kind: "final", Complete: &complete}
 		if resultErr != nil {
 			r.Error = resultErr.Error()
 		}
-		resultErr = errors.Join(resultErr, out.write(r))
+		resultErr = errors.Join(resultErr, out.write(r), ctx.Err())
 	}()
 	for _, r := range b.manifest.Roles {
 		a, err := startRole(runCtx, b, r, opts.Endpoints[r.ID])

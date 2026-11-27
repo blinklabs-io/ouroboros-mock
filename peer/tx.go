@@ -150,6 +150,7 @@ func (r *relay) run(server *txsubmission.Server) {
 		})
 		bodies, err := server.RequestTxs(want)
 		if err != nil {
+			r.events.publish(Event{Kind: EventTxReceiveFailed, OccurredAt: time.Now(), Session: r.session, Connection: r.connection, Request: request, TxIds: offered, Err: err})
 			return
 		}
 		receivedAt := time.Now()

@@ -58,9 +58,10 @@ type Record struct {
 }
 
 var eventNames = map[peer.EventKind]string{
-	peer.EventTxsOffered:     "txs_offered",
-	peer.EventTxsReturned:    "tx_bodies_returned",
-	peer.EventSessionStarted: "session_started", peer.EventSessionClosed: "session_closed",
+	peer.EventTxReceiveFailed: "tx_receive_failed",
+	peer.EventTxsOffered:      "txs_offered",
+	peer.EventTxsReturned:     "tx_bodies_returned",
+	peer.EventSessionStarted:  "session_started", peer.EventSessionClosed: "session_closed",
 	peer.EventFindIntersect: "find_intersect", peer.EventIntersectFound: "intersect_found", peer.EventIntersectNotFound: "intersect_not_found",
 	peer.EventRequestNext: "request_next", peer.EventAwaitReply: "await_reply", peer.EventRollForward: "roll_forward", peer.EventRollBackward: "roll_backward",
 	peer.EventRequestRange: "request_range", peer.EventNoBlocks: "no_blocks", peer.EventBatchDone: "batch_done", peer.EventAwaitedReply: "awaited_reply",

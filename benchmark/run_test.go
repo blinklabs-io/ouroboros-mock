@@ -34,9 +34,10 @@ import (
 )
 
 type recordWriter struct {
-	records  chan Record
-	failKind string
-	failure  error
+	records             chan Record
+	failKind            string
+	failure             error
+	cancelAtSourceFinal context.CancelFunc
 }
 
 func (w *recordWriter) Write(data []byte) (int, error) {
@@ -46,6 +47,9 @@ func (w *recordWriter) Write(data []byte) (int, error) {
 	}
 	if r.Kind == w.failKind {
 		return 0, w.failure
+	}
+	if r.Kind == "source_final" && w.cancelAtSourceFinal != nil {
+		w.cancelAtSourceFinal()
 	}
 	w.records <- r
 	return len(data), nil
@@ -72,6 +76,10 @@ func startTestRun(t *testing.T, requirements []Requirement, failKind string) *ru
 	input, control := io.Pipe()
 	r := &runHandle{input: control, records: make(chan Record, 1024), done: make(chan error, 1), cancel: cancel}
 	out := &recordWriter{records: r.records, failKind: failKind, failure: errors.New("record writer failed")}
+	if failKind == "final cancellation" {
+		out.failKind = ""
+		out.cancelAtSourceFinal = cancel
+	}
 	go func() {
 		r.done <- Serve(ctx, b, Options{Run: "trial", Endpoints: map[string]string{"upstream": "127.0.0.1:0"}}, input, out)
 		close(r.records)
@@ -147,7 +155,7 @@ func TestServeCompletesOnlyAfterDurableSourceTail(t *testing.T) {
 
 func TestServeRejectsMissingActivityEOFStopCancellationAndWriterFailure(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-	for _, mode := range []string{"missing population", "eof", "stop", "cancel", "writer"} {
+	for _, mode := range []string{"missing population", "eof", "stop", "cancel", "writer", "final cancellation"} {
 		t.Run(mode, func(t *testing.T) {
 			requirements := []Requirement{}
 			fail := ""
@@ -156,6 +164,9 @@ func TestServeRejectsMissingActivityEOFStopCancellationAndWriterFailure(t *testi
 			}
 			if mode == "writer" {
 				fail = "started"
+			}
+			if mode == "final cancellation" {
+				fail = mode
 			}
 			r := startTestRun(t, requirements, fail)
 			nextRecord(t, r, "ready")
