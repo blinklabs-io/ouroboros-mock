@@ -142,22 +142,23 @@ func startRole(ctx context.Context, b *Bundle, r Role, endpoint string) (*active
 }
 
 type commandResult struct {
-	control Control
-	err     error
+	control  Control
+	err      error
+	observed time.Time
 }
 
 func readControls(ctx context.Context, r io.Reader, out chan<- commandResult) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 65536)
 	for scanner.Scan() {
+		observed := time.Now()
 		var c Control
 		err := decodeJSON(scanner.Bytes(), &c)
 		if err == nil && (c.Version != SchemaVersion || !oneOf(c.Kind, "start", "stop") || !name(c.Run)) {
 			err = errors.New("invalid control version/kind/run")
 		}
-		select {
-		case out <- commandResult{control: c, err: err}:
-		case <-ctx.Done():
+		result := commandResult{control: c, err: err, observed: observed}
+		if !sendControl(ctx, out, result) {
 			return
 		}
 		if err != nil {
@@ -168,10 +169,35 @@ func readControls(ctx context.Context, r io.Reader, out chan<- commandResult) {
 	if err == nil {
 		err = io.EOF
 	}
+	sendControl(ctx, out, commandResult{err: err, observed: time.Now()})
+}
+
+func sendControl(ctx context.Context, out chan<- commandResult, result commandResult) bool {
 	select {
-	case out <- commandResult{err: err}:
-	case <-ctx.Done():
+	case out <- result:
+		return true
+	default:
 	}
+	select {
+	case out <- result:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func remainingControl(commands <-chan commandResult, closing time.Time) error {
+	select {
+	case result := <-commands:
+		if !result.observed.After(closing) {
+			if result.err != nil {
+				return fmt.Errorf("control input ended before finalization: %w", result.err)
+			}
+			return fmt.Errorf("unexpected control before finalization: %s", result.control.Kind)
+		}
+	default:
+	}
+	return nil
 }
 
 // Serve runs real peer roles, accepting bounded JSON-line start/stop controls.
@@ -286,7 +312,13 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 	commands := make(chan commandResult, 1)
 	readerDone := make(chan struct{})
 	go func() { defer close(readerDone); readControls(runCtx, controls, commands) }()
-	defer func() { cancel(); _ = controls.Close(); <-readerDone }()
+	defer func() {
+		closing := time.Now()
+		cancel()
+		_ = controls.Close()
+		<-readerDone
+		resultErr = errors.Join(resultErr, remainingControl(commands, closing))
+	}()
 	var start time.Time
 	select {
 	case <-runCtx.Done():

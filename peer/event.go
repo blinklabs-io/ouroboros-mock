@@ -135,8 +135,7 @@ type Event struct {
 	Points  []pcommon.Point
 	TxIds   [][32]byte
 	Txs     []Tx
-	// Err is set on EventSessionClosed when the connection ended with an
-	// error.
+	// Err reports an operation failure or the error that ended a session.
 	Err error
 }
 

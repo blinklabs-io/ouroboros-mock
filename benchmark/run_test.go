@@ -315,3 +315,35 @@ func TestRawPeerNormalizationMatchesIndependentExpectedRecords(t *testing.T) {
 	require.Greater(t, input.Events[0].OccurredAt.UnixNano(), input.Events[1].OccurredAt.UnixNano())
 	require.Equal(t, []uint64{2, 1}, want.Occurrence)
 }
+
+func TestFinalizationPreservesPendingControlFailure(t *testing.T) {
+	closing := time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC)
+	for _, kind := range []string{"eof", "stop", "own close"} {
+		t.Run(kind, func(t *testing.T) {
+			result := commandResult{observed: closing.Add(-time.Nanosecond), err: io.EOF}
+			if kind == "stop" {
+				result.err = nil
+				result.control.Kind = "stop"
+			}
+			if kind == "own close" {
+				result.observed = closing.Add(time.Nanosecond)
+			}
+			commands := make(chan commandResult, 1)
+			commands <- result
+			err := remainingControl(commands, closing)
+			if kind == "own close" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				if kind == "eof" {
+					require.ErrorIs(t, err, io.EOF)
+				}
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	commands := make(chan commandResult, 1)
+	require.True(t, sendControl(ctx, commands, commandResult{err: io.EOF, observed: closing.Add(-time.Nanosecond)}))
+	require.ErrorIs(t, remainingControl(commands, closing), io.EOF)
+}
