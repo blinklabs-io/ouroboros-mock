@@ -11,22 +11,21 @@ on:
       - v*.*.*
 
 jobs:
-  golangci-lint:
-    uses: blinklabs-io/shared-actions/.github/workflows/reuseable-golangci-lint.yml@d90d0eef9c2d00ecac430e1b184ac2993ac768fb
+  go-test:
+    uses: blinklabs-io/shared-actions/.github/workflows/reuseable-go-test.yml@d90d0eef9c2d00ecac430e1b184ac2993ac768fb
     permissions:
       contents: read
     with:
-      go-version: 1.26.x
-  nilaway:
-    needs: [golangci-lint]
-    uses: blinklabs-io/shared-actions/.github/workflows/reuseable-nilaway.yml@d90d0eef9c2d00ecac430e1b184ac2993ac768fb
-    permissions:
-      contents: read
-    with:
-      go-version: 1.26.x
-      include-pkgs: github.com/blinklabs-io/ouroboros-mock
+      extra-test-flags: -race -timeout 15m -v
+      extra-test-packages: ./conformance/...
+      golangci-go-version: 1.26.x
+      nilaway-include-pkgs: github.com/blinklabs-io/ouroboros-mock
+      pre-test-command: make prepare-blueprint-testdata
+      run-golangci-lint: true
+      run-nilaway: true
+      submodules: true
   publish:
-    needs: [nilaway]
+    needs: [go-test]
     if: github.event_name == 'push'
     uses: blinklabs-io/shared-actions/.github/workflows/reuseable-go-library-release.yml@d90d0eef9c2d00ecac430e1b184ac2993ac768fb
     permissions:
