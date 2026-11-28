@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "cases": {
+    "canonical-observables": {
+      "counts": {
+        "Resources": 1,
+        "Forge.Loop.StartLeadershipCheck": 1,
+        "Forge.Loop.BlockContext": 1,
+        "Forge.Loop.LedgerState": 1,
+        "Forge.Loop.LedgerView": 1,
+        "Forge.Loop.NodeNotLeader": 1,
+        "LedgerMetrics": 1,
+        "ChainSync.Client.DownloadedHeader": 1,
+        "BlockFetch.Client.SendFetchRequest": 1,
+        "BlockFetch.Client.CompletedBlockFetch": 1,
+        "ChainSync.ServerHeader.Update": 1,
+        "ChainDB.AddBlockEvent.AddedToCurrentChain": 1,
+        "BlockFetch.Server.SendBlock": 1,
+        "TxSubmission.TxInbound.Collected": 1,
+        "Mempool.AddedTx": 1,
+        "TxSubmission.TxInbound.Processed": 1,
+        "Mempool.RejectedTx": 1,
+        "Mempool.RemoveTxs": 1,
+        "Forge.Loop.NodeIsLeader": 1,
+        "Forge.Loop.ForgeTickedLedgerState": 1,
+        "Forge.Loop.ForgingMempoolSnapshot": 1,
+        "Forge.Loop.ForgedBlock": 1,
+        "Forge.Loop.AdoptedBlock": 1,
+        "ChainDB.LedgerEvent.Snapshot.TookSnapshot": 2,
+        "ChainDB.AddBlockEvent.SwitchedToAFork": 1
+      },
+      "total": 26,
+      "schema": "observables.schema.json",
+      "envelope": "envelope.schema.json"
+    }
+  }
+}

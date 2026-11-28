@@ -1,0 +1,329 @@
+{
+  "version": 1,
+  "method": "independent rational arithmetic and explicit state/population rules",
+  "derivations": {
+    "metric-01": "(4000000 - 0) / 1000000000; precomputation retains its original interval",
+    "metric-02": "(4200000 - 4000000) / 1000000000; precomputation retains its original interval",
+    "metric-03": "(5000000 - 4200000) / 1000000000; precomputation retains its original interval",
+    "metric-04": "(-1000000 - -2000000) / 1000000000; precomputation retains its original interval",
+    "metric-05": "(6000000 - 5000000) / 1000000000; precomputation retains its original interval",
+    "metric-06": "(7000000 - 6000000) / 1000000000; precomputation retains its original interval",
+    "metric-07": "(8000000 - 7000000) / 1000000000; precomputation retains its original interval",
+    "metric-08": "(10000000 - 8000000) / 1000000000; precomputation retains its original interval",
+    "metric-09": "Subtract signing completion from each actual endpoint; root span end is not signing",
+    "metric-10": "Minimum peer observation in each declared population relative to slot start",
+    "metric-11": "Use actual write, excluding the earlier API/enqueue timestamp",
+    "metric-12": "Each decode uses the common range request start; slots 1 and 5 contain two blocks",
+    "metric-13": "Subtract actual decode completion, not pre-decode receipt",
+    "metric-14": "Nearest rank uses all four eligible nodes; rank three is censored, not renormalized",
+    "metric-15": "(14-10)/2 * 100; RSS and current OS threads are gauges",
+    "metric-16": "Count successful completed local writes only",
+    "metric-17": "Actual local-write intervals, excluding scheduling/upload/prune",
+    "metric-18": "Observe live bytes only on a major-count increment after the initial baseline; no Go major/minor substitution",
+    "metric-19": "The common specification counts only newly added transactions as accepted: 2. Of 4 submitted, one duplicate and one validation failure are not added: rejected=4-2=2. Three native nil returns do not imply three new admissions.",
+    "metric-20": "2 / 4 with aligned submitted/newly-admitted populations; duplicates count among transactions not added",
+    "metric-21": "(14-10)/4 in the same window; whole-node index, not isolated validation CPU",
+    "metric-22": "Use atomic post-mutation common CBOR byte snapshots; duplicates do not grow occupancy",
+    "metric-23": "Rollback publishes a new generation; each count/density pair is same-state",
+    "zero-denominator": "Independent contract edge case; no inferred or fabricated missing values",
+    "negative-interval": "Independent contract edge case; no inferred or fabricated missing values",
+    "missing-batch-start": "Independent contract edge case; no inferred or fabricated missing values",
+    "duplicate-batch-start": "Independent contract edge case; no inferred or fabricated missing values",
+    "lost-observations": "Independent contract edge case; no inferred or fabricated missing values",
+    "missing-finalization": "Independent contract edge case; no inferred or fabricated missing values",
+    "source-writer-error": "Independent contract edge case; no inferred or fabricated missing values",
+    "process-restart": "Independent contract edge case; no inferred or fabricated missing values",
+    "decode-failure": "Independent contract edge case; no inferred or fabricated missing values",
+    "leader-check-panic": "Independent contract edge case; no inferred or fabricated missing values",
+    "nonleader": "Independent contract edge case; no inferred or fabricated missing values",
+    "losing-signed-candidate": "Independent contract edge case; no inferred or fabricated missing values",
+    "fork-reinclusion": "Independent contract edge case; no inferred or fabricated missing values",
+    "actual-header-not-tip": "Independent contract edge case; no inferred or fabricated missing values",
+    "batch-publication": "Independent contract edge case; no inferred or fabricated missing values",
+    "peer-and-batch-pairing": "Independent contract edge case; no inferred or fabricated missing values",
+    "out-of-order-serialization": "Independent contract edge case; no inferred or fabricated missing values",
+    "mempool-removal-causes": "Independent contract edge case; no inferred or fabricated missing values",
+    "clock-uncertainty": "Independent contract edge case; no inferred or fabricated missing values",
+    "sampler-deadline": "Independent contract edge case; no inferred or fabricated missing values",
+    "peer-normalization": "Convert each source occurrence to nine-digit UTC without sorting publication sequence; preserve full point, session and request identities; both peers saw the same block, so the block population is one and the peer population is two; occurrence order is the reverse of serialization order.",
+    "intake-count-mismatch": "The collected population must be the four transactions actually submitted, not the three in the last transport reply; per-batch subtraction on those mismatched populations is invalid."
+  },
+  "evidence": {
+    "metric-01": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "1a0ffeb2db40455c844dc8dc8e7e49777078bb4478fb94a329aa4048f9026782"
+    },
+    "metric-02": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3c38264ae493002b8530a2dec9a23a517c3c9492fc4ac333095416b25e05eaf9"
+    },
+    "metric-03": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "0a1761cfbdd7e70664ac026708c06953d7968b2b8fb5651dcf8eaa3277141cfe"
+    },
+    "metric-04": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3ad7d116ee6b6864aed8d48b8609e63338a51b4cd9bb8d227876da24b84050ee"
+    },
+    "metric-05": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3ad7d116ee6b6864aed8d48b8609e63338a51b4cd9bb8d227876da24b84050ee"
+    },
+    "metric-06": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3ad7d116ee6b6864aed8d48b8609e63338a51b4cd9bb8d227876da24b84050ee"
+    },
+    "metric-07": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3ad7d116ee6b6864aed8d48b8609e63338a51b4cd9bb8d227876da24b84050ee"
+    },
+    "metric-08": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "553dcba4c7dc968ae75acd264035368db8372e7ebf46fbfcc75bdc7c684b7cc4"
+    },
+    "metric-09": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "7143567b66f710bc16c7a6e92179f65f98c8506823e1d0d209a0f7f69c2d32cd"
+    },
+    "metric-10": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "ad6ff8bb97515e7a53fe15a3948e475281c75fd4cbb7e0f7745b5a3bf2ba5204"
+    },
+    "metric-11": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "553dcba4c7dc968ae75acd264035368db8372e7ebf46fbfcc75bdc7c684b7cc4"
+    },
+    "metric-12": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "d4b4beddd59a088ff27d82fa52abad59e58b75ed415de201bcb5c0256b0ed964"
+    },
+    "metric-13": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "7143567b66f710bc16c7a6e92179f65f98c8506823e1d0d209a0f7f69c2d32cd"
+    },
+    "metric-14": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "a7d2201251e1f57a3fa6969ae859d4cff5ebabe33520752271bc52e92ac160b3"
+    },
+    "metric-15": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "f1d64f37d7dfadaba5257f28722520f40501a043848dfa001c8c91affed12fd7"
+    },
+    "metric-16": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "f571539c10e2fab221a2632245c9d682747293d289a877b3017d963b8c445ade"
+    },
+    "metric-17": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "55c8ee17953b02cc8b4742ff177203ec4a1be1818a169598d169a2910918b4e0"
+    },
+    "metric-18": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3b2ca6e32dacffaa84f2c7688223a7ade86a75b1b8b24b18b8805903b96f67a4"
+    },
+    "metric-19": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "44ec25ad44ca44df265e9e9d3d8774c89bc7a2cfa8fdabcf5a4392e6f82062fa"
+    },
+    "metric-20": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "ee8cd1c98a6035cc5f3e091451797ded414369fdc9763fb7ceaf939b363550b2"
+    },
+    "metric-21": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "69fff0e5a34970aa1dfeb81b9754f7a269619bd73f9c6af966df546b890b745f"
+    },
+    "metric-22": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "30d1cfa12393bd426d85a629adb66a3c97cb03d0bd659ae3eae75cb181000577"
+    },
+    "metric-23": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "a350bd0f6cc46c068739da95d50f967d0b50d7882d9d0fd349c478a3e5713dc0"
+    },
+    "zero-denominator": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "6f20011093d252867e21e00064874c85cbdccc81753249534357e9408a12186f"
+    },
+    "negative-interval": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "3adf3b1d3c9f05cb34402c78d3f8f573ea7ef8ec7225078a8352979dcf638123"
+    },
+    "missing-batch-start": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "63b9dcaef0ad2564899cad16e50023fb77ed89de2ade5bfbb683c5c5519cb49b"
+    },
+    "duplicate-batch-start": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "5b1b7b7a5e8610ccb12600fdf62f6aa3bca887387da42472b235b51d273a7411"
+    },
+    "lost-observations": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "5c3865d14ebfc11c409e8ed1325454c912d4e4e4912e29a7b2befa1267a16fcb"
+    },
+    "missing-finalization": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "1d6e536429f80cd0c7c6b9f535fee677a63679402031e81fab0dd17581c5096f"
+    },
+    "source-writer-error": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "b703e4eebade4d88c5bb792b3c22a8ee432cda568a86cfa66ac39721592a1821"
+    },
+    "process-restart": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "35368e000ec99b45f8879e97c9c278db630ceaf55cfed81474dfd5f9df75da07"
+    },
+    "decode-failure": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "aa448f857bd3ae89881fbff3f405e72992a112b7cc9b5091e295055f89ee2cd2"
+    },
+    "leader-check-panic": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "27719bef33bd465767919d3031976bae534e2534f39db6fd507802e7763e1424"
+    },
+    "nonleader": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "788d32c5c364cb263731991eb9978214cf16964a9d276423ec1eb388072304ce"
+    },
+    "losing-signed-candidate": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "183090ef8841e71d984aac67cc9202636a0dd35d10d898e2a30bf54894a2ddc1"
+    },
+    "fork-reinclusion": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "f4407da8f772f57b24b83e976b01e9e969cb7848a70b904958836bded5fd70b9"
+    },
+    "actual-header-not-tip": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "be9d81658b8d709e89c93892ea8951ccbe2bd6e1150487a256c4d932c40b91f3"
+    },
+    "batch-publication": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "057cedc84af020d302ffd2b85cf5c1f90f8ea726dd58f3aed77ebfff86250d24"
+    },
+    "peer-and-batch-pairing": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "93a30cfce56af95165f10ebecc37e5bced6ca8100f746045ba88c35ce2bff400"
+    },
+    "out-of-order-serialization": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "5aaff6ab6460dd6186eeb5107aaa59cc5e66e303c8ab0005a45f013f14272938"
+    },
+    "mempool-removal-causes": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "4ee2e31717d4aa06c7a8d0a3bb6f346a8594936f3bacb2887f1d0f3565db0305"
+    },
+    "clock-uncertainty": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "ae46605a27e1dfbe387fa982448928dc45915ff4fc9baa8f0e1f47a2e8c9218d"
+    },
+    "sampler-deadline": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "62a08f745e7bf028cf20e57c72ca0e20378ae7a249ccc60f6f470ba600c690db"
+    },
+    "intake-count-mismatch": {
+      "inputs": {
+        "observations": "a33377f237482e363428faf05eba6d38d82234e7fde975754aa61abb0a91d27f"
+      },
+      "expected_sha256": "022e24b90117304db2549dca96d9449017903322b59f5cee4870361eccd20e9f"
+    },
+    "canonical-observables": {
+      "inputs": {
+        "common-examples": "21ee005874a021de73a37b6e8647c97057d6c1b56a79d9e0d8c7a234ddc8158c"
+      },
+      "expected_sha256": "2649df1b619f29abcebb4004e5b136282636d8afd06b59db8137791bb58cca62"
+    },
+    "peer-normalization": {
+      "inputs": {
+        "raw-events": "f23933ac51dc1cdbd06ddb17ba7ffd671d075d472dad5fdb61ff8a7f486b92d1"
+      },
+      "expected_sha256": "7913759ecdbc2b38c8d9ae72d94c89581ef9efed3915d4e4be15653388bc462e"
+    }
+  }
+}

@@ -5,6 +5,7 @@ go 1.26.11
 require (
 	github.com/blinklabs-io/gouroboros v0.222.0
 	github.com/blinklabs-io/plutigo v0.13.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.12.1
 	github.com/utxorpc/go-codegen v0.19.2
 	go.uber.org/goleak v1.3.0
@@ -27,5 +28,6 @@ require (
 	github.com/klauspost/compress v1.20.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
