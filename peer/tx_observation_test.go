@@ -47,6 +47,8 @@ func TestRelayCorrelatesFailedBodyRequests(t *testing.T) {
 	}
 	require.True(t, errors.Is(e.Err, protocol.ErrProtocolShuttingDown) || errors.Is(e.Err, protocol.ErrProtocolViolationInvalidMessage), "unexpected body-request failure: %v", e.Err)
 	require.Equal(t, [][32]byte{tx.ID}, e.TxIds)
+	require.Equal(t, uint64(1), e.Count)
+	require.Equal(t, []peer.TxRef{{EraId: tx.EraId, ID: tx.ID}}, e.TxRefs)
 	require.NotZero(t, e.Request)
 	require.NotZero(t, e.Session)
 	require.NotEmpty(t, e.Connection)

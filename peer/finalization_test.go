@@ -101,10 +101,11 @@ func TestPublishedObservationsOwnMutablePayloads(t *testing.T) {
 	hash := make([]byte, 32)
 	hash[0] = 1
 	tx := Tx{Raw: []byte{1, 2, 3}}
-	e := Event{Kind: EventBlockFetched, Parent: hash, Points: []pcommon.Point{{Slot: 1, Hash: hash}}, TxIds: [][32]byte{{1}}, Txs: []Tx{tx}}
+	e := Event{Kind: EventBlockFetched, Parent: hash, Points: []pcommon.Point{{Slot: 1, Hash: hash}}, TxIds: [][32]byte{{1}}, TxRefs: []TxRef{{EraId: 6, ID: [32]byte{1}}}, Txs: []Tx{tx}}
 	s.publish(e)
 	hash[0] = 9
 	e.TxIds[0][0] = 9
+	e.TxRefs[0].EraId = 9
 	tx.Raw[0] = 9
 	e.Points[0].Slot = 9
 	got := <-s.out
@@ -112,6 +113,7 @@ func TestPublishedObservationsOwnMutablePayloads(t *testing.T) {
 	require.Equal(t, byte(1), got.Points[0].Hash[0])
 	require.Equal(t, uint64(1), got.Points[0].Slot)
 	require.Equal(t, byte(1), got.TxIds[0][0])
+	require.Equal(t, uint16(6), got.TxRefs[0].EraId)
 	require.Equal(t, byte(1), got.Txs[0].Raw[0])
 }
 
@@ -135,4 +137,18 @@ func TestTransactionPullAndPreparedReplyRemainDistinct(t *testing.T) {
 	require.NotZero(t, pull.Request)
 	require.Equal(t, pull.Request, reply.Request)
 	require.False(t, reply.OccurredAt.Before(pull.OccurredAt))
+}
+
+func TestAlreadyDrainedStreamStillRejectsCanceledFinish(t *testing.T) {
+	s := newEventStream()
+	stats, err := s.finish(t.Context())
+	require.NoError(t, err)
+	require.True(t, stats.Complete())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for range 32 {
+		_, err = s.finish(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, ErrIncompleteObservations)
+	}
 }

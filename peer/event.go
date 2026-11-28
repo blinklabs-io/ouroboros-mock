@@ -136,6 +136,7 @@ type Event struct {
 	Session uint64
 	Points  []pcommon.Point
 	TxIds   [][32]byte
+	TxRefs  []TxRef
 	Txs     []Tx
 	// Err reports an operation failure or the error that ended a session.
 	Err error
@@ -204,6 +205,7 @@ func (s *eventStream) publish(e Event) {
 		e.Points[i].Hash = bytes.Clone(e.Points[i].Hash)
 	}
 	e.TxIds = slices.Clone(e.TxIds)
+	e.TxRefs = slices.Clone(e.TxRefs)
 	e.Txs = cloneTxs(e.Txs)
 	s.mu.Lock()
 	s.produced++
@@ -317,6 +319,9 @@ func (s *eventStream) finish(ctx context.Context) (ObservationStats, error) {
 	select {
 	case <-s.stopped:
 		stats := s.stats()
+		if err := ctx.Err(); err != nil {
+			return stats, errors.Join(err, ErrIncompleteObservations)
+		}
 		if !stats.Complete() {
 			return stats, ErrIncompleteObservations
 		}

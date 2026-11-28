@@ -16,6 +16,7 @@ package peer
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -55,11 +56,12 @@ func (s *session) emit(kind EventKind, points ...pcommon.Point) {
 }
 
 // watch reports the end of the connection.
-func (s *session) watch() {
+func (s *session) watch(ctx context.Context) {
 	var last error
 	for err := range s.conn.ErrorChan() {
 		last = errors.Join(last, err)
 	}
+	_ = waitServerProtocols(ctx, s.conn)
 	s.relay.wg.Wait()
 	s.up.removeSession(s.id)
 	s.up.events.publish(

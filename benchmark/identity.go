@@ -27,17 +27,27 @@ import (
 
 // Identity records the actual process executable and available Go build metadata.
 type Identity struct {
-	SHA256        string `json:"executable_sha256"`
+	SHA256        string `json:"executable_sha256,omitempty"`
+	PathSHA256    string `json:"executable_path_sha256,omitempty"`
+	Source        string `json:"digest_source"`
 	GoVersion     string `json:"go_version"`
+	ModulePath    string `json:"module_path,omitempty"`
 	ModuleVersion string `json:"module_version,omitempty"`
-	Revision      string `json:"revision,omitempty"`
-	Modified      bool   `json:"modified"`
+	// GoVCSRevision and GoVCSModified are compiler-reported diagnostics. In a
+	// linked worktree they can describe an enclosing checkout, not this module.
+	GoVCSRevision string `json:"go_vcs_revision,omitempty"`
+	GoVCSModified bool   `json:"go_vcs_modified"`
 }
 
 var processIdentity = sync.OnceValues(func() (Identity, error) {
 	path, err := os.Executable()
 	if err != nil {
 		return Identity{}, err
+	}
+	source := "pathname"
+	if runtime.GOOS == "linux" {
+		path = "/proc/self/exe"
+		source = "running-image"
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -48,15 +58,21 @@ var processIdentity = sync.OnceValues(func() (Identity, error) {
 	if err = errors.Join(readErr, f.Close()); err != nil {
 		return Identity{}, err
 	}
-	id := Identity{SHA256: hex.EncodeToString(hash.Sum(nil)), GoVersion: runtime.Version()}
+	id := Identity{Source: source, GoVersion: runtime.Version()}
+	if source == "running-image" {
+		id.SHA256 = hex.EncodeToString(hash.Sum(nil))
+	} else {
+		id.PathSHA256 = hex.EncodeToString(hash.Sum(nil))
+	}
 	if info, ok := debug.ReadBuildInfo(); ok {
+		id.ModulePath = info.Main.Path
 		id.ModuleVersion = info.Main.Version
 		for _, setting := range info.Settings {
 			switch setting.Key {
 			case "vcs.revision":
-				id.Revision = setting.Value
+				id.GoVCSRevision = setting.Value
 			case "vcs.modified":
-				id.Modified = setting.Value == "true"
+				id.GoVCSModified = setting.Value == "true"
 			}
 		}
 	}

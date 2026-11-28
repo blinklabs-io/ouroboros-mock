@@ -28,33 +28,40 @@ type Point struct {
 	Hash string `json:"hash"`
 }
 
+// TransactionRef retains both fields of a transaction-submission wire identity.
+type TransactionRef struct {
+	Era  uint16 `json:"era"`
+	Hash string `json:"hash"`
+}
+
 // Record is one versioned process, action or source observation.
 type Record struct {
-	ManifestSHA256 string                 `json:"manifest_sha256,omitempty"`
-	Build          *Identity              `json:"build,omitempty"`
-	Connection     string                 `json:"connection,omitempty"`
-	Version        int                    `json:"version"`
-	Run            string                 `json:"run"`
-	Experiment     string                 `json:"experiment"`
-	Kind           string                 `json:"kind"`
-	At             string                 `json:"at"`
-	Role           string                 `json:"role,omitempty"`
-	Endpoint       string                 `json:"endpoint,omitempty"`
-	Action         string                 `json:"action,omitempty"`
-	ScheduledNS    *int64                 `json:"scheduled_ns,omitempty"`
-	ElapsedNS      *int64                 `json:"elapsed_ns,omitempty"`
-	Sequence       uint64                 `json:"sequence,omitempty"`
-	Session        uint64                 `json:"session,omitempty"`
-	Request        uint64                 `json:"request,omitempty"`
-	Points         []Point                `json:"points,omitempty"`
-	Parent         string                 `json:"parent,omitempty"`
-	Number         *uint64                `json:"number,omitempty"`
-	Size           uint64                 `json:"size,omitempty"`
-	Count          uint64                 `json:"count,omitempty"`
-	Transactions   []string               `json:"transactions,omitempty"`
-	Error          string                 `json:"error,omitempty"`
-	Stats          *peer.ObservationStats `json:"stats,omitempty"`
-	Complete       *bool                  `json:"recording_complete,omitempty"`
+	ManifestSHA256  string                 `json:"manifest_sha256,omitempty"`
+	Build           *Identity              `json:"build,omitempty"`
+	Connection      string                 `json:"connection,omitempty"`
+	Version         int                    `json:"version"`
+	Run             string                 `json:"run"`
+	Experiment      string                 `json:"experiment"`
+	Kind            string                 `json:"kind"`
+	At              string                 `json:"at"`
+	Role            string                 `json:"role,omitempty"`
+	Endpoint        string                 `json:"endpoint,omitempty"`
+	Action          string                 `json:"action,omitempty"`
+	ScheduledNS     *int64                 `json:"scheduled_ns,omitempty"`
+	ElapsedNS       *int64                 `json:"elapsed_ns,omitempty"`
+	Sequence        uint64                 `json:"sequence,omitempty"`
+	Session         uint64                 `json:"session,omitempty"`
+	Request         uint64                 `json:"request,omitempty"`
+	Points          []Point                `json:"points,omitempty"`
+	Parent          string                 `json:"parent,omitempty"`
+	Number          *uint64                `json:"number,omitempty"`
+	Size            uint64                 `json:"size,omitempty"`
+	Count           uint64                 `json:"count,omitempty"`
+	TransactionRefs []TransactionRef       `json:"transaction_refs,omitempty"`
+	Transactions    []string               `json:"transactions,omitempty"`
+	Error           string                 `json:"error,omitempty"`
+	Stats           *peer.ObservationStats `json:"stats,omitempty"`
+	Complete        *bool                  `json:"recording_complete,omitempty"`
 }
 
 var eventNames = map[peer.EventKind]string{
@@ -87,11 +94,21 @@ func eventRecord(e peer.Event) (Record, error) {
 		}
 		r.Points = append(r.Points, Point{Slot: p.Slot, Hash: hex.EncodeToString(p.Hash)})
 	}
-	for _, id := range e.TxIds {
-		r.Transactions = append(r.Transactions, hex.EncodeToString(id[:]))
+	if len(e.TxRefs) > 0 {
+		for _, ref := range e.TxRefs {
+			hash := hex.EncodeToString(ref.ID[:])
+			r.Transactions = append(r.Transactions, hash)
+			r.TransactionRefs = append(r.TransactionRefs, TransactionRef{Era: ref.EraId, Hash: hash})
+		}
+	} else {
+		for _, id := range e.TxIds {
+			r.Transactions = append(r.Transactions, hex.EncodeToString(id[:]))
+		}
 	}
 	for _, tx := range e.Txs {
-		r.Transactions = append(r.Transactions, hex.EncodeToString(tx.ID[:]))
+		hash := hex.EncodeToString(tx.ID[:])
+		r.Transactions = append(r.Transactions, hash)
+		r.TransactionRefs = append(r.TransactionRefs, TransactionRef{Era: tx.EraId, Hash: hash})
 	}
 	if e.Err != nil {
 		r.Error = e.Err.Error()

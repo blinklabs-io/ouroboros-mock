@@ -96,7 +96,7 @@ func ObservableNames() []string { return append([]string(nil), observableNames[:
 // DerivedNames returns the complete derived-family catalogue in stable order.
 func DerivedNames() []string { return append([]string(nil), derivedNames[:]...) }
 
-func (c Coverage) validate(cases map[string]bool) error {
+func (c Coverage) validate(cases map[string]caseCoverage) error {
 	if c.Version != SchemaVersion {
 		return fmt.Errorf("unsupported coverage version %d", c.Version)
 	}
@@ -117,11 +117,20 @@ func (c Coverage) validate(cases map[string]bool) error {
 			}
 			delete(required, m.Name)
 			seen := map[string]bool{}
+			covered := false
 			for _, id := range m.Cases {
-				if !cases[id] || seen[id] {
+				c, present := cases[id]
+				if !present || seen[id] {
 					return fmt.Errorf("unknown/repeated measurement case %q", id)
 				}
+				if !c.supports(m.Name) && !c.quality {
+					return fmt.Errorf("case %s does not cover measurement %s", id, m.Name)
+				}
 				seen[id] = true
+				covered = covered || c.supports(m.Name)
+			}
+			if !covered {
+				return fmt.Errorf("measurement %s has no matching positive golden", m.Name)
 			}
 		}
 	}

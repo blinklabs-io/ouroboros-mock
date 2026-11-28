@@ -136,10 +136,12 @@ func (p *TxPeer) Offer(txs ...Tx) {
 
 func (p *TxPeer) observeOffer(at time.Time, txs []Tx) {
 	ids := make([][32]byte, len(txs))
+	refs := make([]TxRef, len(txs))
 	for i, tx := range txs {
 		ids[i] = tx.ID
+		refs[i] = TxRef{EraId: tx.EraId, ID: tx.ID}
 	}
-	p.events.publish(Event{Kind: EventTxsOffered, OccurredAt: at, Session: 1, Count: uint64(len(txs)), TxIds: ids})
+	p.events.publish(Event{Kind: EventTxsOffered, OccurredAt: at, Session: 1, Count: uint64(len(txs)), TxIds: ids, TxRefs: refs})
 }
 
 // Served returns the transactions the node requested and received, in
@@ -199,7 +201,11 @@ func (p *TxPeer) requestTxIds(
 			}
 			p.announced += n
 			p.mu.Unlock()
-			p.events.publish(Event{Kind: EventTxIdsRequested, Session: 1, Request: request, OccurredAt: occurred, Count: uint64(len(ids)), TxIds: ids})
+			refs := make([]TxRef, len(out))
+			for i, item := range out {
+				refs[i] = TxRef{EraId: item.TxId.EraId, ID: item.TxId.TxId}
+			}
+			p.events.publish(Event{Kind: EventTxIdsRequested, Session: 1, Request: request, OccurredAt: occurred, Count: uint64(len(ids)), TxIds: ids, TxRefs: refs})
 			return out, nil
 		}
 		more := p.more
@@ -224,11 +230,14 @@ func (p *TxPeer) requestTxs(
 	occurred := time.Now()
 	request := p.requestSequence.Add(1)
 	requested := make([][32]byte, 0, len(ids))
+	requestedRefs := make([]TxRef, 0, len(ids))
 	for _, id := range ids {
 		requested = append(requested, id.TxId)
+		requestedRefs = append(requestedRefs, TxRef{EraId: id.EraId, ID: id.TxId})
 	}
-	p.events.publish(Event{Kind: EventTxsRequested, Session: 1, Request: request, OccurredAt: occurred, Count: uint64(len(ids)), TxIds: requested})
+	p.events.publish(Event{Kind: EventTxsRequested, Session: 1, Request: request, OccurredAt: occurred, Count: uint64(len(ids)), TxIds: requested, TxRefs: requestedRefs})
 	returned := make([][32]byte, 0, len(ids))
+	returnedRefs := make([]TxRef, 0, len(ids))
 	out := make([]txsubmission.TxBody, 0, len(ids))
 	p.mu.Lock()
 	for _, id := range ids {
@@ -240,12 +249,13 @@ func (p *TxPeer) requestTxs(
 				})
 				p.served = append(p.served, tx)
 				returned = append(returned, tx.ID)
+				returnedRefs = append(returnedRefs, TxRef{EraId: tx.EraId, ID: tx.ID})
 				break
 			}
 		}
 	}
 	p.mu.Unlock()
-	p.events.publish(Event{Kind: EventTxsReturned, Session: 1, Request: request, OccurredAt: time.Now(), Count: uint64(len(out)), TxIds: returned})
+	p.events.publish(Event{Kind: EventTxsReturned, Session: 1, Request: request, OccurredAt: time.Now(), Count: uint64(len(out)), TxIds: returned, TxRefs: returnedRefs})
 	return out, nil
 }
 
@@ -258,7 +268,12 @@ func (p *TxPeer) Close() error {
 
 // Finish stops transaction offers and drains observations while Events is consumed.
 func (p *TxPeer) Finish(ctx context.Context) (ObservationStats, error) {
+	txProtocol := p.conn.TxSubmission().Client.ProtocolInstance()
 	err := p.stop(ctx)
+	if waitErr := waitProtocols(ctx, txProtocol); waitErr != nil {
+		p.events.close()
+		return p.events.stats(), errors.Join(err, waitErr, ErrIncompleteObservations)
+	}
 	select {
 	case <-p.watchDone:
 	case <-ctx.Done():

@@ -37,6 +37,8 @@ import (
 // SchemaVersion is the supported experiment and measurement contract version.
 const SchemaVersion = 1
 
+const maxArtifactBytes int64 = 128 * 1024 * 1024
+
 // Network fixes the semantic time and protocol context of a corpus.
 type Network struct {
 	Magic       uint32    `json:"magic"`
@@ -85,7 +87,8 @@ type Expectation struct {
 	Expected string   `json:"expected"`
 }
 
-// Requirement is a minimum observed event/item population for a peer role.
+// Requirement is a minimum event/item population over the complete process
+// capture, including preparation and drain. It is not a measurement-window count.
 type Requirement struct {
 	Event  string `json:"event"`
 	Events uint64 `json:"events"`
@@ -143,9 +146,13 @@ type Bundle struct {
 	manifest  Manifest
 	root      string
 	artifacts map[string]Artifact
+	caseInfo  map[string]caseCoverage
 }
 
 func decodeJSON(data []byte, dst any) error {
+	if err := uniqueJSON(data); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -160,7 +167,12 @@ func decodeJSON(data []byte, dst any) error {
 
 // Load reads a manifest, verifies every artifact and validates its references.
 func Load(path string) (*Bundle, error) {
-	f, err := os.Open(path)
+	manifestRoot, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer manifestRoot.Close()
+	f, err := openRegular(manifestRoot, filepath.Base(path))
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +188,7 @@ func Load(path string) (*Bundle, error) {
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
 	sum := sha256.Sum256(data)
-	b := &Bundle{digest: hex.EncodeToString(sum[:]), manifest: m, root: filepath.Dir(path), artifacts: make(map[string]Artifact, len(m.Artifacts))}
+	b := &Bundle{digest: hex.EncodeToString(sum[:]), manifest: m, root: filepath.Dir(path), artifacts: make(map[string]Artifact, len(m.Artifacts)), caseInfo: make(map[string]caseCoverage, len(m.Expectations))}
 	if err = b.validate(); err != nil {
 		return nil, fmt.Errorf("experiment %q: %w", m.ID, err)
 	}
@@ -189,7 +201,7 @@ func (b *Bundle) Read(id string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown artifact %q", id)
 	}
-	if a.Bytes > 128*1024*1024 {
+	if a.Bytes <= 0 || a.Bytes > maxArtifactBytes {
 		return nil, fmt.Errorf("artifact %q exceeds the payload read limit", id)
 	}
 	r, err := os.OpenRoot(b.root)
@@ -197,7 +209,7 @@ func (b *Bundle) Read(id string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Close()
-	f, err := r.Open(a.Path)
+	f, err := openRegular(r, a.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +270,7 @@ func (b *Bundle) Transactions(ids []string) ([]peer.Tx, error) {
 }
 
 func (b *Bundle) verifyArtifact(a Artifact) error {
-	if a.ID == "" || !fs.ValidPath(a.Path) || strings.Contains(a.Path, "\\") || a.Bytes <= 0 || a.Bytes == int64(^uint64(0)>>1) {
+	if a.ID == "" || !fs.ValidPath(a.Path) || strings.Contains(a.Path, "\\") || a.Bytes <= 0 || a.Bytes > maxArtifactBytes {
 		return fmt.Errorf("invalid artifact %q", a.ID)
 	}
 	digest, err := hex.DecodeString(a.SHA256)
@@ -270,7 +282,7 @@ func (b *Bundle) verifyArtifact(a Artifact) error {
 		return err
 	}
 	defer r.Close()
-	f, err := r.Open(a.Path)
+	f, err := openRegular(r, a.Path)
 	if err != nil {
 		return err
 	}

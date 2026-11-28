@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/ouroboros-mock/peer"
 )
@@ -59,12 +60,17 @@ type activeRole struct {
 	endpoint   string
 	upstream   *peer.Upstream
 	tx         *peer.TxPeer
-	fetcher    *peer.Fetcher
+	fetcher    interface {
+		Request(context.Context, common.Point, common.Point) (uint64, error)
+	}
 }
 
 type output struct {
 	mu              sync.Mutex
 	enc             *json.Encoder
+	closer          io.Closer
+	closeOnce       sync.Once
+	closeErr        error
 	err             error
 	run, experiment string
 }
@@ -83,6 +89,11 @@ func (o *output) write(r Record) error {
 	}
 	o.err = o.enc.Encode(r)
 	return o.err
+}
+
+func (o *output) close() error {
+	o.closeOnce.Do(func() { o.closeErr = o.closer.Close() })
+	return o.closeErr
 }
 
 func startRole(ctx context.Context, b *Bundle, r Role, endpoint string) (*activeRole, error) {
@@ -129,8 +140,8 @@ func startRole(ctx context.Context, b *Bundle, r Role, endpoint string) (*active
 		a.tx, err = peer.NewTxPeer(peer.TxPeerConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic, KeepAlive: true})
 		a.peer = a.tx
 	case "fetcher":
-		a.fetcher, err = peer.NewFetcher(peer.FetcherConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic})
-		a.peer = a.fetcher
+		fetcher, fetchErr := peer.NewFetcher(peer.FetcherConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic})
+		a.fetcher, a.peer, err = fetcher, fetcher, fetchErr
 	default:
 		err = fmt.Errorf("unknown role %q", r.Kind)
 	}
@@ -186,23 +197,39 @@ func sendControl(ctx context.Context, out chan<- commandResult, result commandRe
 	}
 }
 
-func remainingControl(commands <-chan commandResult, closing time.Time) error {
-	select {
-	case result := <-commands:
-		if !result.observed.After(closing) {
-			if result.err != nil {
-				return fmt.Errorf("control input ended before finalization: %w", result.err)
-			}
-			return fmt.Errorf("unexpected control before finalization: %s", result.control.Kind)
-		}
-	default:
+func drainContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(10 * time.Second)
+	if parent, ok := ctx.Deadline(); ok && parent.Before(deadline) {
+		deadline = parent
 	}
-	return nil
+	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
+}
+
+type drainBudget struct {
+	once            sync.Once
+	ctx             context.Context
+	cancel          context.CancelFunc
+	stopOutputAbort func() bool
+}
+
+func (b *drainBudget) begin(ctx context.Context, out *output) context.Context {
+	b.once.Do(func() {
+		cleanupCtx, cancel := drainContext(ctx)
+		b.ctx, b.cancel = cleanupCtx, cancel
+		b.stopOutputAbort = context.AfterFunc(cleanupCtx, func() { _ = out.close() })
+	})
+	return b.ctx
 }
 
 // Serve runs real peer roles, accepting bounded JSON-line start/stop controls.
-// The control reader is owned by Serve and is closed when the run terminates.
-func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser, w io.Writer) (resultErr error) {
+// Serve owns both streams. Their Close methods must interrupt pending I/O.
+// Required populations cover the complete capture, including startup and drain;
+// measurement-window populations are checked by the external controller.
+func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser, w io.WriteCloser) (resultErr error) {
+	return serve(ctx, b, opts, controls, w, startRole)
+}
+
+func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser, w io.WriteCloser, starter func(context.Context, *Bundle, Role, string) (*activeRole, error)) (resultErr error) {
 	if !name(opts.Run) {
 		return errors.New("run identity required")
 	}
@@ -215,28 +242,48 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 			return fmt.Errorf("unknown role endpoint %s", id)
 		}
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	closeInput := context.AfterFunc(runCtx, func() { _ = controls.Close() })
-	defer closeInput()
-	defer controls.Close()
-	out := &output{enc: json.NewEncoder(w), run: opts.Run, experiment: b.manifest.ID}
-	identity, identityErr := executableIdentity()
-	if identityErr != nil {
-		return identityErr
-	}
-	if err := out.write(Record{Kind: "prepared", ManifestSHA256: b.digest, Build: &identity}); err != nil {
-		return err
-	}
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	out := &output{enc: json.NewEncoder(w), closer: w, run: opts.Run, experiment: b.manifest.ID}
+	defer func() { resultErr = errors.Join(resultErr, out.close()) }()
+	budget := &drainBudget{}
+	beginCleanup := func() { budget.begin(ctx, out) }
+	stopParent := context.AfterFunc(ctx, beginCleanup)
+	defer stopParent()
+	commands := make(chan commandResult, 1)
+	starts := make(chan commandResult, 1)
+	readerCtx, stopReader := context.WithCancel(context.WithoutCancel(ctx))
+	readerDone, monitorDone := make(chan struct{}), make(chan struct{})
+	var inputClosing atomic.Int64
+	go func() { defer close(readerDone); defer close(commands); readControls(readerCtx, controls, commands) }()
+	go func() {
+		defer close(monitorDone)
+		started := false
+		for command := range commands {
+			if closing := inputClosing.Load(); closing != 0 && command.observed.UnixNano() > closing {
+				continue
+			}
+			if !started && command.err == nil && command.control.Kind == "start" && command.control.Run == opts.Run && !command.control.Start.IsZero() {
+				started = true
+				starts <- command
+				continue
+			}
+			err := command.err
+			if err == nil {
+				err = fmt.Errorf("unexpected control: %s for %s", command.control.Kind, command.control.Run)
+			}
+			cancel(fmt.Errorf("control input ended before finalization: %w", err))
+			beginCleanup()
+		}
+	}()
 	active := make(map[string]*activeRole, len(b.manifest.Roles))
 	ordered := make([]*activeRole, 0, len(b.manifest.Roles))
 	var collectors sync.WaitGroup
 	var quiesceAt atomic.Int64
-	failures := make(chan error, len(b.manifest.Roles)+1)
 	defer func() {
+		cleanupCtx := budget.begin(ctx, out)
+		defer func() { budget.stopOutputAbort(); budget.cancel() }()
 		quiesceAt.Store(time.Now().UnixNano())
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cleanupCancel()
 		statsByRole := make(map[string]peer.ObservationStats, len(ordered))
 		for _, a := range ordered {
 			stats, err := a.peer.Finish(cleanupCtx)
@@ -254,19 +301,28 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 				}
 			}
 		}
-		for len(failures) > 0 {
-			resultErr = errors.Join(resultErr, <-failures)
-		}
-		resultErr = errors.Join(resultErr, ctx.Err())
+		inputClosing.Store(time.Now().UnixNano())
+		resultErr = errors.Join(resultErr, controls.Close())
+		stopReader()
+		<-readerDone
+		<-monitorDone
+		resultErr = errors.Join(resultErr, context.Cause(runCtx), ctx.Err(), cleanupCtx.Err())
 		complete := resultErr == nil
 		r := Record{Kind: "final", Complete: &complete}
 		if resultErr != nil {
 			r.Error = resultErr.Error()
 		}
-		resultErr = errors.Join(resultErr, out.write(r), ctx.Err())
+		resultErr = errors.Join(resultErr, out.write(r), ctx.Err(), cleanupCtx.Err())
 	}()
+	identity, err := executableIdentity()
+	if err != nil {
+		return err
+	}
+	if err = out.write(Record{Kind: "prepared", ManifestSHA256: b.digest, Build: &identity}); err != nil {
+		return err
+	}
 	for _, r := range b.manifest.Roles {
-		a, err := startRole(runCtx, b, r, opts.Endpoints[r.ID])
+		a, err := starter(runCtx, b, r, opts.Endpoints[r.ID])
 		if err != nil {
 			return err
 		}
@@ -278,9 +334,6 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 			var previous uint64
 			reported := false
 			for e := range a.peer.Events() {
-				if reported {
-					continue
-				}
 				record, err := eventRecord(e)
 				if err == nil {
 					record.Role = a.definition.ID
@@ -294,14 +347,12 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 					err = errors.Join(err, fmt.Errorf("observation gap in %s: %d after %d", a.definition.ID, e.Sequence, previous))
 				}
 				previous = e.Sequence
-				if (e.Kind == peer.EventSessionClosed && (quiesceAt.Load() == 0 || e.OccurredAt.UnixNano() < quiesceAt.Load())) || e.Err != nil {
+				if (e.Kind == peer.EventSessionClosed && (quiesceAt.Load() == 0 || e.OccurredAt.UnixNano() < quiesceAt.Load())) || (e.Err != nil && (e.Kind != peer.EventFetchCompleted || !errors.Is(e.Err, blockfetch.ErrNoBlocks))) {
 					err = errors.Join(err, fmt.Errorf("peer operation ended: %s: %w", a.definition.ID, errors.Join(errors.New("session or operation failed"), e.Err)))
 				}
-				if err != nil {
-					select {
-					case failures <- err:
-					default:
-					}
+				if err != nil && !reported {
+					cancel(err)
+					beginCleanup()
 					reported = true
 				}
 			}
@@ -310,32 +361,16 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 			return err
 		}
 	}
-	commands := make(chan commandResult, 1)
-	readerDone := make(chan struct{})
-	go func() { defer close(readerDone); readControls(runCtx, controls, commands) }()
-	defer func() {
-		closing := time.Now()
-		cancel()
-		_ = controls.Close()
-		<-readerDone
-		resultErr = errors.Join(resultErr, remainingControl(commands, closing))
-	}()
 	var start time.Time
 	select {
 	case <-runCtx.Done():
-		return runCtx.Err()
-	case err := <-failures:
-		return err
-	case command := <-commands:
-		if command.err != nil {
-			return command.err
-		}
-		c := command.control
-		if c.Kind != "start" || c.Run != opts.Run || c.Start.IsZero() {
-			return errors.New("explicit matching start control required")
-		}
-		start = c.Start
+		return context.Cause(runCtx)
+	case command := <-starts:
+		start = command.control.Start
 	}
+	end := start.Add(time.Duration(b.manifest.DurationNS))
+	endTimer := time.AfterFunc(time.Until(end), beginCleanup)
+	defer endTimer.Stop()
 	if err := out.write(Record{Kind: "started", At: stamp(start)}); err != nil {
 		return err
 	}
@@ -343,35 +378,32 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 	defer timer.Stop()
 	select {
 	case <-runCtx.Done():
-		return runCtx.Err()
-	case err := <-failures:
-		return err
-	case command := <-commands:
-		return fmt.Errorf("control before start: %v", command)
+		return context.Cause(runCtx)
 	case <-timer.C:
 	}
-	actionCtx, actionCancel := context.WithDeadline(runCtx, start.Add(time.Duration(b.manifest.DurationNS)))
+	actionCtx, actionCancel := context.WithDeadline(runCtx, end)
 	defer actionCancel()
 	for _, action := range b.manifest.Actions {
 		timer.Reset(time.Until(start.Add(time.Duration(action.AtNS))))
 		select {
 		case <-runCtx.Done():
-			return runCtx.Err()
-		case err := <-failures:
-			return err
-		case command := <-commands:
-			return fmt.Errorf("interrupted action %s: %v", action.ID, command)
+			return context.Cause(runCtx)
 		case <-timer.C:
 		}
 		at := time.Now()
-		role, ok := active[action.Role]
-		if !ok || role == nil {
+		if err := actionCtx.Err(); err != nil {
+			return err
+		}
+		if !at.Before(end) {
+			return fmt.Errorf("action %s dispatched after trial end", action.ID)
+		}
+		role := active[action.Role]
+		if role == nil {
 			return fmt.Errorf("action %s has no active role", action.ID)
 		}
-		err := perform(actionCtx, b, role, action)
-		elapsed := at.Sub(start).Nanoseconds()
-		scheduled := action.AtNS
-		r := Record{Kind: "action", Role: action.Role, Action: action.ID, At: stamp(at), ScheduledNS: &scheduled, ElapsedNS: &elapsed, Count: uint64(len(action.Items))}
+		request, err := perform(actionCtx, b, role, action)
+		elapsed, scheduled := at.Sub(start).Nanoseconds(), action.AtNS
+		r := Record{Kind: "action", Role: action.Role, Action: action.ID, Request: request, At: stamp(at), ScheduledNS: &scheduled, ElapsedNS: &elapsed, Count: uint64(len(action.Items))}
 		if err != nil {
 			r.Error = err.Error()
 		}
@@ -382,51 +414,49 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 			return err
 		}
 	}
-	timer.Reset(time.Until(start.Add(time.Duration(b.manifest.DurationNS))))
+	timer.Reset(time.Until(end))
 	select {
 	case <-runCtx.Done():
-		return runCtx.Err()
-	case err := <-failures:
-		return err
-	case command := <-commands:
-		return fmt.Errorf("interrupted measurement: %v", command)
+		return context.Cause(runCtx)
 	case <-timer.C:
 		return nil
 	}
 }
 
-func perform(ctx context.Context, b *Bundle, a *activeRole, action Action) error {
+func perform(ctx context.Context, b *Bundle, a *activeRole, action Action) (uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	switch action.Kind {
 	case "offer":
 		txs, err := b.Transactions(action.Items)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		a.tx.Offer(txs...)
-		return nil
+		return 0, nil
 	case "append", "fork":
 		blocks, err := b.Blocks(action.Items)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if action.Kind == "append" {
-			return a.upstream.Append(blocks...)
+			return 0, a.upstream.Append(blocks...)
 		}
 		_, err = a.upstream.SwitchFork(blocks)
-		return err
+		return 0, err
 	case "fetch":
 		var points [2]common.Point
 		for i, id := range action.Items {
 			blocks, err := b.Blocks([]string{id})
 			if err != nil {
-				return err
+				return 0, err
 			}
 			block := blocks[0]
 			points[i] = common.NewPoint(block.SlotNumber(), block.Hash().Bytes())
 		}
-		_, err := a.fetcher.Request(ctx, points[0], points[1])
-		return err
+		return a.fetcher.Request(ctx, points[0], points[1])
 	default:
-		return fmt.Errorf("unsupported action %q", action.Kind)
+		return 0, fmt.Errorf("unsupported action %q", action.Kind)
 	}
 }

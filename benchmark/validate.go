@@ -180,6 +180,11 @@ func (b *Bundle) validate() error {
 		if expected.Version != SchemaVersion || !present || string(value) == "null" || len(value) == 0 {
 			return fmt.Errorf("missing expected result for %s", e.ID)
 		}
+		info, err := b.validateEvidence(e, o, value)
+		if err != nil {
+			return err
+		}
+		b.caseInfo[e.ID] = info
 		chainCase = chainCase || e.Kind == "chain"
 		ledgerCase = ledgerCase || e.Kind == "transaction" || e.Kind == "script"
 		cases[e.ID] = true
@@ -201,13 +206,16 @@ func (b *Bundle) validate() error {
 	if err = decodeJSON(raw, &coverage); err != nil {
 		return err
 	}
-	if err = coverage.validate(cases); err != nil {
+	if err = coverage.validate(b.caseInfo); err != nil {
 		return err
 	}
 	if err = b.require([]string{coverage.Schema, coverage.Envelope}, "config"); err != nil {
 		return err
 	}
 	if err = b.require([]string{coverage.Examples}, "golden"); err != nil {
+		return err
+	}
+	if err = b.validateSchemaReferences(coverage.Schema, coverage.Envelope); err != nil {
 		return err
 	}
 	schemaBytes, err := b.Read(coverage.Schema)
@@ -224,8 +232,21 @@ func (b *Bundle) validate() error {
 		return errors.New("incomplete observable schema catalogue")
 	}
 	for _, observable := range observableNames {
-		if len(schema.Definitions[observable]) == 0 {
+		definition := schema.Definitions[observable]
+		var object map[string]json.RawMessage
+		if err = json.Unmarshal(definition, &object); err != nil || len(object) == 0 {
 			return fmt.Errorf("schema lacks %s", observable)
+		}
+		var kind string
+		var required []string
+		var properties map[string]json.RawMessage
+		if json.Unmarshal(object["type"], &kind) != nil || kind != "object" || (len(object["required"]) > 0 && json.Unmarshal(object["required"], &required) != nil) || json.Unmarshal(object["properties"], &properties) != nil || len(properties) == 0 {
+			return fmt.Errorf("invalid observable schema definition %s", observable)
+		}
+		for _, field := range required {
+			if len(properties[field]) == 0 {
+				return fmt.Errorf("schema %s lacks required property %s", observable, field)
+			}
 		}
 	}
 	roles := map[string]Role{}
@@ -281,7 +302,7 @@ func (b *Bundle) validate() error {
 	last := int64(-1)
 	for _, a := range m.Actions {
 		r, ok := roles[a.Role]
-		if !ok || !name(a.ID) || a.AtNS < 0 || a.AtNS < last || a.AtNS > m.DurationNS {
+		if !ok || !name(a.ID) || a.AtNS < 0 || a.AtNS < last || a.AtNS >= m.DurationNS {
 			return fmt.Errorf("invalid action schedule %q", a.ID)
 		}
 		if _, ok = actions[a.ID]; ok {
@@ -328,7 +349,7 @@ func (b *Bundle) validate() error {
 				return fmt.Errorf("fetch requires two block endpoints: %q", a.ID)
 			}
 			for _, id := range a.Items {
-				if err = b.require([]string{id}, "block"); err != nil {
+				if _, err = b.Blocks([]string{id}); err != nil {
 					return err
 				}
 			}
@@ -383,9 +404,15 @@ func (b *Bundle) validateModels() error {
 			return err
 		}
 		for key, model := range g.CostModels {
+			if old, exists := combined[key]; exists && !slices.Equal(old, model) {
+				return fmt.Errorf("conflicting cost model %s", key)
+			}
 			combined[key] = model
 		}
 		if len(g.V3) > 0 {
+			if old, exists := combined["PlutusV3"]; exists && !slices.Equal(old, g.V3) {
+				return errors.New("conflicting cost model PlutusV3")
+			}
 			combined["PlutusV3"] = g.V3
 		}
 	}

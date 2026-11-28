@@ -70,6 +70,8 @@ stdin after all `ready` records have arrived:
 
 Supply the actual intended UTC start time, normally a future time shared with
 other participants. Scheduling uses that absolute start plus each `at_ns`.
+Action offsets are strictly before `duration_ns`; dispatch at or after the end
+is an error for every action kind. Fetch action records retain the request ID.
 Records retain both scheduled offsets and actual call times, so a late
 controller start is visible. The example timestamp illustrates the format.
 An explicit `stop` control, input EOF, malformed/mismatched control, signal,
@@ -101,11 +103,21 @@ has a distinct session identity.
 
 ## Observation and finalization semantics
 
-`prepared` records identify the exact manifest and executable digest, build
-revision and Go toolchain. Peer records carry occurrence time, publication
+`prepared` records identify the exact manifest, executable digest source, module
+and Go toolchain. `go_vcs_revision` and `go_vcs_modified` retain the compiler's
+reported VCS diagnostics, which can describe an enclosing checkout in linked
+worktrees. On Linux, `executable_sha256` hashes the running image through
+`/proc/self/exe`,
+even if its pathname is replaced. Other platforms report
+`executable_path_sha256` with `digest_source: "pathname"`; this is a pathname
+diagnostic and does not attest the running image. The controller records the
+build artifact hash and links that digest to its independently recorded source/build provenance.
+Peer records carry occurrence time, publication
 sequence, session, connection and request identities where the protocol has an
 exchange, full points/parents, block number, byte size and actual item counts.
-UTC timestamps always retain nine fractional digits. Publication order and
+`transaction_refs` retains era plus full hash; the hash-only `transactions`
+list is not the complete wire identity. UTC timestamps always retain nine fractional digits.
+Publication order and
 occurrence order are separate, especially across concurrent connections.
 
 Boundaries describe what is observable at this layer:
@@ -139,13 +151,19 @@ a sequence number; overflow increments drops. Source payloads are copied before
 queuing. Nothing writes files or blocks on export inside a protocol callback.
 Opt-in `Finish(ctx)` stops producers/connections and drains while the caller
 consumes `Events`. `source_final` is written only after collectors have drained
-and reports produced/delivered/dropped/discarded counts. Ordinary `Close` still
+and reports produced/delivered/dropped/discarded counts. Control monitoring stays
+active through this drain. The runner owns its control and output streams;
+closing either must interrupt pending I/O. Finalization has a ten-second budget
+bounded further by the caller deadline; an interrupted write invalidates it.
+Ordinary `Close` still
 discards unread observations. Overflow, an interrupted tail or an early ordinary
 close cannot certify complete observations.
 
 `final.recording_complete` certifies this process's capture, action execution,
-minimum declared event/item populations and successful output writes. It is
-not a ledger verdict or a full experiment pass. The controller must additionally
+minimum declared event/item populations and successful output writes. These
+minimums cover the entire process capture, including preparation and drain.
+Measurement-window populations are checked by the controller using occurrence
+timestamps and the declared window. It is not a ledger verdict or a full experiment pass. The controller must additionally
 validate node outcomes, all required observables, cross-process finalization,
 clock quality and resource windows. A missing final record or nonzero process
 exit is always an incomplete recording. A failed writer may prevent even the

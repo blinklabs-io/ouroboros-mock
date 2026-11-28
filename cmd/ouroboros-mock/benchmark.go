@@ -66,5 +66,9 @@ func runBenchmark(ctx context.Context, args []string, input io.ReadCloser, outpu
 			return fmt.Errorf("endpoint names unknown role %q", role)
 		}
 	}
-	return benchmark.Serve(ctx, bundle, benchmark.Options{Run: *runID, Endpoints: endpoint}, input, output)
+	writer, ok := output.(io.WriteCloser)
+	if !ok {
+		return errors.New("benchmark output must support interrupting Close")
+	}
+	return benchmark.Serve(ctx, bundle, benchmark.Options{Run: *runID, Endpoints: endpoint}, input, writer)
 }

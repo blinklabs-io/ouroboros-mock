@@ -24,61 +24,107 @@ import (
 	"syscall"
 )
 
+type descriptorState struct {
+	raw   syscall.RawConn
+	flags uintptr
+}
+type streamGroup struct {
+	mu        sync.Mutex
+	remaining int
+	states    []descriptorState
+}
 type controlInput struct {
 	*os.File
-	original syscall.RawConn
-	flags    uintptr
-	once     sync.Once
-	err      error
+	group *streamGroup
+	once  sync.Once
+	err   error
 }
 
 func (r *controlInput) Close() error {
 	r.once.Do(func() {
-		closeErr := r.File.Close()
-		var restoreErr error
-		controlErr := r.original.Control(func(fd uintptr) {
-			_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFL, r.flags)
-			if errno != 0 {
-				restoreErr = errno
-			}
-		})
-		r.err = errors.Join(closeErr, controlErr, restoreErr)
+		r.err = r.File.Close()
+		r.group.mu.Lock()
+		defer r.group.mu.Unlock()
+		r.group.remaining--
+		if r.group.remaining != 0 {
+			return
+		}
+		r.err = errors.Join(r.err, r.group.restore())
 	})
 	return r.err
 }
 
-func benchmarkInput() (io.ReadCloser, error) {
-	raw, err := os.Stdin.SyscallConn()
-	if err != nil {
-		return nil, err
+func (g *streamGroup) restore() error {
+	var result error
+	for _, state := range g.states {
+		var restoreErr error
+		controlErr := state.raw.Control(func(fd uintptr) {
+			_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFL, state.flags)
+			if errno != 0 {
+				restoreErr = errno
+			}
+		})
+		result = errors.Join(result, controlErr, restoreErr)
 	}
-	var input *controlInput
-	var setupErr error
-	controlErr := raw.Control(func(original uintptr) {
-		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, original, syscall.F_GETFL, 0)
-		if errno != 0 {
-			setupErr = errno
-			return
-		}
-		fd, err := syscall.Dup(int(original))
+	return result
+}
+
+// Snapshot all inherited flags before Dup changes any shared open-file description.
+// Restore them only after both pollable copies have closed.
+func ownBenchmarkStreams(files ...*os.File) ([]*controlInput, error) {
+	group := &streamGroup{}
+	for _, file := range files {
+		raw, err := file.SyscallConn()
 		if err != nil {
-			setupErr = err
-			return
+			return nil, err
 		}
-		// NewFile registers an already nonblocking descriptor with the poller.
-		// Dup shares status flags with the inherited input, so Close restores them.
-		if err = syscall.SetNonblock(fd, true); err != nil {
-			_ = syscall.Close(fd)
-			setupErr = err
-			return
+		state := descriptorState{raw: raw}
+		var flagErr error
+		err = raw.Control(func(fd uintptr) {
+			flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
+			if errno != 0 {
+				flagErr = errno
+			}
+			state.flags = flags
+		})
+		if err = errors.Join(err, flagErr); err != nil {
+			return nil, err
 		}
-		input = &controlInput{File: os.NewFile(uintptr(fd), "benchmark controls"), original: raw, flags: flags}
-	})
-	if err = errors.Join(controlErr, setupErr); err != nil {
-		return nil, err
+		group.states = append(group.states, state)
 	}
-	if input == nil {
-		return nil, errors.New("benchmark input descriptor was not initialized")
+	streams := make([]*controlInput, 0, len(files))
+	for _, state := range group.states {
+		var file *os.File
+		var setupErr error
+		err := state.raw.Control(func(original uintptr) {
+			fd, err := syscall.Dup(int(original))
+			if err != nil {
+				setupErr = err
+				return
+			}
+			if err = syscall.SetNonblock(fd, true); err != nil {
+				_ = syscall.Close(fd)
+				setupErr = err
+				return
+			}
+			file = os.NewFile(uintptr(fd), "benchmark stream")
+		})
+		if err = errors.Join(err, setupErr); err != nil {
+			for _, stream := range streams {
+				_ = stream.File.Close()
+			}
+			return nil, errors.Join(err, group.restore())
+		}
+		streams = append(streams, &controlInput{File: file, group: group})
 	}
-	return input, nil
+	group.remaining = len(streams)
+	return streams, nil
+}
+
+func benchmarkStreams(output *os.File) (io.ReadCloser, io.WriteCloser, error) {
+	streams, err := ownBenchmarkStreams(os.Stdin, output)
+	if err != nil {
+		return nil, nil, err
+	}
+	return streams[0], streams[1], nil
 }

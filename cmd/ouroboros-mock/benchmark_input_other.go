@@ -19,8 +19,9 @@ package main
 import (
 	"errors"
 	"io"
+	"os"
 )
 
-func benchmarkInput() (io.ReadCloser, error) {
-	return nil, errors.New("benchmark control pipes require a POSIX platform")
+func benchmarkStreams(_ *os.File) (io.ReadCloser, io.WriteCloser, error) {
+	return nil, nil, errors.New("benchmark control pipes require a POSIX platform")
 }

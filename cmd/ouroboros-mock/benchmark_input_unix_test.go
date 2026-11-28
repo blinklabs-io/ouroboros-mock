@@ -41,13 +41,42 @@ func TestBenchmarkControlCloseRestoresInheritedDescriptorFlags(t *testing.T) {
 	inherited := os.Stdin
 	os.Stdin = r
 	defer func() { os.Stdin = inherited }()
-	input, err := benchmarkInput()
+	streams, err := ownBenchmarkStreams(os.Stdin)
 	require.NoError(t, err)
-	require.NoError(t, input.Close())
-	require.NoError(t, input.Close())
+	require.NoError(t, streams[0].Close())
+	require.NoError(t, streams[0].Close())
 	require.NoError(t, raw.Control(func(fd uintptr) {
 		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
 		require.Zero(t, errno)
 		require.Equal(t, before, flags)
 	}))
+}
+
+func TestBenchmarkStreamsRestoreSharedFlagsOnlyAfterBothClose(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+	raw, err := r.SyscallConn()
+	require.NoError(t, err)
+	require.NoError(t, raw.Control(func(fd uintptr) { require.NoError(t, syscall.SetNonblock(int(fd), false)) }))
+	flags := func() uintptr {
+		var result uintptr
+		require.NoError(t, raw.Control(func(fd uintptr) {
+			value, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
+			require.Zero(t, errno)
+			result = value
+		}))
+		return result
+	}
+	before := flags()
+	inherited := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = inherited }()
+	input, output, err := benchmarkStreams(r)
+	require.NoError(t, err)
+	require.NoError(t, input.Close())
+	require.NotZero(t, flags()&syscall.O_NONBLOCK)
+	require.NoError(t, output.Close())
+	require.Equal(t, before, flags())
 }

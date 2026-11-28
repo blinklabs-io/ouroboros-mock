@@ -45,14 +45,17 @@ func main() {
 
 func run(ctx context.Context, args []string, output io.Writer) error {
 	if len(args) > 0 && args[0] == "benchmark" {
-		// Own a pollable control descriptor so Close interrupts a blocked read.
-		// The inherited standard-input descriptor can be in blocking mode.
-		input, err := benchmarkInput()
+		file, ok := output.(*os.File)
+		if !ok {
+			return errors.New("benchmark output requires a pollable file")
+		}
+		input, writer, err := benchmarkStreams(file)
 		if err != nil {
-			return fmt.Errorf("open benchmark control input: %w", err)
+			return fmt.Errorf("open benchmark streams: %w", err)
 		}
 		defer input.Close()
-		return runBenchmark(ctx, args[1:], input, output)
+		defer writer.Close()
+		return runBenchmark(ctx, args[1:], input, writer)
 	}
 	if len(args) != 1 {
 		return errors.New("usage: ouroboros-mock <configuration.yaml>")

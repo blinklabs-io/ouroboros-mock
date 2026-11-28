@@ -1712,8 +1712,8 @@
       "id": "node-oracle",
       "path": "node-oracle.json",
       "kind": "oracle",
-      "sha256": "2fc2878e03826c65483adfaad19b199eaf2f1214094ea47fec23c715b89e5ab1",
-      "bytes": 61724
+      "sha256": "82bb6f3e5a5b550fd8e7b57c70d3ed35308a9d10e1ff2c09bd2258016863e84d",
+      "bytes": 118890
     },
     {
       "id": "common-schema",
@@ -1775,8 +1775,8 @@
       "id": "metric-oracle",
       "path": "metric-oracle.json",
       "kind": "oracle",
-      "sha256": "4427b659921ae8a3d19276ac759a6dd31b5831ebd8d41a055eb3001ca8facbff",
-      "bytes": 5080
+      "sha256": "b5ee9b7bd21fe39d578fa4abcd600afe0a4cb2123e09c65da4c2354fce474df2",
+      "bytes": 16175
     },
     {
       "id": "coverage",
@@ -1784,6 +1784,13 @@
       "kind": "coverage",
       "sha256": "48da09330a838397de426b9f39bc399a9719d4f7763e39476b8e37f0bba2dc20",
       "bytes": 22374
+    },
+    {
+      "id": "common-types",
+      "path": "types.schema.json",
+      "kind": "config",
+      "bytes": 2755,
+      "sha256": "a9d331a9169b1e4409435a74b99a01affeb2763917babfad0afb57b5b8e8af3e"
     }
   ],
   "credentials": [

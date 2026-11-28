@@ -291,7 +291,13 @@ func (f *Follower) awaitReply(chainsync.CallbackContext) error {
 
 // Finish stops the connection and drains observations while the caller consumes Events.
 func (f *Follower) Finish(ctx context.Context) (ObservationStats, error) {
+	chainProtocol := f.conn.ChainSync().Client.ProtocolInstance()
+	bodyProtocol := f.conn.BlockFetch().Client.ProtocolInstance()
 	err := lifecycle.Close(ctx, f.conn)
+	if waitErr := waitProtocols(ctx, chainProtocol, bodyProtocol); waitErr != nil {
+		f.events.close()
+		return f.events.stats(), errors.Join(err, waitErr, ErrIncompleteObservations)
+	}
 	select {
 	case <-f.watchDone:
 	case <-ctx.Done():

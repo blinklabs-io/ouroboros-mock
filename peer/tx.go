@@ -30,6 +30,12 @@ const (
 	maxRetainedTxBytes = 4 << 20
 )
 
+// TxRef is the complete transaction-submission wire identity.
+type TxRef struct {
+	EraId uint16
+	ID    [32]byte
+}
+
 // Tx is a transaction a peer offers or has received.
 type Tx struct {
 	// EraId is the tx-submission era index of the transaction.
@@ -134,9 +140,11 @@ func (r *relay) run(server *txsubmission.Server) {
 		}
 		offeredAt := time.Now()
 		offered := make([][32]byte, 0, len(ids))
+		refs := make([]TxRef, 0, len(ids))
 		want := make([]txsubmission.TxId, 0, len(ids))
 		for _, id := range ids {
 			offered = append(offered, id.TxId.TxId)
+			refs = append(refs, TxRef{EraId: id.TxId.EraId, ID: id.TxId.TxId})
 			want = append(want, id.TxId)
 		}
 		r.events.publish(Event{
@@ -147,10 +155,11 @@ func (r *relay) run(server *txsubmission.Server) {
 			Request:    request,
 			Connection: r.connection,
 			TxIds:      offered,
+			TxRefs:     refs,
 		})
 		bodies, err := server.RequestTxs(want)
 		if err != nil {
-			r.events.publish(Event{Kind: EventTxReceiveFailed, OccurredAt: time.Now(), Session: r.session, Connection: r.connection, Request: request, TxIds: offered, Err: err})
+			r.events.publish(Event{Kind: EventTxReceiveFailed, Count: uint64(len(offered)), OccurredAt: time.Now(), Session: r.session, Connection: r.connection, Request: request, TxIds: offered, TxRefs: refs, Err: err})
 			return
 		}
 		receivedAt := time.Now()

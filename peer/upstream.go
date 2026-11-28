@@ -67,6 +67,10 @@ type Upstream struct {
 	// retiredRelays tracks close order for constant-time history eviction.
 	retiredRelays *list.List
 	wg            sync.WaitGroup
+	updates       sync.WaitGroup
+	stopOnce      sync.Once
+	stopDone      chan struct{}
+	stopErr       error
 }
 
 // NewUpstream returns an Upstream serving cfg.Blocks. Release it with
@@ -81,6 +85,7 @@ func NewUpstream(cfg UpstreamConfig) (*Upstream, error) {
 	}
 	return &Upstream{
 		cfg:           cfg,
+		stopDone:      make(chan struct{}),
 		chain:         chain,
 		events:        newEventStream(),
 		sessions:      make(map[uint64]*session),
@@ -121,7 +126,9 @@ func (u *Upstream) Append(blocks ...ledger.Block) error {
 		return err
 	}
 	sessions := u.sessionsLocked()
+	u.updates.Add(1)
 	u.mu.Unlock()
+	defer u.updates.Done()
 	wakeSessions(sessions)
 	return nil
 }
@@ -142,7 +149,9 @@ func (u *Upstream) SwitchFork(fork []ledger.Block) (pcommon.Point, error) {
 		return pcommon.Point{}, err
 	}
 	sessions := u.sessionsLocked()
+	u.updates.Add(1)
 	u.mu.Unlock()
+	defer u.updates.Done()
 	wakeSessions(sessions)
 	return point, nil
 }
@@ -205,6 +214,7 @@ func (u *Upstream) ServeContext(ctx context.Context, conn net.Conn) error {
 	if u.closed {
 		u.mu.Unlock()
 		_ = lifecycle.Close(ctx, oConn)
+		_ = waitServerProtocols(context.WithoutCancel(ctx), oConn)
 		return ErrClosed
 	}
 	s.conn = oConn
@@ -214,7 +224,7 @@ func (u *Upstream) ServeContext(ctx context.Context, conn net.Conn) error {
 	s.relay.attach(oConn.TxSubmission().Server)
 
 	u.events.publish(Event{Kind: EventSessionStarted, Session: s.id, Connection: s.connection})
-	go s.watch()
+	go s.watch(context.WithoutCancel(ctx))
 	return nil
 }
 
@@ -308,33 +318,37 @@ func (u *Upstream) RelayedTxs() []Tx {
 }
 
 func (u *Upstream) stop(ctx context.Context) error {
-	u.mu.Lock()
-	if u.closed {
+	u.stopOnce.Do(func() {
+		u.mu.Lock()
+		u.closed = true
+		listeners := u.listeners
+		sessions := u.sessionsLocked()
+		negotiating := make([]net.Conn, 0, len(u.handshaking))
+		for c := range u.handshaking {
+			negotiating = append(negotiating, c)
+		}
 		u.mu.Unlock()
-		return nil
+		go func() {
+			for _, l := range listeners {
+				_ = l.Close()
+			}
+			for _, c := range negotiating {
+				_ = c.Close()
+			}
+			for _, s := range sessions {
+				u.stopErr = errors.Join(u.stopErr, lifecycle.Close(context.WithoutCancel(ctx), s.conn))
+			}
+			u.updates.Wait()
+			u.wg.Wait()
+			close(u.stopDone)
+		}()
+	})
+	select {
+	case <-u.stopDone:
+		return errors.Join(u.stopErr, ctx.Err())
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	u.closed = true
-	listeners := u.listeners
-	sessions := make([]*session, 0, len(u.sessions))
-	for _, s := range u.sessions {
-		sessions = append(sessions, s)
-	}
-	negotiating := make([]net.Conn, 0, len(u.handshaking))
-	for c := range u.handshaking {
-		negotiating = append(negotiating, c)
-	}
-	u.mu.Unlock()
-	for _, l := range listeners {
-		_ = l.Close()
-	}
-	for _, c := range negotiating {
-		_ = c.Close()
-	}
-	for _, s := range sessions {
-		_ = lifecycle.Close(ctx, s.conn)
-	}
-	u.wg.Wait()
-	return nil
 }
 
 func (u *Upstream) sessionsLocked() []*session {
@@ -380,7 +394,10 @@ func (u *Upstream) Close() error {
 // Finish quiesces connections and drains observations while Events is consumed.
 func (u *Upstream) Finish(ctx context.Context) (ObservationStats, error) {
 	err := u.stop(ctx)
-	u.wg.Wait()
+	if err != nil {
+		u.events.close()
+		return u.events.stats(), errors.Join(err, ErrIncompleteObservations)
+	}
 	stats, drainErr := u.events.finish(ctx)
 	return stats, errors.Join(err, drainErr)
 }
