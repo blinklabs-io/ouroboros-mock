@@ -1782,8 +1782,8 @@
       "id": "coverage",
       "path": "coverage.json",
       "kind": "coverage",
-      "sha256": "48da09330a838397de426b9f39bc399a9719d4f7763e39476b8e37f0bba2dc20",
-      "bytes": 22374
+      "sha256": "c12966baba29ceb87162c2f69ab42859426f2968bb35f4b5ee8e79f19d019a0e",
+      "bytes": 23999
     },
     {
       "id": "common-types",

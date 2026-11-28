@@ -80,3 +80,43 @@ func TestBenchmarkStreamsRestoreSharedFlagsOnlyAfterBothClose(t *testing.T) {
 	require.NoError(t, output.Close())
 	require.Equal(t, before, flags())
 }
+
+func descriptorFlags(t *testing.T, file *os.File) uintptr {
+	t.Helper()
+	raw, err := file.SyscallConn()
+	require.NoError(t, err)
+	var result uintptr
+	require.NoError(t, raw.Control(func(fd uintptr) {
+		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
+		require.Zero(t, errno)
+		result = flags
+	}))
+	return result
+}
+
+func TestBenchmarkRejectsUnpollableStreamsAndRestoresFlags(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+	file, err := os.CreateTemp(t.TempDir(), "unpollable")
+	require.NoError(t, err)
+	defer file.Close()
+	raw, err := r.SyscallConn()
+	require.NoError(t, err)
+	require.NoError(t, raw.Control(func(fd uintptr) { require.NoError(t, syscall.SetNonblock(int(fd), false)) }))
+	inputFlags, outputFlags := descriptorFlags(t, r), descriptorFlags(t, file)
+	streams, err := ownBenchmarkStreams(r, file)
+	defer func() {
+		for _, stream := range streams {
+			_ = stream.Close()
+		}
+	}()
+	require.Nil(t, streams)
+	require.ErrorContains(t, err, "support polling")
+	require.Equal(t, inputFlags, descriptorFlags(t, r))
+	require.Equal(t, outputFlags, descriptorFlags(t, file))
+	_, err = ownBenchmarkStreams(file)
+	require.ErrorContains(t, err, "support polling")
+	require.Equal(t, outputFlags, descriptorFlags(t, file))
+}

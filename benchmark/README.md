@@ -190,3 +190,17 @@ same-generation ledger size/density. Lost records, writer failure, absent final
 records, restart boundaries, clock uncertainty, sampler overruns and checker
 panics are explicit invalid cases. Resource and timing values from an actual
 run must be measured afresh rather than copied from these goldens.
+
+The controller supplies pollable stdin/stdout pipes or sockets and owns durable
+record-file writes. The executable rejects nonpollable streams so cancellation
+can interrupt I/O. Stream ownership transfers when `Serve` is called, including
+option-validation failures. A start whose window has already ended is invalid;
+future starts and late starts with time remaining are accepted. Successful
+action timestamps identify the peer call after artifact preparation; failed
+preparation records identify the attempted action and its error.
+
+Observable coverage comes from schema-validated canonical records with bound
+expected namespace populations. `metric_cases` links each observable to its
+calculation goldens; a shared metric family does not establish presence of an
+individual observable. The JSON Schema validator loads only declared,
+checksummed corpus resources and never fetches a schema from the network.

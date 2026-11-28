@@ -8,10 +8,13 @@
       "boundary": "Complete successful body receive and decode before ledger delivery",
       "native_meaning": "Raw arrival, failed decode and downstream span end are not completion",
       "cases": [
-        "metric-12",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "decode-failure"
+      ],
+      "metric_cases": [
+        "metric-12"
       ]
     },
     {
@@ -21,9 +24,12 @@
       "boundary": "Start of the actual source connection write for the request",
       "native_meaning": "API admission/enqueue and physical NIC departure are different boundaries",
       "cases": [
-        "metric-11",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-11"
       ]
     },
     {
@@ -33,9 +39,12 @@
       "boundary": "Per-block source body-send-call start, with eventual call result",
       "native_meaning": "Do not substitute end of the whole batch or peer receipt",
       "cases": [
-        "metric-09",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-09"
       ]
     },
     {
@@ -45,10 +54,13 @@
       "boundary": "Authoritative validated selected-chain extension; applied publication retains its own authority/time",
       "native_meaning": "Shared commit-chunk publication is not each block independent validation duration",
       "cases": [
-        "metric-14",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "batch-publication"
+      ],
+      "metric_cases": [
+        "metric-14"
       ]
     },
     {
@@ -58,10 +70,13 @@
       "boundary": "Successful preferred-branch installation/publication",
       "native_meaning": "Candidate detection, preferred peer change and rollback start are not successful replacement",
       "cases": [
-        "metric-14",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "fork-reinclusion"
+      ],
+      "metric_cases": [
+        "metric-14"
       ]
     },
     {
@@ -71,9 +86,12 @@
       "boundary": "Successful local snapshot write after its promised artifact finalization",
       "native_meaning": "Scheduling/no-op/retry/upload/prune spans do not count as completed local writes",
       "cases": [
-        "metric-17",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-17"
       ]
     },
     {
@@ -83,9 +101,12 @@
       "boundary": "Decoded-header ingress before downstream validation/admission",
       "native_meaning": "Preserve duplicate notices and each peer; analysis selects first notice",
       "cases": [
-        "metric-10",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-10"
       ]
     },
     {
@@ -95,10 +116,13 @@
       "boundary": "Before actual header/rollback send, including immediate and post-AwaitReply paths",
       "native_meaning": "Identify the transmitted point rather than the server tip; distinguish waited announcements from catch-up",
       "cases": [
-        "metric-09",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "actual-header-not-tip"
+      ],
+      "metric_cases": [
+        "metric-09"
       ]
     },
     {
@@ -108,9 +132,12 @@
       "boundary": "Successful own-block adoption at its source authority",
       "native_meaning": "Keep signing, publication notification and applied adoption distinct",
       "cases": [
-        "metric-09",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-09"
       ]
     },
     {
@@ -120,9 +147,12 @@
       "boundary": "Actual parent/context acquisition for the attempt, including re-resolution",
       "native_meaning": "Do not backdate final context into an earlier reference stage",
       "cases": [
-        "metric-02",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-02"
       ]
     },
     {
@@ -132,9 +162,12 @@
       "boundary": "Actual completed native state advance with documented correspondence",
       "native_meaning": "Integrated or differently ordered work is not a fictitious post-decision reference interval",
       "cases": [
-        "metric-06",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-06"
       ]
     },
     {
@@ -144,10 +177,13 @@
       "boundary": "Successful signed construction completed before admission",
       "native_meaning": "Retain signed candidates even when subsequent selection/adoption loses",
       "cases": [
-        "metric-08",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "losing-signed-candidate"
+      ],
+      "metric_cases": [
+        "metric-08"
       ]
     },
     {
@@ -157,9 +193,12 @@
       "boundary": "Consistent transaction snapshot acquisition, distinct from selection/revalidation/retry",
       "native_meaning": "Retain discarded/rebuilt attempts; the entire build interval is not snapshotting",
       "cases": [
-        "metric-07",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-07"
       ]
     },
     {
@@ -169,9 +208,12 @@
       "boundary": "Actual consistent ledger/build-view acquisition",
       "native_meaning": "A nonleader path need not acquire a view simply to manufacture a phase",
       "cases": [
-        "metric-03",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-03"
       ]
     },
     {
@@ -181,9 +223,12 @@
       "boundary": "Actual native forecast/leadership-input preparation interval",
       "native_meaning": "Record cache/precomputation at its real time, not synthetic work in the current slot",
       "cases": [
-        "metric-04",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-04"
       ]
     },
     {
@@ -193,9 +238,12 @@
       "boundary": "Actual completed positive leader decision before later gates",
       "native_meaning": "Retain attempt/pool/generation and actual decision completion",
       "cases": [
-        "metric-05",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-05"
       ]
     },
     {
@@ -205,11 +253,14 @@
       "boundary": "Actual completed negative leader decision",
       "native_meaning": "Checker panic, unavailable state or early refusal is not an ordinary nonleader decision",
       "cases": [
-        "metric-05",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "nonleader",
         "leader-check-panic"
+      ],
+      "metric_cases": [
+        "metric-05"
       ]
     },
     {
@@ -219,9 +270,12 @@
       "boundary": "Entry to every actual slot attempt, including later refusal/error",
       "native_meaning": "Never substitute a future leader schedule for executed work",
       "cases": [
-        "metric-01",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-01"
       ]
     },
     {
@@ -231,9 +285,12 @@
       "boundary": "Same published state/generation for cardinality, density and slot",
       "native_meaning": "Preserve selected-fragment window/fallback provenance and rollback/epoch semantics",
       "cases": [
-        "metric-23",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-23"
       ]
     },
     {
@@ -243,9 +300,12 @@
       "boundary": "Successful addition under mutation authority",
       "native_meaning": "Retained overlay/capacity memory is a separate native byte measure; duplicates do not add occupancy",
       "cases": [
-        "metric-22",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-22"
       ]
     },
     {
@@ -255,9 +315,12 @@
       "boundary": "Actual mempool validation rejection",
       "native_meaning": "Capacity, duplicate, transient, infrastructure and transport outcomes retain distinct causes",
       "cases": [
-        "metric-22",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-22"
       ]
     },
     {
@@ -267,10 +330,13 @@
       "boundary": "Actual removal mutation caused by inclusion/conflicting ledger invalidation",
       "native_meaning": "Expiry/capacity eviction remain separately classified native causes",
       "cases": [
-        "metric-22",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "mempool-removal-causes"
+      ],
+      "metric_cases": [
+        "metric-22"
       ]
     },
     {
@@ -280,11 +346,14 @@
       "boundary": "Sample the actual node process at 1000 ms plus or minus 10 percent; retain actual measurement time/process generation",
       "native_meaning": "Go heap/goroutines/threads-created are not RSS/current OS threads",
       "cases": [
-        "metric-15",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "sampler-deadline",
         "process-restart"
+      ],
+      "metric_cases": [
+        "metric-15"
       ]
     },
     {
@@ -294,9 +363,12 @@
       "boundary": "Actual group handed to admission before processing",
       "native_meaning": "A transport reply and a retried admission attempt are not automatically a new input group",
       "cases": [
-        "metric-19",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization"
+      ],
+      "metric_cases": [
+        "metric-19"
       ]
     },
     {
@@ -306,13 +378,16 @@
       "boundary": "Terminal completion/cancellation of the declared submitted group",
       "native_meaning": "Common accepted counts newly added transactions only; duplicate/already-known transactions count among not-added/rejected. Preserve native nil returns separately; rejected equals submitted minus newly added.",
       "cases": [
-        "metric-19",
+        "canonical-observables",
         "lost-observations",
         "missing-finalization",
         "missing-batch-start",
         "duplicate-batch-start",
         "peer-and-batch-pairing",
         "intake-count-mismatch"
+      ],
+      "metric_cases": [
+        "metric-19"
       ]
     }
   ],

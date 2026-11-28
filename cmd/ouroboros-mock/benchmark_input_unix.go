@@ -18,10 +18,12 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
 	"syscall"
+	"time"
 )
 
 type descriptorState struct {
@@ -108,6 +110,23 @@ func ownBenchmarkStreams(files ...*os.File) ([]*controlInput, error) {
 				return
 			}
 			file = os.NewFile(uintptr(fd), "benchmark stream")
+			if file == nil {
+				_ = syscall.Close(fd)
+				setupErr = errors.New("benchmark stream descriptor is invalid")
+				return
+			}
+			info, statErr := file.Stat()
+			if statErr != nil || info.Mode().IsRegular() {
+				_ = file.Close()
+				file = nil
+				setupErr = errors.Join(errors.New("benchmark stream must support polling; regular files are unsupported"), statErr)
+				return
+			}
+			if err = file.SetDeadline(time.Time{}); err != nil {
+				_ = file.Close()
+				file = nil
+				setupErr = fmt.Errorf("benchmark stream must support polling: %w", err)
+			}
 		})
 		if err = errors.Join(err, setupErr); err != nil {
 			for _, stream := range streams {

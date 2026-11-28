@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	pcommon "github.com/blinklabs-io/gouroboros/protocol/common"
@@ -75,6 +76,7 @@ type runHandle struct {
 	records chan Record
 	done    chan error
 	cancel  context.CancelFunc
+	runCtx  context.Context
 }
 
 func startTestRun(t *testing.T, requirements []Requirement, failKind string) *runHandle {
@@ -455,7 +457,8 @@ func controlledRun(t *testing.T, p *controlledPeer, fetch interface {
 	r := &runHandle{input: control, records: make(chan Record, 100), done: make(chan error, 1), cancel: cancel}
 	w := &recordWriter{records: r.records, closed: make(chan struct{})}
 	go func() {
-		r.done <- serve(ctx, b, Options{Run: "trial"}, input, w, func(_ context.Context, _ *Bundle, role Role, _ string) (*activeRole, error) {
+		r.done <- serve(ctx, b, Options{Run: "trial"}, input, w, func(runCtx context.Context, _ *Bundle, role Role, _ string) (*activeRole, error) {
+			r.runCtx = runCtx
 			return &activeRole{definition: role, peer: p, fetcher: fetch, counts: map[string]eventCount{}}, nil
 		})
 		close(r.records)
@@ -477,8 +480,14 @@ func TestControlFailuresDuringDrainInvalidateFinal(t *testing.T) {
 			} else {
 				require.NoError(t, r.input.Close())
 			}
+			<-r.runCtx.Done()
 			close(p.release)
-			require.Error(t, <-r.done)
+			runErr := <-r.done
+			if mode == "eof" {
+				require.ErrorIs(t, runErr, io.EOF)
+			} else {
+				require.ErrorContains(t, runErr, "unexpected control: stop")
+			}
 			final := nextRecord(t, r, "final")
 			require.NotNil(t, final.Complete)
 			require.False(t, *final.Complete)
@@ -563,4 +572,131 @@ func TestServeReportsOutputCloseFailure(t *testing.T) {
 	nextRecord(t, r, "ready")
 	startTrial(t, r)
 	require.ErrorContains(t, <-r.done, "output close failed")
+}
+
+type countedInput struct {
+	io.Reader
+	closes int
+}
+
+func (r *countedInput) Close() error { r.closes++; return nil }
+
+type countedOutput struct {
+	bytes.Buffer
+	closes int
+}
+
+func (w *countedOutput) Close() error { w.closes++; return nil }
+
+func TestServeClosesOwnedStreamsOnInvalidOptions(t *testing.T) {
+	b, err := Load("testdata/reference/upstream.json")
+	require.NoError(t, err)
+	for _, options := range []Options{{}, {Run: "trial", Endpoints: map[string]string{"absent": "127.0.0.1:0"}}} {
+		input := &countedInput{Reader: strings.NewReader("")}
+		output := &countedOutput{}
+		require.Error(t, Serve(t.Context(), b, options, input, output))
+		require.Equal(t, 1, input.closes)
+		require.Equal(t, 1, output.closes)
+	}
+}
+
+func TestTrialStartRequiresTimeRemaining(t *testing.T) {
+	for _, mode := range []string{"expired", "future", "late"} {
+		t.Run(mode, func(t *testing.T) {
+			r := startTestRun(t, []Requirement{}, "")
+			nextRecord(t, r, "ready")
+			start := time.Now().Add(-time.Millisecond)
+			if mode == "expired" {
+				start = time.Now().Add(-time.Second)
+			} else if mode == "future" {
+				start = time.Now().Add(10 * time.Millisecond)
+			}
+			require.NoError(t, json.NewEncoder(r.input).Encode(Control{Version: 1, Kind: "start", Run: "trial", Start: start}))
+			err := <-r.done
+			if mode == "expired" {
+				require.ErrorContains(t, err, "trial window has already ended")
+			} else {
+				require.NoError(t, err)
+			}
+			started := false
+			for row := range r.records {
+				if row.Kind == "started" {
+					started = true
+				}
+				if row.Kind == "final" {
+					require.Equal(t, mode != "expired", *row.Complete)
+				}
+			}
+			require.Equal(t, mode != "expired", started)
+		})
+	}
+}
+
+type actionTarget struct{ calls int }
+
+func (a *actionTarget) Offer(...peer.Tx)             { a.calls++ }
+func (a *actionTarget) Append(...ledger.Block) error { a.calls++; return nil }
+func (a *actionTarget) SwitchFork([]ledger.Block) (pcommon.Point, error) {
+	a.calls++
+	return pcommon.NewPointOrigin(), nil
+}
+
+func (a *actionTarget) Request(context.Context, pcommon.Point, pcommon.Point) (uint64, error) {
+	a.calls++
+	return 7, nil
+}
+
+func TestActionCancellationDuringPreparationDoesNotCallPeer(t *testing.T) {
+	b, err := Load("testdata/reference/upstream.json")
+	require.NoError(t, err)
+	txID := ""
+	for _, a := range b.manifest.Artifacts {
+		if a.Kind == "transaction" {
+			txID = a.ID
+			break
+		}
+	}
+	require.NotEmpty(t, txID)
+	for _, kind := range []string{"offer", "append", "fork", "fetch"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			target := &actionTarget{}
+			action := Action{Kind: kind, Items: []string{"b1-000"}}
+			if kind == "offer" {
+				action.Items = []string{txID}
+			}
+			if kind == "fetch" {
+				action.Items = append(action.Items, action.Items[0])
+			}
+			prepared := false
+			txs := func(ids []string) ([]peer.Tx, error) {
+				result, err := b.Transactions(ids)
+				prepared = true
+				cancel()
+				return result, err
+			}
+			blocks := func(ids []string) ([]ledger.Block, error) {
+				result, err := b.Blocks(ids)
+				prepared = true
+				cancel()
+				return result, err
+			}
+			_, at, err := performLoaded(ctx, &activeRole{tx: target, upstream: target, fetcher: target}, action, txs, blocks)
+			require.True(t, prepared)
+			require.ErrorIs(t, err, context.Canceled)
+			require.True(t, at.IsZero())
+			require.Zero(t, target.calls)
+		})
+	}
+	target := &actionTarget{}
+	var preparedAt time.Time
+	_, at, err := performLoaded(t.Context(), &activeRole{tx: target}, Action{Kind: "offer", Items: []string{txID}}, func(ids []string) ([]peer.Tx, error) {
+		result, err := b.Transactions(ids)
+		preparedAt = time.Now()
+		return result, err
+	}, b.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, 1, target.calls)
+	require.False(t, at.Before(preparedAt))
 }

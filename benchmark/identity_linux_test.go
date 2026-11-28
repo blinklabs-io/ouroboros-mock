@@ -62,6 +62,13 @@ func TestIdentityHashesRunningImageAfterPathReplacement(t *testing.T) {
 	require.NoError(t, err)
 	cmd.Stderr = os.Stderr
 	require.NoError(t, cmd.Start())
+	waited := false
+	t.Cleanup(func() {
+		if !waited {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
 	scanner := bufio.NewScanner(output)
 	require.True(t, scanner.Scan())
 	require.Equal(t, "ready", scanner.Text())
@@ -76,7 +83,9 @@ func TestIdentityHashesRunningImageAfterPathReplacement(t *testing.T) {
 	require.NoError(t, json.Unmarshal(scanner.Bytes(), &id))
 	require.False(t, scanner.Scan())
 	require.NoError(t, scanner.Err())
-	require.NoError(t, cmd.Wait())
+	waitErr := cmd.Wait()
+	waited = true
+	require.NoError(t, waitErr)
 	sum := sha256.Sum256(data)
 	require.Equal(t, hex.EncodeToString(sum[:]), id.SHA256)
 	require.Equal(t, "running-image", id.Source)

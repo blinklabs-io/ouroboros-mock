@@ -117,6 +117,11 @@ func (b *Bundle) validate() error {
 	if err := b.validateDependencies(); err != nil {
 		return err
 	}
+	coverage, err := b.prepareCoverage()
+	if err != nil {
+		return err
+	}
+	b.coverage = coverage
 	oracles := map[string]Oracle{}
 	for _, o := range m.Oracles {
 		if !name(o.ID) || !name(o.Version) || !name(o.Source) || len(o.Inputs) == 0 || !oneOf(o.Tool, "cardano-node", "cardano-cli", "cardano-ledger", "cardano-blueprint", "manual") {
@@ -195,27 +200,7 @@ func (b *Bundle) validate() error {
 	if len(cases) == 0 {
 		return errors.New("empty selected case set")
 	}
-	if err := b.require([]string{m.Coverage}, "coverage"); err != nil {
-		return err
-	}
-	raw, err := b.Read(m.Coverage)
-	if err != nil {
-		return err
-	}
-	var coverage Coverage
-	if err = decodeJSON(raw, &coverage); err != nil {
-		return err
-	}
 	if err = coverage.validate(b.caseInfo); err != nil {
-		return err
-	}
-	if err = b.require([]string{coverage.Schema, coverage.Envelope}, "config"); err != nil {
-		return err
-	}
-	if err = b.require([]string{coverage.Examples}, "golden"); err != nil {
-		return err
-	}
-	if err = b.validateSchemaReferences(coverage.Schema, coverage.Envelope); err != nil {
 		return err
 	}
 	schemaBytes, err := b.Read(coverage.Schema)

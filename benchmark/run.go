@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/ouroboros-mock/peer"
@@ -58,9 +59,12 @@ type activeRole struct {
 	definition Role
 	peer       observedPeer
 	endpoint   string
-	upstream   *peer.Upstream
-	tx         *peer.TxPeer
-	fetcher    interface {
+	upstream   interface {
+		Append(...ledger.Block) error
+		SwitchFork([]ledger.Block) (common.Point, error)
+	}
+	tx      interface{ Offer(...peer.Tx) }
+	fetcher interface {
 		Request(context.Context, common.Point, common.Point) (uint64, error)
 	}
 }
@@ -137,8 +141,8 @@ func startRole(ctx context.Context, b *Bundle, r Role, endpoint string) (*active
 	case "follower":
 		a.peer, err = peer.NewFollowerContext(ctx, peer.FollowerConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic, KeepAlive: true})
 	case "txpeer":
-		a.tx, err = peer.NewTxPeer(peer.TxPeerConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic, KeepAlive: true})
-		a.peer = a.tx
+		tx, txErr := peer.NewTxPeer(peer.TxPeerConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic, KeepAlive: true})
+		a.tx, a.peer, err = tx, tx, txErr
 	case "fetcher":
 		fetcher, fetchErr := peer.NewFetcher(peer.FetcherConfig{Conn: conn, NetworkMagic: b.manifest.Network.Magic})
 		a.fetcher, a.peer, err = fetcher, fetcher, fetchErr
@@ -221,6 +225,17 @@ func (b *drainBudget) begin(ctx context.Context, out *output) context.Context {
 	return b.ctx
 }
 
+type ownedControls struct {
+	io.ReadCloser
+	once sync.Once
+	err  error
+}
+
+func (r *ownedControls) Close() error {
+	r.once.Do(func() { r.err = r.ReadCloser.Close() })
+	return r.err
+}
+
 // Serve runs real peer roles, accepting bounded JSON-line start/stop controls.
 // Serve owns both streams. Their Close methods must interrupt pending I/O.
 // Required populations cover the complete capture, including startup and drain;
@@ -230,6 +245,11 @@ func Serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 }
 
 func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser, w io.WriteCloser, starter func(context.Context, *Bundle, Role, string) (*activeRole, error)) (resultErr error) {
+	controls = &ownedControls{ReadCloser: controls}
+	defer func() { resultErr = errors.Join(resultErr, controls.Close()) }()
+	out := &output{enc: json.NewEncoder(w), closer: w, run: opts.Run, experiment: b.manifest.ID}
+	defer func() { resultErr = errors.Join(resultErr, out.close()) }()
+
 	if !name(opts.Run) {
 		return errors.New("run identity required")
 	}
@@ -244,8 +264,6 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 	}
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	out := &output{enc: json.NewEncoder(w), closer: w, run: opts.Run, experiment: b.manifest.ID}
-	defer func() { resultErr = errors.Join(resultErr, out.close()) }()
 	budget := &drainBudget{}
 	beginCleanup := func() { budget.begin(ctx, out) }
 	stopParent := context.AfterFunc(ctx, beginCleanup)
@@ -254,13 +272,13 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 	starts := make(chan commandResult, 1)
 	readerCtx, stopReader := context.WithCancel(context.WithoutCancel(ctx))
 	readerDone, monitorDone := make(chan struct{}), make(chan struct{})
-	var inputClosing atomic.Int64
+	var inputClosing atomic.Pointer[time.Time]
 	go func() { defer close(readerDone); defer close(commands); readControls(readerCtx, controls, commands) }()
 	go func() {
 		defer close(monitorDone)
 		started := false
 		for command := range commands {
-			if closing := inputClosing.Load(); closing != 0 && command.observed.UnixNano() > closing {
+			if closing := inputClosing.Load(); closing != nil && command.observed.After(*closing) {
 				continue
 			}
 			if !started && command.err == nil && command.control.Kind == "start" && command.control.Run == opts.Run && !command.control.Start.IsZero() {
@@ -279,11 +297,12 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 	active := make(map[string]*activeRole, len(b.manifest.Roles))
 	ordered := make([]*activeRole, 0, len(b.manifest.Roles))
 	var collectors sync.WaitGroup
-	var quiesceAt atomic.Int64
+	var quiesceAt atomic.Pointer[time.Time]
 	defer func() {
 		cleanupCtx := budget.begin(ctx, out)
 		defer func() { budget.stopOutputAbort(); budget.cancel() }()
-		quiesceAt.Store(time.Now().UnixNano())
+		quiescing := time.Now()
+		quiesceAt.Store(&quiescing)
 		statsByRole := make(map[string]peer.ObservationStats, len(ordered))
 		for _, a := range ordered {
 			stats, err := a.peer.Finish(cleanupCtx)
@@ -301,7 +320,8 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 				}
 			}
 		}
-		inputClosing.Store(time.Now().UnixNano())
+		closing := time.Now()
+		inputClosing.Store(&closing)
 		resultErr = errors.Join(resultErr, controls.Close())
 		stopReader()
 		<-readerDone
@@ -347,7 +367,7 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 					err = errors.Join(err, fmt.Errorf("observation gap in %s: %d after %d", a.definition.ID, e.Sequence, previous))
 				}
 				previous = e.Sequence
-				if (e.Kind == peer.EventSessionClosed && (quiesceAt.Load() == 0 || e.OccurredAt.UnixNano() < quiesceAt.Load())) || (e.Err != nil && (e.Kind != peer.EventFetchCompleted || !errors.Is(e.Err, blockfetch.ErrNoBlocks))) {
+				if (e.Kind == peer.EventSessionClosed && (quiesceAt.Load() == nil || e.OccurredAt.Before(*quiesceAt.Load()))) || (e.Err != nil && (e.Kind != peer.EventFetchCompleted || !errors.Is(e.Err, blockfetch.ErrNoBlocks))) {
 					err = errors.Join(err, fmt.Errorf("peer operation ended: %s: %w", a.definition.ID, errors.Join(errors.New("session or operation failed"), e.Err)))
 				}
 				if err != nil && !reported {
@@ -369,6 +389,9 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 		start = command.control.Start
 	}
 	end := start.Add(time.Duration(b.manifest.DurationNS))
+	if !time.Now().Before(end) {
+		return errors.New("trial window has already ended")
+	}
 	endTimer := time.AfterFunc(time.Until(end), beginCleanup)
 	defer endTimer.Stop()
 	if err := out.write(Record{Kind: "started", At: stamp(start)}); err != nil {
@@ -401,7 +424,10 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 		if role == nil {
 			return fmt.Errorf("action %s has no active role", action.ID)
 		}
-		request, err := perform(actionCtx, b, role, action)
+		request, calledAt, err := perform(actionCtx, b, role, action)
+		if !calledAt.IsZero() {
+			at = calledAt
+		}
 		elapsed, scheduled := at.Sub(start).Nanoseconds(), action.AtNS
 		r := Record{Kind: "action", Role: action.Role, Action: action.ID, Request: request, At: stamp(at), ScheduledNS: &scheduled, ElapsedNS: &elapsed, Count: uint64(len(action.Items))}
 		if err != nil {
@@ -423,40 +449,68 @@ func serve(ctx context.Context, b *Bundle, opts Options, controls io.ReadCloser,
 	}
 }
 
-func perform(ctx context.Context, b *Bundle, a *activeRole, action Action) (uint64, error) {
+func perform(ctx context.Context, b *Bundle, a *activeRole, action Action) (uint64, time.Time, error) {
+	return performLoaded(ctx, a, action, b.Transactions, b.Blocks)
+}
+
+func actionCallTime(ctx context.Context) (time.Time, error) {
+	at := time.Now()
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return time.Time{}, err
+	}
+	if deadline, ok := ctx.Deadline(); ok && !at.Before(deadline) {
+		return time.Time{}, context.DeadlineExceeded
+	}
+	return at, nil
+}
+
+func performLoaded(ctx context.Context, a *activeRole, action Action, transactions func([]string) ([]peer.Tx, error), blocks func([]string) ([]ledger.Block, error)) (uint64, time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, time.Time{}, err
 	}
 	switch action.Kind {
 	case "offer":
-		txs, err := b.Transactions(action.Items)
+		txs, err := transactions(action.Items)
 		if err != nil {
-			return 0, err
+			return 0, time.Time{}, err
+		}
+		at, err := actionCallTime(ctx)
+		if err != nil {
+			return 0, time.Time{}, err
 		}
 		a.tx.Offer(txs...)
-		return 0, nil
+		return 0, at, nil
 	case "append", "fork":
-		blocks, err := b.Blocks(action.Items)
+		payload, err := blocks(action.Items)
 		if err != nil {
-			return 0, err
+			return 0, time.Time{}, err
+		}
+		at, err := actionCallTime(ctx)
+		if err != nil {
+			return 0, time.Time{}, err
 		}
 		if action.Kind == "append" {
-			return 0, a.upstream.Append(blocks...)
+			return 0, at, a.upstream.Append(payload...)
 		}
-		_, err = a.upstream.SwitchFork(blocks)
-		return 0, err
+		_, err = a.upstream.SwitchFork(payload)
+		return 0, at, err
 	case "fetch":
 		var points [2]common.Point
 		for i, id := range action.Items {
-			blocks, err := b.Blocks([]string{id})
+			payload, err := blocks([]string{id})
 			if err != nil {
-				return 0, err
+				return 0, time.Time{}, err
 			}
-			block := blocks[0]
+			block := payload[0]
 			points[i] = common.NewPoint(block.SlotNumber(), block.Hash().Bytes())
 		}
-		return a.fetcher.Request(ctx, points[0], points[1])
+		at, err := actionCallTime(ctx)
+		if err != nil {
+			return 0, time.Time{}, err
+		}
+		request, err := a.fetcher.Request(ctx, points[0], points[1])
+		return request, at, err
 	default:
-		return 0, fmt.Errorf("unsupported action %q", action.Kind)
+		return 0, time.Time{}, fmt.Errorf("unsupported action %q", action.Kind)
 	}
 }

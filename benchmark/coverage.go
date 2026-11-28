@@ -24,6 +24,8 @@ type Measurement struct {
 	Boundary      string   `json:"boundary"`
 	NativeMeaning string   `json:"native_meaning"`
 	Cases         []string `json:"cases"`
+	// MetricCases links calculation goldens without asserting observable presence.
+	MetricCases []string `json:"metric_cases,omitempty"`
 }
 
 // Coverage enumerates the complete common-observable and derived-family contract.
@@ -101,9 +103,10 @@ func (c Coverage) validate(cases map[string]caseCoverage) error {
 		return fmt.Errorf("unsupported coverage version %d", c.Version)
 	}
 	for _, group := range []struct {
-		got  []Measurement
-		want []string
-	}{{c.Observables, observableNames[:]}, {c.Derived, derivedNames[:]}} {
+		got         []Measurement
+		want        []string
+		observables bool
+	}{{c.Observables, observableNames[:], true}, {c.Derived, derivedNames[:], false}} {
 		if len(group.got) != len(group.want) {
 			return fmt.Errorf("incomplete measurement catalogue: got %d, need %d", len(group.got), len(group.want))
 		}
@@ -116,6 +119,21 @@ func (c Coverage) validate(cases map[string]caseCoverage) error {
 				return fmt.Errorf("invalid measurement definition %q", m.Name)
 			}
 			delete(required, m.Name)
+			if group.observables {
+				if len(m.MetricCases) == 0 {
+					return fmt.Errorf("observable %s lacks calculation cases", m.Name)
+				}
+				seenMetrics := map[string]bool{}
+				for _, id := range m.MetricCases {
+					info, ok := cases[id]
+					if !ok || seenMetrics[id] || !info.metricFor(m.Name) {
+						return fmt.Errorf("case %s does not calculate measurement %s", id, m.Name)
+					}
+					seenMetrics[id] = true
+				}
+			} else if len(m.MetricCases) > 0 {
+				return fmt.Errorf("derived measurement %s has unexpected observable associations", m.Name)
+			}
 			seen := map[string]bool{}
 			covered := false
 			for _, id := range m.Cases {

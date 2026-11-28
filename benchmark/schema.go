@@ -15,125 +15,73 @@
 package benchmark
 
 import (
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"net/url"
-	"path"
-	"strconv"
-	"strings"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// Resolve references only from declared, checksummed schema artifacts. Loading a
-// bundle must never fetch a remote schema or depend on undeclared adjacent files.
-func (b *Bundle) validateSchemaReferences(ids ...string) error {
-	byPath := map[string]string{}
+type corpusSchemas struct {
+	bundle    *Bundle
+	artifacts map[string]string
+}
+
+func schemaURL(path string) string {
+	return (&url.URL{Scheme: "https", Host: "benchmark.invalid", Path: "/" + path}).String()
+}
+
+// Load never accesses the network or undeclared adjacent files.
+func (l corpusSchemas) Load(location string) (any, error) {
+	id, ok := l.artifacts[location]
+	if !ok {
+		return nil, fmt.Errorf("undeclared schema resource %s", location)
+	}
+	raw, err := l.bundle.Read(id)
+	if err != nil {
+		return nil, err
+	}
+	if err = uniqueJSON(raw); err != nil {
+		return nil, err
+	}
+	return jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+}
+
+func (b *Bundle) prepareCoverage() (Coverage, error) {
+	var c Coverage
+	if err := b.require([]string{b.manifest.Coverage}, "coverage"); err != nil {
+		return c, err
+	}
+	raw, err := b.Read(b.manifest.Coverage)
+	if err != nil {
+		return c, err
+	}
+	if err = decodeJSON(raw, &c); err != nil {
+		return c, err
+	}
+	if err = b.require([]string{c.Schema, c.Envelope}, "config"); err != nil {
+		return c, err
+	}
+	if err = b.require([]string{c.Examples}, "golden"); err != nil {
+		return c, err
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.DefaultDraft(jsonschema.Draft2020)
+	compiler.AssertFormat()
+	loader := corpusSchemas{bundle: b, artifacts: map[string]string{}}
 	for id, a := range b.artifacts {
 		if a.Kind == "config" {
-			byPath[a.Path] = id
+			loader.artifacts[schemaURL(a.Path)] = id
 		}
 	}
-	documents := map[string]any{}
-	seen := map[string]bool{}
-	var visit func(string, any) error
-	load := func(id string) (any, error) {
-		if doc, ok := documents[id]; ok {
-			return doc, nil
-		}
-		raw, err := b.Read(id)
+	compiler.UseLoader(loader)
+	b.schemas = map[string]*jsonschema.Schema{}
+	for _, id := range []string{c.Schema, c.Envelope} {
+		schema, err := compiler.Compile(schemaURL(b.artifacts[id].Path))
 		if err != nil {
-			return nil, err
+			return c, fmt.Errorf("invalid or unresolved schema reference: %w", err)
 		}
-		if err = uniqueJSON(raw); err != nil {
-			return nil, err
-		}
-		var doc any
-		if err = json.Unmarshal(raw, &doc); err != nil {
-			return nil, err
-		}
-		documents[id] = doc
-		return doc, nil
+		b.schemas[id] = schema
 	}
-	visit = func(id string, node any) error {
-		switch v := node.(type) {
-		case map[string]any:
-			if raw, ok := v["$ref"]; ok {
-				ref, ok := raw.(string)
-				if !ok {
-					return fmt.Errorf("schema %s has non-string reference", id)
-				}
-				key := id + "#" + ref
-				if !seen[key] {
-					seen[key] = true
-					uri, err := url.Parse(ref)
-					if err != nil {
-						return err
-					}
-					if uri.IsAbs() || uri.Host != "" || uri.RawQuery != "" || strings.HasPrefix(uri.Path, "/") {
-						return fmt.Errorf("schema reference is not corpus-local: %s", ref)
-					}
-					targetID := id
-					if uri.Path != "" {
-						targetID = byPath[path.Join(path.Dir(b.artifacts[id].Path), uri.Path)]
-					}
-					if targetID == "" {
-						return fmt.Errorf("schema %s has undeclared reference %s", id, ref)
-					}
-					target, err := load(targetID)
-					if err != nil {
-						return err
-					}
-					if uri.Fragment != "" {
-						if !strings.HasPrefix(uri.Fragment, "/") {
-							return fmt.Errorf("unsupported schema anchor %s", ref)
-						}
-						for _, part := range strings.Split(uri.Fragment[1:], "/") {
-							part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
-							switch container := target.(type) {
-							case map[string]any:
-								target = container[part]
-							case []any:
-								index, err := strconv.Atoi(part)
-								if err != nil || index < 0 || index >= len(container) {
-									return fmt.Errorf("unresolved schema reference %s", ref)
-								}
-								target = container[index]
-							default:
-								return fmt.Errorf("unresolved schema reference %s", ref)
-							}
-						}
-					}
-					switch target.(type) {
-					case map[string]any, bool:
-					default:
-						return fmt.Errorf("unresolved schema reference %s", ref)
-					}
-					if err = visit(targetID, target); err != nil {
-						return err
-					}
-				}
-			}
-			for _, child := range v {
-				if err := visit(id, child); err != nil {
-					return err
-				}
-			}
-		case []any:
-			for _, child := range v {
-				if err := visit(id, child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	for _, id := range ids {
-		doc, err := load(id)
-		if err != nil {
-			return err
-		}
-		if err = visit(id, doc); err != nil {
-			return err
-		}
-	}
-	return nil
+	return c, nil
 }

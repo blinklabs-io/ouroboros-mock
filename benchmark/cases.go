@@ -15,16 +15,21 @@
 package benchmark
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type caseCoverage struct {
-	families map[string]bool
-	quality  bool
+	families    map[string]bool
+	observables map[string]bool
+	quality     bool
 }
 type evidenceCase struct {
 	Inputs         map[string]string `json:"inputs"`
@@ -68,11 +73,12 @@ var observableFamilies = map[string][]int{
 }
 
 func (c caseCoverage) supports(measurement string) bool {
-	if c.families[measurement] {
-		return true
-	}
-	for _, index := range observableFamilies[measurement] {
-		if c.families[derivedNames[index]] {
+	return c.families[measurement] || c.observables[measurement]
+}
+
+func (c caseCoverage) metricFor(observable string) bool {
+	for _, i := range observableFamilies[observable] {
+		if c.families[derivedNames[i]] {
 			return true
 		}
 	}
@@ -139,7 +145,11 @@ func (b *Bundle) validateEvidence(e Expectation, o Oracle, value json.RawMessage
 	if e.Kind != "metric" {
 		return caseCoverage{}, nil
 	}
-	support := caseCoverage{families: map[string]bool{}}
+	observables, err := b.observableEvidence(e, result)
+	if err != nil {
+		return caseCoverage{}, err
+	}
+	support := caseCoverage{families: map[string]bool{}, observables: observables}
 	for _, id := range e.Inputs {
 		if b.artifacts[id].Kind != "golden" {
 			continue
@@ -184,14 +194,8 @@ func (b *Bundle) validateEvidence(e Expectation, o Oracle, value json.RawMessage
 			if index < 0 {
 				return caseCoverage{}, fmt.Errorf("unknown metric family %s", family)
 			}
-			var status string
-			if err = json.Unmarshal(result["status"], &status); err != nil || status != "valid" {
-				return caseCoverage{}, fmt.Errorf("family %s lacks a positive expected result", family)
-			}
-			for _, field := range resultFields[index] {
-				if len(result[field]) == 0 {
-					return caseCoverage{}, fmt.Errorf("family %s lacks expected field %s", family, field)
-				}
+			if err = validateMetricResult(index, value); err != nil {
+				return caseCoverage{}, fmt.Errorf("family %s lacks a typed positive result: %w", family, err)
 			}
 			support.families[family] = true
 		}
@@ -243,4 +247,75 @@ func (b *Bundle) validateChainOutcome(e Expectation, result map[string]json.RawM
 		}
 	}
 	return nil
+}
+
+func (b *Bundle) observableEvidence(e Expectation, result map[string]json.RawMessage) (map[string]bool, error) {
+	support := map[string]bool{}
+	if _, present := result["counts"]; !present {
+		return support, nil
+	}
+	var counts map[string]uint64
+	var total uint64
+	var schema, envelope string
+	if json.Unmarshal(result["counts"], &counts) != nil || len(counts) == 0 || json.Unmarshal(result["total"], &total) != nil || total == 0 || json.Unmarshal(result["schema"], &schema) != nil || json.Unmarshal(result["envelope"], &envelope) != nil {
+		return nil, errors.New("incomplete observable outcome")
+	}
+	if schema != b.artifacts[b.coverage.Schema].Path || envelope != b.artifacts[b.coverage.Envelope].Path {
+		return nil, errors.New("observable outcome uses different schemas")
+	}
+	bound := false
+	for _, id := range e.Inputs {
+		bound = bound || id == b.coverage.Examples
+	}
+	if !bound {
+		return nil, errors.New("observable outcome must bind the canonical records")
+	}
+	raw, err := b.Read(b.coverage.Examples)
+	if err != nil {
+		return nil, err
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	actual := map[string]uint64{}
+	var observed uint64
+	for scanner.Scan() {
+		if err = uniqueJSON(scanner.Bytes()); err != nil {
+			return nil, err
+		}
+		instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(scanner.Bytes()))
+		if err != nil {
+			return nil, err
+		}
+		if err = b.schemas[b.coverage.Schema].Validate(instance); err != nil {
+			return nil, fmt.Errorf("canonical observable: %w", err)
+		}
+		object, ok := instance.(map[string]any)
+		if !ok {
+			return nil, errors.New("observable must be an object")
+		}
+		ns, ok := object["ns"].(string)
+		if !ok {
+			return nil, errors.New("observable namespace required")
+		}
+		actual[ns]++
+		observed++
+	}
+	if err = scanner.Err(); err != nil {
+		return nil, err
+	}
+	if total != observed || len(counts) != len(actual) {
+		return nil, errors.New("observable populations differ from expected")
+	}
+	for ns, count := range counts {
+		if count == 0 || count != actual[ns] {
+			return nil, fmt.Errorf("observable population differs for %s", ns)
+		}
+		for _, known := range observableNames {
+			if ns == known {
+				support[ns] = true
+				break
+			}
+		}
+	}
+	return support, nil
 }

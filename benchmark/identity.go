@@ -36,7 +36,7 @@ type Identity struct {
 	// GoVCSRevision and GoVCSModified are compiler-reported diagnostics. In a
 	// linked worktree they can describe an enclosing checkout, not this module.
 	GoVCSRevision string `json:"go_vcs_revision,omitempty"`
-	GoVCSModified bool   `json:"go_vcs_modified"`
+	GoVCSModified *bool  `json:"go_vcs_modified,omitempty"`
 }
 
 var processIdentity = sync.OnceValues(func() (Identity, error) {
@@ -65,18 +65,25 @@ var processIdentity = sync.OnceValues(func() (Identity, error) {
 		id.PathSHA256 = hex.EncodeToString(hash.Sum(nil))
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
-		id.ModulePath = info.Main.Path
-		id.ModuleVersion = info.Main.Version
-		for _, setting := range info.Settings {
-			switch setting.Key {
-			case "vcs.revision":
-				id.GoVCSRevision = setting.Value
-			case "vcs.modified":
-				id.GoVCSModified = setting.Value == "true"
-			}
-		}
+		addBuildInfo(&id, info)
 	}
 	return id, nil
 })
 
 func executableIdentity() (Identity, error) { return processIdentity() }
+
+func addBuildInfo(id *Identity, info *debug.BuildInfo) {
+	id.ModulePath = info.Main.Path
+	id.ModuleVersion = info.Main.Version
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			id.GoVCSRevision = setting.Value
+		case "vcs.modified":
+			if setting.Value == "true" || setting.Value == "false" {
+				modified := setting.Value == "true"
+				id.GoVCSModified = &modified
+			}
+		}
+	}
+}

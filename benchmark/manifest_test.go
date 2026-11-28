@@ -222,25 +222,19 @@ func TestCoverageRejectsUnrelatedAndQualityOnlyGoldens(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := b.Read(b.manifest.Coverage)
 	require.NoError(t, err)
-	for _, id := range []string{"snapshot-count", "source-loss"} {
-		// Pick actual positive and quality cases rather than inventing missing IDs.
-		for candidate, info := range b.caseInfo {
-			if id == "snapshot-count" && info.supports("Snapshot count") {
-				id = candidate
-				break
-			}
-			if id == "source-loss" && info.quality {
-				id = candidate
-				break
-			}
-		}
-		var c Coverage
-		require.NoError(t, decodeJSON(raw, &c))
-		for i := range c.Derived {
-			c.Derived[i].Cases = []string{id}
-		}
-		require.Error(t, c.validate(b.caseInfo))
-	}
+	snapshot, ok := b.caseInfo["metric-16"]
+	require.True(t, ok)
+	require.True(t, snapshot.families["Snapshot count"])
+	quality, ok := b.caseInfo["lost-observations"]
+	require.True(t, ok)
+	require.True(t, quality.quality)
+	var c Coverage
+	require.NoError(t, decodeJSON(raw, &c))
+	c.Derived[0].Cases = []string{"metric-16"}
+	require.ErrorContains(t, c.validate(b.caseInfo), "case metric-16 does not cover measurement Forge-loop tardiness")
+	require.NoError(t, decodeJSON(raw, &c))
+	c.Derived[0].Cases = []string{"lost-observations"}
+	require.ErrorContains(t, c.validate(b.caseInfo), "measurement Forge-loop tardiness has no matching positive golden")
 }
 
 func TestStrictJSONRejectsDuplicateKeys(t *testing.T) {
@@ -261,7 +255,7 @@ func TestStrictJSONRejectsDuplicateKeys(t *testing.T) {
 }
 
 func TestConsensusNeedsBlocksTypedOutcomeAndMatchingEvidence(t *testing.T) {
-	for _, mode := range []string{"config only", "boolean outcome", "unbound outcome", "missing evidence"} {
+	for _, mode := range []string{"config only", "boolean outcome", "unbound outcome", "empty branches", "missing evidence"} {
 		t.Run(mode, func(t *testing.T) {
 			path, m := mutableCorpus(t)
 			for i, e := range m.Expectations {
@@ -271,7 +265,7 @@ func TestConsensusNeedsBlocksTypedOutcomeAndMatchingEvidence(t *testing.T) {
 				if mode == "config only" {
 					m.Expectations[i].Inputs = []string{"parameters"}
 				}
-				if mode == "boolean outcome" || mode == "unbound outcome" {
+				if mode == "boolean outcome" || mode == "unbound outcome" || mode == "empty branches" {
 					var expected map[string]any
 					raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "node-expected.json"))
 					require.NoError(t, err)
@@ -284,6 +278,9 @@ func TestConsensusNeedsBlocksTypedOutcomeAndMatchingEvidence(t *testing.T) {
 					raw, err = json.Marshal(expected)
 					require.NoError(t, err)
 					replaceArtifact(t, path, &m, e.Expected, raw)
+					if mode == "empty branches" {
+						refreshBindings(t, path, &m)
+					}
 				}
 				if mode == "missing evidence" {
 					replaceArtifact(t, path, &m, "node-oracle", []byte(`{"version":1,"evidence":{}}`))
@@ -292,7 +289,11 @@ func TestConsensusNeedsBlocksTypedOutcomeAndMatchingEvidence(t *testing.T) {
 			}
 			saveManifest(t, path, m)
 			_, err := Load(path)
-			require.Error(t, err)
+			if mode == "empty branches" {
+				require.ErrorContains(t, err, "chain outcome requires independently expected branches")
+			} else {
+				require.Error(t, err)
+			}
 		})
 	}
 }
@@ -380,7 +381,7 @@ func TestSchemasResolveOnlyDeclaredChecksummedReferences(t *testing.T) {
 	}
 	saveManifest(t, path, m)
 	_, err := Load(path)
-	require.ErrorContains(t, err, "undeclared reference types.schema.json")
+	require.ErrorContains(t, err, "undeclared schema resource")
 	path, m = mutableCorpus(t)
 	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "types.schema.json"))
 	require.NoError(t, err)
@@ -392,7 +393,7 @@ func TestSchemasResolveOnlyDeclaredChecksummedReferences(t *testing.T) {
 	replaceArtifact(t, path, &m, "common-types", raw)
 	saveManifest(t, path, m)
 	_, err = Load(path)
-	require.ErrorContains(t, err, "unresolved schema reference")
+	require.ErrorContains(t, err, "invalid or unresolved schema reference")
 }
 
 func TestArtifactSizeLimitAppliesBeforeVerifyAndRead(t *testing.T) {
@@ -415,4 +416,174 @@ func TestArtifactSizeLimitAppliesBeforeVerifyAndRead(t *testing.T) {
 	require.ErrorContains(t, b.verifyArtifact(a), "invalid artifact")
 	_, err = b.Read(a.ID)
 	require.ErrorContains(t, err, "payload read limit")
+}
+
+func refreshBindings(t *testing.T, path string, m *Manifest) {
+	t.Helper()
+	artifacts := map[string]Artifact{}
+	for _, a := range m.Artifacts {
+		artifacts[a.ID] = a
+	}
+	results := map[string]map[string]json.RawMessage{}
+	bindings := map[string]map[string]evidenceCase{}
+	oracles := map[string]Oracle{}
+	for _, oracle := range m.Oracles {
+		oracles[oracle.ID] = oracle
+		raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), artifacts[oracle.Result].Path))
+		require.NoError(t, err)
+		var result map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &result))
+		results[oracle.Result] = result
+		bindings[oracle.Result] = map[string]evidenceCase{}
+	}
+	for _, e := range m.Expectations {
+		raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), artifacts[e.Expected].Path))
+		require.NoError(t, err)
+		var expected struct {
+			Cases map[string]json.RawMessage `json:"cases"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &expected))
+		value, ok := expected.Cases[e.ID]
+		require.True(t, ok)
+		hash := sha256.Sum256(value)
+		binding := evidenceCase{Inputs: map[string]string{}, ExpectedSHA256: hex.EncodeToString(hash[:])}
+		for _, id := range e.Inputs {
+			binding.Inputs[id] = artifacts[id].SHA256
+		}
+		target := bindings[oracles[e.Oracle].Result]
+		if target == nil {
+			t.Fatalf("missing oracle binding target for %s", e.ID)
+			return
+		}
+		target[e.ID] = binding
+	}
+	for id, result := range results {
+		raw, err := json.Marshal(bindings[id])
+		require.NoError(t, err)
+		result["evidence"] = raw
+		raw, err = json.Marshal(result)
+		require.NoError(t, err)
+		replaceArtifact(t, path, m, id, raw)
+	}
+}
+
+func changeExpected(t *testing.T, path string, m *Manifest, caseID string, change func(map[string]json.RawMessage)) {
+	t.Helper()
+	for _, e := range m.Expectations {
+		if e.ID == caseID {
+			for _, a := range m.Artifacts {
+				if a.ID == e.Expected {
+					raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), a.Path))
+					require.NoError(t, err)
+					var document struct {
+						Version int                        `json:"version"`
+						Cases   map[string]json.RawMessage `json:"cases"`
+					}
+					require.NoError(t, json.Unmarshal(raw, &document))
+					var result map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal(document.Cases[caseID], &result))
+					change(result)
+					document.Cases[caseID], err = json.Marshal(result)
+					require.NoError(t, err)
+					raw, err = json.Marshal(document)
+					require.NoError(t, err)
+					replaceArtifact(t, path, m, e.Expected, raw)
+					refreshBindings(t, path, m)
+					return
+				}
+			}
+		}
+	}
+	t.Fatalf("missing case %s", caseID)
+}
+
+func TestPositiveMetricValuesRequireDeclaredTypes(t *testing.T) {
+	for _, value := range []string{"null", `"zero"`, "true", "-1", "0.5", "0"} {
+		t.Run(value, func(t *testing.T) {
+			path, m := mutableCorpus(t)
+			changeExpected(t, path, &m, "metric-16", func(result map[string]json.RawMessage) { result["count"] = json.RawMessage(value) })
+			saveManifest(t, path, m)
+			_, err := Load(path)
+			if value == "0" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "typed positive result")
+			}
+		})
+	}
+}
+
+func TestObservableSupportRequiresConcreteNamespaceAndExpectedPopulation(t *testing.T) {
+	path, m := mutableCorpus(t)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "canonical.jsonl"))
+	require.NoError(t, err)
+	var retained []byte
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var row struct {
+			NS string `json:"ns"`
+		}
+		require.NoError(t, json.Unmarshal(line, &row))
+		if row.NS != "Forge.Loop.NodeNotLeader" {
+			retained = append(retained, line...)
+			retained = append(retained, '\n')
+		}
+	}
+	replaceArtifact(t, path, &m, "common-examples", retained)
+	changeExpected(t, path, &m, "canonical-observables", func(result map[string]json.RawMessage) {
+		var counts map[string]uint64
+		require.NoError(t, json.Unmarshal(result["counts"], &counts))
+		delete(counts, "Forge.Loop.NodeNotLeader")
+		result["counts"], err = json.Marshal(counts)
+		require.NoError(t, err)
+		result["total"] = json.RawMessage("25")
+	})
+	saveManifest(t, path, m)
+	_, err = Load(path)
+	require.ErrorContains(t, err, "case canonical-observables does not cover measurement Forge.Loop.NodeNotLeader")
+}
+
+func TestSchemaPropertyNamesAndAnnotationsAreNotReferences(t *testing.T) {
+	for _, mode := range []string{"property", "annotation"} {
+		t.Run(mode, func(t *testing.T) {
+			path, m := mutableCorpus(t)
+			raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "observables.schema.json"))
+			require.NoError(t, err)
+			var schema map[string]any
+			require.NoError(t, json.Unmarshal(raw, &schema))
+			definition := schema["$defs"].(map[string]any)[observableNames[0]].(map[string]any)
+			if mode == "property" {
+				definition["properties"].(map[string]any)["$ref"] = map[string]any{"type": "string"}
+			} else {
+				definition["examples"] = []any{map[string]any{"$ref": "https://undeclared.invalid/instance-value.json"}}
+			}
+			raw, err = json.Marshal(schema)
+			require.NoError(t, err)
+			replaceArtifact(t, path, &m, "common-schema", raw)
+			saveManifest(t, path, m)
+			_, err = Load(path)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestCalculationFamilyDoesNotProveAnObservable(t *testing.T) {
+	path, m := mutableCorpus(t)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "coverage.json"))
+	require.NoError(t, err)
+	var c Coverage
+	require.NoError(t, json.Unmarshal(raw, &c))
+	changed := false
+	for i, measurement := range c.Observables {
+		if measurement.Name == "Forge.Loop.NodeNotLeader" {
+			c.Observables[i].Cases = []string{"metric-05"}
+			changed = true
+		}
+	}
+	require.True(t, changed)
+	raw, err = json.Marshal(c)
+	require.NoError(t, err)
+	replaceArtifact(t, path, &m, m.Coverage, raw)
+	saveManifest(t, path, m)
+	_, err = Load(path)
+	require.ErrorContains(t, err, "case metric-05 does not cover measurement Forge.Loop.NodeNotLeader")
 }

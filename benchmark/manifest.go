@@ -32,6 +32,7 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/ouroboros-mock/peer"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // SchemaVersion is the supported experiment and measurement contract version.
@@ -147,6 +148,8 @@ type Bundle struct {
 	root      string
 	artifacts map[string]Artifact
 	caseInfo  map[string]caseCoverage
+	coverage  Coverage
+	schemas   map[string]*jsonschema.Schema
 }
 
 func decodeJSON(data []byte, dst any) error {
