@@ -344,7 +344,7 @@ func TestRepeatedCostModelsMustAgree(t *testing.T) {
 		}
 	}
 	replaceArtifact(t, path, &m, "conflicting-model", raw)
-	m.Network.CostModels = append(m.Network.CostModels, "conflicting-model")
+	m.Network.CostModels = append([]string{"conflicting-model"}, m.Network.CostModels...)
 	saveManifest(t, path, m)
 	_, err = Load(path)
 	require.ErrorContains(t, err, "conflicting cost model")
