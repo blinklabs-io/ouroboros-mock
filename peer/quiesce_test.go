@@ -110,7 +110,7 @@ func TestFetcherFinishWaitsForAsynchronousTerminalCallback(t *testing.T) {
 		}
 		for range server.ErrorChan() {
 		}
-		serverDone <- server.Close()
+		serverDone <- server.Close(t.Context())
 	}()
 	f := &Fetcher{events: newEventStream(), watchDone: make(chan struct{}), requestsDone: make(chan struct{}), ranges: map[uint64]*rangeCompletion{}}
 	entered, release, callbackDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
