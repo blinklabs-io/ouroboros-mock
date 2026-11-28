@@ -22,6 +22,8 @@ import (
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
+	"github.com/blinklabs-io/gouroboros/protocol"
+	"github.com/blinklabs-io/gouroboros/protocol/handshake"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/blinklabs-io/ouroboros-mock/fixtures"
@@ -77,7 +79,25 @@ func TestLocalStateQueryBuildersServeGouroborosClient(t *testing.T) {
 		LocalStateQueryReAcquireImmutableTip(), LocalStateQueryAcquired(),
 		LocalStateQueryRelease(), LocalStateQueryDone(),
 	}
-	client, mock := newProtocolClientConnection(t, entries, false)
+	// Acquiring the immutable tip needs node-to-client version 16, newer
+	// than the version the shared handshake fixture negotiates.
+	client, mock := newProtocolClientConnectionWithHandshake(
+		t,
+		ConversationEntryOutput{
+			ProtocolId: handshake.ProtocolId,
+			IsResponse: true,
+			Messages: []protocol.Message{
+				handshake.NewMsgAcceptVersion(
+					16+protocol.ProtocolVersionNtCOffset,
+					protocol.VersionDataNtC15andUp{
+						CborNetworkMagic: MockNetworkMagic,
+					},
+				),
+			},
+		},
+		entries,
+		false,
+	)
 	stateQuery := client.LocalStateQuery().Client
 	require.NoError(t, stateQuery.AcquireVolatileTip())
 	blockNo, err := stateQuery.GetChainBlockNo()
@@ -100,6 +120,19 @@ func newProtocolClientConnection(
 	if nodeToNode {
 		response = ConversationEntryHandshakeNtNResponse
 	}
+	return newProtocolClientConnectionWithHandshake(
+		t, response, entries, nodeToNode, options...,
+	)
+}
+
+func newProtocolClientConnectionWithHandshake(
+	t *testing.T,
+	response ConversationEntry,
+	entries []ConversationEntry,
+	nodeToNode bool,
+	options ...ouroboros.ConnectionOptionFunc,
+) (*ouroboros.Connection, *Connection) {
+	t.Helper()
 	script := append(
 		[]ConversationEntry{ConversationEntryHandshakeRequestGeneric, response},
 		entries...)

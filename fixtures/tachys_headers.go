@@ -76,6 +76,14 @@ const (
 	tachysFaultOpCert
 )
 
+// Envelope limits for the fixture headers: mainnet's protocol parameter
+// limits, and a node major protocol version above both fixture eras.
+const (
+	tachysMaxMajorProtocolVersion uint64 = 10
+	tachysMaxBlockHeaderSize      uint64 = 1100
+	tachysMaxBlockBodySize        uint64 = 90112
+)
+
 // NewTachysSignedHeaderFixtures builds deterministic signed fixtures for the
 // Babbage or Conway era. Scheduled carries the pool ID for a one-pool Tachys
 // distribution. WrongProducer has valid VRF, KES, and operational certificate
@@ -307,6 +315,14 @@ func buildTachysSignedHeaderFixture(
 		EpochNonce:      epochNonce[:],
 		PoolStake:       1,
 		TotalStake:      1,
+		Envelope: &consensus.EnvelopeInput{
+			ProtocolMajorVersion:    header.Body.ProtoMajor,
+			MaxMajorProtocolVersion: tachysMaxMajorProtocolVersion,
+			HeaderSize:              uint64(len(headerCbor)),
+			BlockBodySize:           header.Body.BlockBodySize,
+			MaxBlockHeaderSize:      tachysMaxBlockHeaderSize,
+			MaxBlockBodySize:        tachysMaxBlockBodySize,
+		},
 		RegisteredVrfKeyHash: common.Blake2b256Hash(vrfSigner.PublicKey()).
 			Bytes(),
 	}
