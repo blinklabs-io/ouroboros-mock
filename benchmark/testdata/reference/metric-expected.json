@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "cases": {
+    "metric-01": {
+      "status": "valid",
+      "seconds": 0.004
+    },
+    "metric-02": {
+      "status": "valid",
+      "seconds": 0.0002
+    },
+    "metric-03": {
+      "status": "valid",
+      "seconds": 0.0008
+    },
+    "metric-04": {
+      "status": "valid",
+      "seconds": 0.001
+    },
+    "metric-05": {
+      "status": "valid",
+      "seconds": 0.001
+    },
+    "metric-06": {
+      "status": "valid",
+      "seconds": 0.001
+    },
+    "metric-07": {
+      "status": "valid",
+      "seconds": 0.001
+    },
+    "metric-08": {
+      "status": "valid",
+      "seconds": 0.002
+    },
+    "metric-09": {
+      "status": "valid",
+      "announced_seconds": 0.002,
+      "sending_seconds": 0.003,
+      "adopted_seconds": 0.004
+    },
+    "metric-10": {
+      "status": "valid",
+      "first_notice_seconds": 0.002,
+      "first_fetch_seconds": 0.008
+    },
+    "metric-11": {
+      "status": "valid",
+      "seconds": 0.002
+    },
+    "metric-12": {
+      "status": "valid",
+      "seconds": [
+        0.004,
+        0.006
+      ],
+      "range_length": 2
+    },
+    "metric-13": {
+      "status": "valid",
+      "announced_seconds": 0.002,
+      "sending_seconds": 0.003,
+      "adopted_seconds": 0.004
+    },
+    "metric-14": {
+      "status": "valid",
+      "eligible": 4,
+      "adopted": 2,
+      "missing": 2,
+      "p50_seconds": 0.002,
+      "p75_seconds": null
+    },
+    "metric-15": {
+      "status": "valid",
+      "cpu_percent_one_core": 200,
+      "rss_bytes": 1200,
+      "threads": 5
+    },
+    "metric-16": {
+      "status": "valid",
+      "count": 2
+    },
+    "metric-17": {
+      "status": "valid",
+      "seconds": [
+        0.2,
+        0.4
+      ]
+    },
+    "metric-18": {
+      "status": "valid",
+      "inside_live_bytes": [
+        2048
+      ],
+      "outside_live_bytes": [
+        4096
+      ]
+    },
+    "metric-19": {
+      "status": "valid",
+      "processed": 4,
+      "accepted": 2,
+      "rejected": 2,
+      "newly_admitted": 2,
+      "duplicate_successes": 1,
+      "native_nil_results": 3,
+      "validation_rejected": 1
+    },
+    "metric-20": {
+      "status": "valid",
+      "ratio": 0.5
+    },
+    "metric-21": {
+      "status": "valid",
+      "cpu_seconds_per_processed": 1
+    },
+    "metric-22": {
+      "status": "valid",
+      "peak_count": 2,
+      "peak_bytes": 500,
+      "final_count": 1,
+      "final_bytes": 300,
+      "validation_rejections": 1
+    },
+    "metric-23": {
+      "status": "valid",
+      "samples": 2,
+      "last_slot": 4,
+      "last_utxo_size": 9,
+      "last_density": 0.75
+    },
+    "zero-denominator": {
+      "status": "invalid",
+      "reason": "zero-denominator"
+    },
+    "negative-interval": {
+      "status": "invalid",
+      "reason": "negative-interval"
+    },
+    "missing-batch-start": {
+      "status": "invalid",
+      "reason": "missing-collected"
+    },
+    "duplicate-batch-start": {
+      "status": "invalid",
+      "reason": "duplicate-collected"
+    },
+    "lost-observations": {
+      "status": "invalid",
+      "reason": "source-loss"
+    },
+    "missing-finalization": {
+      "status": "invalid",
+      "reason": "missing-finalization"
+    },
+    "source-writer-error": {
+      "status": "invalid",
+      "reason": "writer-error"
+    },
+    "process-restart": {
+      "status": "invalid",
+      "reason": "process-generation-change"
+    },
+    "decode-failure": {
+      "status": "invalid",
+      "reason": "no-successful-decode"
+    },
+    "leader-check-panic": {
+      "status": "valid",
+      "leader_decision": null,
+      "attempt_outcome": "error"
+    },
+    "nonleader": {
+      "status": "valid",
+      "leader_decision": false,
+      "attempt_outcome": "nonleader"
+    },
+    "losing-signed-candidate": {
+      "status": "valid",
+      "signed_candidates": 1,
+      "self_adoptions": 0
+    },
+    "fork-reinclusion": {
+      "status": "valid",
+      "selected": [
+        "a",
+        "c",
+        "d"
+      ],
+      "confirmed_unique_transactions": 1
+    },
+    "actual-header-not-tip": {
+      "status": "valid",
+      "announced_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "batch-publication": {
+      "status": "valid",
+      "adoption_ns": [
+        20,
+        20
+      ],
+      "independent_validation_durations": null
+    },
+    "peer-and-batch-pairing": {
+      "status": "valid",
+      "durations_ns": {
+        "p1/b1": 4,
+        "p2/b2": 2
+      }
+    },
+    "out-of-order-serialization": {
+      "status": "valid",
+      "occurrence_order_ns": [
+        10,
+        20
+      ]
+    },
+    "mempool-removal-causes": {
+      "status": "valid",
+      "ledger_invalidated": 2,
+      "expired": 1,
+      "capacity": 1
+    },
+    "clock-uncertainty": {
+      "status": "invalid",
+      "reason": "unresolved-clock-order"
+    },
+    "sampler-deadline": {
+      "status": "invalid",
+      "reason": "sample-deadline-missed"
+    },
+    "intake-count-mismatch": {
+      "status": "invalid",
+      "reason": "submitted-population-mismatch"
+    }
+  }
+}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -38,6 +39,8 @@ type FollowerConfig struct {
 	// NetworkMagic is the handshake network magic. Defaults to
 	// [ouroboros_mock.MockNetworkMagic] when zero.
 	NetworkMagic uint32
+	// KeepAlive enables client keep-alive for long-lived observation sessions.
+	KeepAlive bool
 	// Intersect lists the points to intersect at, newest first. Defaults to
 	// the origin.
 	Intersect []pcommon.Point
@@ -49,9 +52,10 @@ type FollowerConfig struct {
 // chain-sync, optionally fetches every announced block with block-fetch, and
 // records what the node served.
 type Follower struct {
-	conn   *ouroboros.Connection
-	events *eventStream
-	cfg    FollowerConfig
+	conn      *ouroboros.Connection
+	events    *eventStream
+	cfg       FollowerConfig
+	watchDone chan struct{}
 
 	mu sync.Mutex
 	// base is the latest intersection or unseen rollback ancestor. It is not in
@@ -68,6 +72,17 @@ type Follower struct {
 // NewFollower completes the handshake on cfg.Conn and starts following.
 // Release it with [Follower.Close].
 func NewFollower(cfg FollowerConfig) (*Follower, error) {
+	return NewFollowerContext(context.Background(), cfg)
+}
+
+// NewFollowerContext bounds handshake and chain-sync startup by ctx.
+// After startup, the caller owns the connection until Close or Finish.
+func NewFollowerContext(ctx context.Context, cfg FollowerConfig) (*Follower, error) {
+	if cfg.Conn == nil {
+		return nil, errors.New("follower connection required")
+	}
+	stop := context.AfterFunc(ctx, func() { _ = cfg.Conn.Close() })
+	defer stop()
 	if cfg.NetworkMagic == 0 {
 		cfg.NetworkMagic = ouroboros_mock.MockNetworkMagic
 	}
@@ -75,18 +90,22 @@ func NewFollower(cfg FollowerConfig) (*Follower, error) {
 		cfg.Intersect = []pcommon.Point{pcommon.NewPointOrigin()}
 	}
 	f := &Follower{
-		cfg:    cfg,
-		events: newEventStream(),
-		blocks: make(map[string]ledger.Block),
+		cfg:       cfg,
+		watchDone: make(chan struct{}),
+		events:    newEventStream(connectionName(cfg.Conn)),
+		blocks:    make(map[string]ledger.Block),
 	}
 	bfCfg, err := blockfetch.NewConfig()
 	if err != nil {
+		f.events.close()
+		_ = cfg.Conn.Close()
 		return nil, err
 	}
 	conn, err := ouroboros.New(
 		ouroboros.WithConnection(cfg.Conn),
 		ouroboros.WithNetworkMagic(cfg.NetworkMagic),
 		ouroboros.WithNodeToNode(true),
+		ouroboros.WithKeepAlive(cfg.KeepAlive),
 		ouroboros.WithChainSyncConfig(chainsync.NewConfig(
 			chainsync.WithIntersectFoundFunc(f.intersectFound),
 			chainsync.WithRollForwardFunc(f.rollForward),
@@ -102,7 +121,8 @@ func NewFollower(cfg FollowerConfig) (*Follower, error) {
 	}
 	f.conn = conn
 	if err := conn.ChainSync().Client.Sync(cfg.Intersect); err != nil {
-		_ = f.Close()
+		_ = lifecycle.Close(ctx, conn)
+		f.events.close()
 		return nil, fmt.Errorf("start chain-sync: %w", err)
 	}
 	go f.watch()
@@ -170,6 +190,7 @@ func (f *Follower) Close() error {
 }
 
 func (f *Follower) watch() {
+	defer close(f.watchDone)
 	for err := range f.conn.ErrorChan() {
 		f.mu.Lock()
 		f.err = errors.Join(f.err, err)
@@ -184,6 +205,7 @@ func (f *Follower) rollForward(
 	data any,
 	_ chainsync.Tip,
 ) error {
+	occurred := time.Now()
 	header, ok := data.(ledger.BlockHeader)
 	if !ok {
 		return fmt.Errorf("unexpected roll forward payload %T", data)
@@ -194,7 +216,7 @@ func (f *Follower) rollForward(
 	f.chain = append(f.chain, point)
 	f.mu.Unlock()
 	f.events.publish(
-		Event{Kind: EventRollForward, Points: []pcommon.Point{point}},
+		Event{Kind: EventRollForward, Count: 1, Session: 1, OccurredAt: occurred, Points: []pcommon.Point{point}, BlockNumber: header.BlockNumber(), Parent: header.PrevHash().Bytes(), Size: header.BlockBodySize()},
 	)
 	if !f.cfg.FetchBlocks {
 		return nil
@@ -203,11 +225,12 @@ func (f *Follower) rollForward(
 	if err != nil {
 		return fmt.Errorf("fetch block: %w", err)
 	}
+	decoded := time.Now()
 	f.mu.Lock()
 	f.blocks[string(point.Hash)] = block
 	f.mu.Unlock()
 	f.events.publish(
-		Event{Kind: EventBlockFetched, Points: []pcommon.Point{point}},
+		Event{Kind: EventBlockFetched, Count: 1, Session: 1, OccurredAt: decoded, Points: []pcommon.Point{point}, BlockNumber: block.BlockNumber(), Parent: block.PrevHash().Bytes(), Size: uint64(len(block.Cbor()))},
 	)
 	return nil
 }
@@ -217,6 +240,7 @@ func (f *Follower) rollBackward(
 	point pcommon.Point,
 	_ chainsync.Tip,
 ) error {
+	occurred := time.Now()
 	f.mu.Lock()
 	keep := 0
 	if point.Slot != f.base.Slot || !bytes.Equal(point.Hash, f.base.Hash) {
@@ -243,7 +267,7 @@ func (f *Follower) rollBackward(
 	f.rollbacks = append(f.rollbacks, point)
 	f.mu.Unlock()
 	f.events.publish(
-		Event{Kind: EventRollBackward, Points: []pcommon.Point{point}},
+		Event{Kind: EventRollBackward, Session: 1, OccurredAt: occurred, Points: []pcommon.Point{point}},
 	)
 	return nil
 }
@@ -263,4 +287,23 @@ func (f *Follower) intersectFound(
 func (f *Follower) awaitReply(chainsync.CallbackContext) error {
 	f.events.publish(Event{Kind: EventAwaitedReply})
 	return nil
+}
+
+// Finish stops the connection and drains observations while the caller consumes Events.
+func (f *Follower) Finish(ctx context.Context) (ObservationStats, error) {
+	chainProtocol := f.conn.ChainSync().Client.ProtocolInstance()
+	bodyProtocol := f.conn.BlockFetch().Client.ProtocolInstance()
+	err := lifecycle.Close(ctx, f.conn)
+	if waitErr := waitProtocols(ctx, chainProtocol, bodyProtocol); waitErr != nil {
+		f.events.close()
+		return f.events.stats(), errors.Join(err, waitErr, ErrIncompleteObservations)
+	}
+	select {
+	case <-f.watchDone:
+	case <-ctx.Done():
+		f.events.close()
+		return f.events.stats(), errors.Join(err, ctx.Err(), ErrIncompleteObservations)
+	}
+	stats, drainErr := f.events.finish(ctx)
+	return stats, errors.Join(err, drainErr)
 }

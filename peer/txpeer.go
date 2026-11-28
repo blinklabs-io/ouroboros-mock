@@ -16,9 +16,12 @@ package peer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
@@ -33,6 +36,8 @@ type TxPeerConfig struct {
 	// NetworkMagic is the handshake network magic. Defaults to
 	// [ouroboros_mock.MockNetworkMagic] when zero.
 	NetworkMagic uint32
+	// KeepAlive enables client keep-alive for long-lived observation sessions.
+	KeepAlive bool
 	// Txs are the transactions to offer initially.
 	Txs []Tx
 }
@@ -40,19 +45,22 @@ type TxPeerConfig struct {
 // TxPeer is a node-to-node peer that offers transactions through
 // tx-submission and records what the node asks for.
 type TxPeer struct {
-	conn   *ouroboros.Connection
-	events *eventStream
-	done   chan struct{}
+	conn      *ouroboros.Connection
+	events    *eventStream
+	done      chan struct{}
+	watchDone chan struct{}
 
-	closeOnce sync.Once
-	closeErr  error
+	requestSequence atomic.Uint64
+	closeOnce       sync.Once
+	closeErr        error
 
 	mu sync.Mutex
 	// txs holds every offered transaction; txs[:announced] have been announced
 	// to the node.
-	txs       []Tx
-	announced int
-	served    []Tx
+	offersClosed bool
+	txs          []Tx
+	announced    int
+	served       []Tx
 	// more is closed and replaced whenever a transaction is offered, waking a
 	// blocking id request.
 	more chan struct{}
@@ -64,11 +72,13 @@ func NewTxPeer(cfg TxPeerConfig) (*TxPeer, error) {
 	if cfg.NetworkMagic == 0 {
 		cfg.NetworkMagic = ouroboros_mock.MockNetworkMagic
 	}
+	offeredAt := time.Now()
 	p := &TxPeer{
-		events: newEventStream(),
-		txs:    append([]Tx(nil), cfg.Txs...),
-		more:   make(chan struct{}),
-		done:   make(chan struct{}),
+		events:    newEventStream(connectionName(cfg.Conn)),
+		txs:       cloneTxs(cfg.Txs),
+		more:      make(chan struct{}),
+		done:      make(chan struct{}),
+		watchDone: make(chan struct{}),
 	}
 	txCfg := txsubmission.Config{
 		RequestTxIdsFunc: p.requestTxIds,
@@ -78,13 +88,18 @@ func NewTxPeer(cfg TxPeerConfig) (*TxPeer, error) {
 		ouroboros.WithConnection(cfg.Conn),
 		ouroboros.WithNetworkMagic(cfg.NetworkMagic),
 		ouroboros.WithNodeToNode(true),
+		ouroboros.WithKeepAlive(cfg.KeepAlive),
 		ouroboros.WithTxSubmissionConfig(txCfg),
 	)
 	if err != nil {
 		p.events.close()
+		_ = cfg.Conn.Close()
 		return nil, fmt.Errorf("handshake: %w", err)
 	}
 	p.conn = conn
+	if len(p.txs) > 0 {
+		p.observeOffer(offeredAt, p.txs)
+	}
 	conn.TxSubmission().Client.Init()
 	go p.watch()
 	return p, nil
@@ -105,11 +120,28 @@ func (p *TxPeer) DroppedEvents() uint64 {
 // Offer adds transactions to announce. A node waiting on a blocking request
 // is answered immediately.
 func (p *TxPeer) Offer(txs ...Tx) {
+	occurred := time.Now()
+	txs = cloneTxs(txs)
 	p.mu.Lock()
+	if p.offersClosed {
+		p.mu.Unlock()
+		return
+	}
 	p.txs = append(p.txs, txs...)
 	close(p.more)
 	p.more = make(chan struct{})
+	p.observeOffer(occurred, txs)
 	p.mu.Unlock()
+}
+
+func (p *TxPeer) observeOffer(at time.Time, txs []Tx) {
+	ids := make([][32]byte, len(txs))
+	refs := make([]TxRef, len(txs))
+	for i, tx := range txs {
+		ids[i] = tx.ID
+		refs[i] = TxRef{EraId: tx.EraId, ID: tx.ID}
+	}
+	p.events.publish(Event{Kind: EventTxsOffered, OccurredAt: at, Session: 1, Count: uint64(len(txs)), TxIds: ids, TxRefs: refs})
 }
 
 // Served returns the transactions the node requested and received, in
@@ -117,25 +149,27 @@ func (p *TxPeer) Offer(txs ...Tx) {
 func (p *TxPeer) Served() []Tx {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]Tx(nil), p.served...)
+	return cloneTxs(p.served)
 }
 
-// Close ends the connection and closes the event channel.
-func (p *TxPeer) Close() error {
+func (p *TxPeer) stop(ctx context.Context) error {
 	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		p.offersClosed = true
 		close(p.done)
+		p.mu.Unlock()
 		if p.conn != nil {
-			p.closeErr = lifecycle.Close(context.Background(), p.conn)
+			p.closeErr = lifecycle.Close(ctx, p.conn)
 		}
-		p.events.close()
 	})
 	return p.closeErr
 }
 
 func (p *TxPeer) watch() {
+	defer close(p.watchDone)
 	var last error
 	for err := range p.conn.ErrorChan() {
-		last = err
+		last = errors.Join(last, err)
 	}
 	p.events.publish(Event{Kind: EventSessionClosed, Err: last})
 }
@@ -148,6 +182,8 @@ func (p *TxPeer) requestTxIds(
 	blocking bool,
 	_, req uint16,
 ) ([]txsubmission.TxIdAndSize, error) {
+	occurred := time.Now()
+	request := p.requestSequence.Add(1)
 	for {
 		p.mu.Lock()
 		avail := p.txs[p.announced:]
@@ -165,12 +201,16 @@ func (p *TxPeer) requestTxIds(
 			}
 			p.announced += n
 			p.mu.Unlock()
-			p.events.publish(Event{Kind: EventTxIdsRequested, TxIds: ids})
+			refs := make([]TxRef, len(out))
+			for i, item := range out {
+				refs[i] = TxRef{EraId: item.TxId.EraId, ID: item.TxId.TxId}
+			}
+			p.events.publish(Event{Kind: EventTxIdsRequested, Session: 1, Request: request, OccurredAt: occurred, Count: uint64(len(ids)), TxIds: ids, TxRefs: refs})
 			return out, nil
 		}
 		more := p.more
 		p.mu.Unlock()
-		p.events.publish(Event{Kind: EventTxIdsBlocked})
+		p.events.publish(Event{Kind: EventTxIdsBlocked, Session: 1, Request: request})
 		select {
 		case <-more:
 		case <-p.done:
@@ -187,11 +227,20 @@ func (p *TxPeer) requestTxs(
 	_ txsubmission.CallbackContext,
 	ids []txsubmission.TxId,
 ) ([]txsubmission.TxBody, error) {
+	occurred := time.Now()
+	request := p.requestSequence.Add(1)
 	requested := make([][32]byte, 0, len(ids))
+	requestedRefs := make([]TxRef, 0, len(ids))
+	for _, id := range ids {
+		requested = append(requested, id.TxId)
+		requestedRefs = append(requestedRefs, TxRef{EraId: id.EraId, ID: id.TxId})
+	}
+	p.events.publish(Event{Kind: EventTxsRequested, Session: 1, Request: request, OccurredAt: occurred, Count: uint64(len(ids)), TxIds: requested, TxRefs: requestedRefs})
+	returned := make([][32]byte, 0, len(ids))
+	returnedRefs := make([]TxRef, 0, len(ids))
 	out := make([]txsubmission.TxBody, 0, len(ids))
 	p.mu.Lock()
 	for _, id := range ids {
-		requested = append(requested, id.TxId)
 		for _, tx := range p.txs[:p.announced] {
 			if tx.EraId == id.EraId && tx.ID == id.TxId {
 				out = append(out, txsubmission.TxBody{
@@ -199,11 +248,38 @@ func (p *TxPeer) requestTxs(
 					TxBody: tx.Raw,
 				})
 				p.served = append(p.served, tx)
+				returned = append(returned, tx.ID)
+				returnedRefs = append(returnedRefs, TxRef{EraId: tx.EraId, ID: tx.ID})
 				break
 			}
 		}
 	}
 	p.mu.Unlock()
-	p.events.publish(Event{Kind: EventTxsRequested, TxIds: requested})
+	p.events.publish(Event{Kind: EventTxsReturned, Session: 1, Request: request, OccurredAt: time.Now(), Count: uint64(len(out)), TxIds: returned, TxRefs: returnedRefs})
 	return out, nil
+}
+
+// Close ends the connection and discards unread observations.
+func (p *TxPeer) Close() error {
+	err := p.stop(context.Background())
+	p.events.close()
+	return err
+}
+
+// Finish stops transaction offers and drains observations while Events is consumed.
+func (p *TxPeer) Finish(ctx context.Context) (ObservationStats, error) {
+	txProtocol := p.conn.TxSubmission().Client.ProtocolInstance()
+	err := p.stop(ctx)
+	if waitErr := waitProtocols(ctx, txProtocol); waitErr != nil {
+		p.events.close()
+		return p.events.stats(), errors.Join(err, waitErr, ErrIncompleteObservations)
+	}
+	select {
+	case <-p.watchDone:
+	case <-ctx.Done():
+		p.events.close()
+		return p.events.stats(), errors.Join(err, ctx.Err(), ErrIncompleteObservations)
+	}
+	stats, drainErr := p.events.finish(ctx)
+	return stats, errors.Join(err, drainErr)
 }

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/blinklabs-io/gouroboros/connection"
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -28,6 +29,12 @@ const (
 	maxRetainedTxCount = 256
 	maxRetainedTxBytes = 4 << 20
 )
+
+// TxRef is the complete transaction-submission wire identity.
+type TxRef struct {
+	EraId uint16
+	ID    [32]byte
+}
 
 // Tx is a transaction a peer offers or has received.
 type Tx struct {
@@ -68,14 +75,16 @@ func TxsFromBlocks(blocks []ledger.Block) ([]Tx, error) {
 // relay is the server side of tx-submission on one connection. It asks the
 // remote node for the transactions it announces and records them.
 type relay struct {
-	events  *eventStream
-	session uint64
+	connection string
+	events     *eventStream
+	session    uint64
 
 	// ready is closed by attach once the connection, and so its server, is
 	// known. OnInit carries only a connection id, and a client's Init can
 	// arrive before the handshake has returned the connection.
 	ready      chan struct{}
 	attachOnce sync.Once
+	wg         sync.WaitGroup
 	server     *txsubmission.Server
 
 	mu       sync.Mutex
@@ -103,7 +112,9 @@ func (r *relay) attach(server *txsubmission.Server) {
 func (r *relay) config() txsubmission.Config {
 	return txsubmission.Config{
 		OnInit: func(connection.ConnectionId) {
+			r.wg.Add(1)
 			go func() {
+				defer r.wg.Done()
 				<-r.ready
 				if r.server != nil {
 					r.run(r.server)
@@ -117,7 +128,9 @@ func (r *relay) config() txsubmission.Config {
 // blocking: each round acknowledges everything announced and fetched in the
 // previous one, so the remote window is always empty.
 func (r *relay) run(server *txsubmission.Server) {
+	var request uint64
 	for {
+		request++
 		ids, err := server.RequestTxIds(true, txsubmission.MaxUnackedTxIds)
 		if err != nil {
 			return
@@ -125,21 +138,31 @@ func (r *relay) run(server *txsubmission.Server) {
 		if len(ids) == 0 {
 			continue
 		}
+		offeredAt := time.Now()
 		offered := make([][32]byte, 0, len(ids))
+		refs := make([]TxRef, 0, len(ids))
 		want := make([]txsubmission.TxId, 0, len(ids))
 		for _, id := range ids {
 			offered = append(offered, id.TxId.TxId)
+			refs = append(refs, TxRef{EraId: id.TxId.EraId, ID: id.TxId.TxId})
 			want = append(want, id.TxId)
 		}
 		r.events.publish(Event{
-			Kind:    EventTxIdsOffered,
-			Session: r.session,
-			TxIds:   offered,
+			Kind:       EventTxIdsOffered,
+			Count:      uint64(len(offered)),
+			OccurredAt: offeredAt,
+			Session:    r.session,
+			Request:    request,
+			Connection: r.connection,
+			TxIds:      offered,
+			TxRefs:     refs,
 		})
 		bodies, err := server.RequestTxs(want)
 		if err != nil {
+			r.events.publish(Event{Kind: EventTxReceiveFailed, Count: uint64(len(offered)), OccurredAt: time.Now(), Session: r.session, Connection: r.connection, Request: request, TxIds: offered, TxRefs: refs, Err: err})
 			return
 		}
+		receivedAt := time.Now()
 		got := make([]Tx, 0, len(bodies))
 		for _, b := range bodies {
 			tx := Tx{EraId: b.EraId, Raw: b.TxBody}
@@ -153,9 +176,13 @@ func (r *relay) run(server *txsubmission.Server) {
 		}
 		r.retain(got)
 		r.events.publish(Event{
-			Kind:    EventTxsReceived,
-			Session: r.session,
-			Txs:     got,
+			Kind:       EventTxsReceived,
+			Count:      uint64(len(got)),
+			OccurredAt: receivedAt,
+			Session:    r.session,
+			Request:    request,
+			Connection: r.connection,
+			Txs:        got,
 		})
 	}
 }

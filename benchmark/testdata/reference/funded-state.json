@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "strategy": "fresh genesis ledger; no implementation database image",
+  "funds": {
+    "3568b7fe3efb6225b20f1755a883d636617c88094785fb8dbcf4bf1620d98a67#0": {
+      "address": "addr_test1vrwyvfrytmjjjjk43sv6lcswx9l93082pl2ktsaaaw0j7jg9ykswq",
+      "datum": null,
+      "datumhash": null,
+      "inlineDatum": null,
+      "inlineDatumRaw": null,
+      "referenceScript": null,
+      "value": {
+        "lovelace": 3600000000000000
+      }
+    }
+  },
+  "staking": "shelley genesis staking map",
+  "reset": "new database from these exact genesis files; no cached snapshot",
+  "cache": "cold process and fresh database; host cache policy is controller-owned and recorded separately"
+}

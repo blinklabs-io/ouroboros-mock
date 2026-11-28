@@ -1,0 +1,90 @@
+{
+  "activeSlotsCoeff": 1,
+  "epochLength": 600,
+  "genDelegs": {
+    "a939b8e38238588ed4ecc48addba024237bec58aee9ae659d35aff85": {
+      "delegate": "800152d43e7d0041bf6c7b97429bf479a004cc1e58a345ce652b3329",
+      "vrf": "08ae9ede3ddfd5a092035b88ef22602cfaafa534774b461a1da5a1e5a038beb1"
+    }
+  },
+  "initialFunds": {
+    "005c1e869a4211603a0c2d2d79fa85735fb5b50b2832874b42dceae82591d00f61168292cea546b9b32248d6c5cd1a71f63581df84cd21b9e8": 800000000000000,
+    "00ac2633764085d5746d06436097f51c7dd2f49b47c0906ccf35bd684ebf3b5ca4fa338ae24f02670e85f817f63e742bc62a727775064c33fa": 800000000000000,
+    "60dc4624645ee5294ad58c19afe20e317e58bcea0fd565c3bdeb9f2f49": 3600000000000000
+  },
+  "maxKESEvolutions": 62,
+  "maxLovelaceSupply": 6000000000000000,
+  "networkId": "Testnet",
+  "networkMagic": 42,
+  "protocolParams": {
+    "a0": 0.3,
+    "decentralisationParam": 0,
+    "eMax": 18,
+    "extraEntropy": {
+      "tag": "NeutralNonce"
+    },
+    "keyDeposit": 2000000,
+    "maxBlockBodySize": 90112,
+    "maxBlockHeaderSize": 1100,
+    "maxTxSize": 16384,
+    "minFeeA": 44,
+    "minFeeB": 155381,
+    "minPoolCost": 340000000,
+    "minUTxOValue": 1000000,
+    "nOpt": 150,
+    "poolDeposit": 500000000,
+    "protocolVersion": {
+      "major": 10,
+      "minor": 0
+    },
+    "rho": 0.003,
+    "tau": 0.2
+  },
+  "securityParam": 20,
+  "slotLength": 1,
+  "slotsPerKESPeriod": 129600,
+  "staking": {
+    "pools": {
+      "e95c5c0e8ea5adcc75645ab9a2034b6ffb93bf379fba9d3d43abbdeb": {
+        "accountAddress": {
+          "credential": {
+            "keyHash": "3e8580f1d245f633591e3be5333003b9129a247279776015421ba69d"
+          },
+          "network": "Testnet"
+        },
+        "blsKey": null,
+        "cost": 0,
+        "margin": 0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "poolId": "e95c5c0e8ea5adcc75645ab9a2034b6ffb93bf379fba9d3d43abbdeb",
+        "relays": [],
+        "vrf": "f7a21d25ba3cdc8ccef837106257fdfb024376ce2303eea61b3f47faaabacd29"
+      },
+      "f365aa0ab7eab237920ebaed9c4eefee48f700f3d376330ee5fc4057": {
+        "accountAddress": {
+          "credential": {
+            "keyHash": "9704a388fb9f48ad3b703c3b1228f3eca669b745c3c3b53f77ac61a7"
+          },
+          "network": "Testnet"
+        },
+        "blsKey": null,
+        "cost": 0,
+        "margin": 0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "poolId": "f365aa0ab7eab237920ebaed9c4eefee48f700f3d376330ee5fc4057",
+        "relays": [],
+        "vrf": "796aa2dae465b0cf55d4ce58a3164305d7f56d1b364a8f35c483a29704abcdc4"
+      }
+    },
+    "stake": {
+      "91d00f61168292cea546b9b32248d6c5cd1a71f63581df84cd21b9e8": "e95c5c0e8ea5adcc75645ab9a2034b6ffb93bf379fba9d3d43abbdeb",
+      "bf3b5ca4fa338ae24f02670e85f817f63e742bc62a727775064c33fa": "f365aa0ab7eab237920ebaed9c4eefee48f700f3d376330ee5fc4057"
+    }
+  },
+  "systemStart": "2026-11-27T23:19:03Z",
+  "updateQuorum": 5
+}

@@ -16,7 +16,10 @@ package peer
 
 import (
 	"container/list"
+	"context"
+	"errors"
 	"sync"
+	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/ledger"
@@ -27,9 +30,10 @@ import (
 
 // session is the server side of one connection.
 type session struct {
-	up   *Upstream
-	id   uint64
-	conn *ouroboros.Connection
+	up         *Upstream
+	id         uint64
+	connection string
+	conn       *ouroboros.Connection
 	// relay collects transactions the client announces.
 	relay        *relay
 	relayElement *list.Element
@@ -40,25 +44,28 @@ type session struct {
 	// last entry is the client's position.
 	path []pcommon.Point
 	// pending is set while the client has been told to wait at the tip.
-	pending bool
+	pending         bool
+	requestSequence uint64
 	// intersectRollback sends the ChainDB follower's initial rollback before
 	// advancing from a newly negotiated intersection.
 	intersectRollback bool
 }
 
 func (s *session) emit(kind EventKind, points ...pcommon.Point) {
-	s.up.events.publish(Event{Kind: kind, Session: s.id, Points: points})
+	s.up.events.publish(Event{Kind: kind, Session: s.id, Connection: s.connection, OccurredAt: time.Now(), Points: points})
 }
 
 // watch reports the end of the connection.
-func (s *session) watch() {
+func (s *session) watch(ctx context.Context) {
 	var last error
 	for err := range s.conn.ErrorChan() {
-		last = err
+		last = errors.Join(last, err)
 	}
+	_ = waitServerProtocols(ctx, s.conn)
+	s.relay.wg.Wait()
 	s.up.removeSession(s.id)
 	s.up.events.publish(
-		Event{Kind: EventSessionClosed, Session: s.id, Err: last},
+		Event{Kind: EventSessionClosed, Session: s.id, Connection: s.connection, Err: last},
 	)
 	s.up.wg.Done()
 }
@@ -125,7 +132,7 @@ func (s *session) serveLocked(fromRequest bool) error {
 		s.pending = false
 		point := pointOf(n.block)
 		s.path = append(s.path, point)
-		s.emit(EventRollForward, point)
+		s.up.events.publish(Event{Kind: EventRollForward, Count: 1, Session: s.id, Connection: s.connection, OccurredAt: time.Now(), Points: []pcommon.Point{point}, BlockNumber: n.block.BlockNumber(), Parent: n.block.PrevHash().Bytes(), Size: n.block.BlockBodySize()})
 		return s.rollForward(n.block, n.tip)
 	case fromRequest:
 		s.pending = true
@@ -145,23 +152,31 @@ func (s *session) requestRange(
 	ctx blockfetch.CallbackContext,
 	start, end pcommon.Point,
 ) error {
-	s.emit(EventRequestRange, start, end)
+	occurred := time.Now()
+	s.mu.Lock()
+	s.requestSequence++
+	request := s.requestSequence
+	s.mu.Unlock()
+	s.up.events.publish(Event{Kind: EventRequestRange, OccurredAt: occurred, Session: s.id, Connection: s.connection, Request: request, Points: []pcommon.Point{start, end}})
 	blocks, ok := s.up.chain.rangeOf(start, end)
 	if !ok {
-		s.emit(EventNoBlocks)
+		s.up.events.publish(Event{Kind: EventNoBlocks, Session: s.id, Connection: s.connection, Request: request})
 		return ctx.Server.NoBlocks()
 	}
 	if err := ctx.Server.StartBatch(); err != nil {
 		return err
 	}
 	for _, b := range blocks {
-		if err := ctx.Server.Block(uint(b.Type()), b.Cbor()); err != nil {
+		sent := time.Now()
+		err := ctx.Server.Block(uint(b.Type()), b.Cbor())
+		s.up.events.publish(Event{Kind: EventBlockSent, Count: 1, OccurredAt: sent, Session: s.id, Connection: s.connection, Request: request, Points: []pcommon.Point{pointOf(b)}, BlockNumber: b.BlockNumber(), Parent: b.PrevHash().Bytes(), Size: uint64(len(b.Cbor())), Err: err})
+		if err != nil {
 			return err
 		}
 	}
 	if err := ctx.Server.BatchDone(); err != nil {
 		return err
 	}
-	s.emit(EventBatchDone, start, end)
+	s.up.events.publish(Event{Kind: EventBatchDone, OccurredAt: time.Now(), Session: s.id, Connection: s.connection, Request: request, Points: []pcommon.Point{start, end}, Count: uint64(len(blocks))})
 	return nil
 }
