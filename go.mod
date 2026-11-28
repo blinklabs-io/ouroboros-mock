@@ -3,7 +3,7 @@ module github.com/blinklabs-io/ouroboros-mock
 go 1.26.11
 
 require (
-	github.com/blinklabs-io/gouroboros v0.220.1
+	github.com/blinklabs-io/gouroboros v0.221.0
 	github.com/blinklabs-io/plutigo v0.13.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.12.1
@@ -25,6 +25,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.10.0 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
+	github.com/klauspost/compress v1.20.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
