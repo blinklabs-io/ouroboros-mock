@@ -35,6 +35,7 @@ package peer
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -95,7 +96,22 @@ func TestFollowerFinishWaitsForReceiveCallback(t *testing.T) {
 	<-drained
 }
 
-func TestFetcherFinishWaitsForAsynchronousTerminalCallback(t *testing.T) {
+// blockedFetcher is a Fetcher with one accepted range whose terminal callback
+// blocks on release once the connection is stopped.
+type blockedFetcher struct {
+	f            *Fetcher
+	entered      chan struct{}
+	release      chan struct{}
+	callbackDone chan struct{}
+	serverDone   chan error
+	drained      <-chan struct{}
+	releaseOnce  sync.Once
+}
+
+func (b *blockedFetcher) releaseCallback() { b.releaseOnce.Do(func() { close(b.release) }) }
+
+func newBlockedFetcher(t *testing.T) *blockedFetcher {
+	t.Helper()
 	clientWire, serverWire := net.Pipe()
 	serverDone := make(chan error, 1)
 	serverRequested := make(chan struct{})
@@ -112,8 +128,9 @@ func TestFetcherFinishWaitsForAsynchronousTerminalCallback(t *testing.T) {
 		}
 		serverDone <- server.Close(t.Context())
 	}()
+	b := &blockedFetcher{serverDone: serverDone, release: make(chan struct{}), entered: make(chan struct{}), callbackDone: make(chan struct{})}
 	f := &Fetcher{events: newEventStream(), watchDone: make(chan struct{}), requestsDone: make(chan struct{}), ranges: map[uint64]*rangeCompletion{}}
-	entered, release, callbackDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	entered, release, callbackDone := b.entered, b.release, b.callbackDone
 	bf, err := blockfetch.NewConfig(blockfetch.WithRequestPipelining(true), blockfetch.WithBlockFunc(func(blockfetch.CallbackContext, uint, ledger.Block) error { return nil }), blockfetch.WithRangeDoneFunc(func(ctx blockfetch.CallbackContext, err error) error {
 		close(entered)
 		<-release
@@ -129,24 +146,68 @@ func TestFetcherFinishWaitsForAsynchronousTerminalCallback(t *testing.T) {
 		for range conn.ErrorChan() {
 		}
 	}()
-	drained := consumeEvents(f.Events())
+	b.f = f
+	b.drained = consumeEvents(f.Events())
 	id, err := f.Request(t.Context(), pcommon.NewPointOrigin(), pcommon.NewPointOrigin())
 	require.NoError(t, err)
 	require.NotZero(t, id)
 	<-serverRequested
-	require.NoError(t, f.stop(t.Context()))
-	<-conn.BlockFetch().Client.ProtocolInstance().DoneChan()
-	<-entered
+	return b
+}
+
+func TestFetcherFinishReportsIncompleteWhileTerminalCallbackRuns(t *testing.T) {
+	t.Parallel()
+	b := newBlockedFetcher(t)
+	defer b.releaseCallback() // before any teardown that joins the callback
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	_, err = f.Finish(ctx)
-	close(release)
+	// Stopping the connection runs the pending range's terminal callback,
+	// and the stop joins it, so Finish cannot report completion while it blocks.
+	_, err := b.f.Finish(ctx)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.ErrorIs(t, err, ErrIncompleteObservations)
-	<-callbackDone
-	require.NoError(t, f.Close())
-	<-drained
-	require.NoError(t, <-serverDone)
+	select {
+	case <-b.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal callback never ran")
+	}
+	select {
+	case <-b.callbackDone:
+		t.Fatal("terminal callback finished while it was held")
+	default:
+	}
+	b.releaseCallback()
+	<-b.callbackDone
+	require.ErrorIs(t, b.f.Close(), context.DeadlineExceeded)
+	<-b.drained
+	require.NoError(t, <-b.serverDone)
+}
+
+func TestFetcherFinishWaitsForAsynchronousTerminalCallback(t *testing.T) {
+	t.Parallel()
+	b := newBlockedFetcher(t)
+	defer b.releaseCallback()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := b.f.Finish(t.Context())
+		finished <- err
+	}()
+	<-b.entered
+	select {
+	case err := <-finished:
+		t.Fatalf("Finish returned %v while the terminal callback was held", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	b.releaseCallback()
+	require.NoError(t, <-finished)
+	select {
+	case <-b.callbackDone:
+	default:
+		t.Fatal("Finish returned before the terminal callback completed")
+	}
+	require.NoError(t, b.f.Close())
+	<-b.drained
+	require.NoError(t, <-b.serverDone)
 }
 
 func TestUpstreamFinishWaitsForAdmittedChainWake(t *testing.T) {
